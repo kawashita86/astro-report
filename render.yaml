@@ -1,0 +1,32 @@
+# Render blueprint — one free web service in the EU, Docker runtime.
+#
+# The database is NOT declared here: it is a Neon project in Europe/Frankfurt,
+# created outside Render and supplied as DATABASE_URL. Render's own Postgres has
+# no permanently-free plan, so declaring it here would break the €0/month budget.
+#
+# Migrations run before traffic is accepted, but NOT via `preDeployCommand`:
+# that is a paid-instance feature. docker-entrypoint.sh applies them and only
+# then execs the server, so a failed migration exits non-zero, the health check
+# never passes, the deploy is marked failed and the previous version keeps
+# serving. Move to preDeployCommand if this service ever moves to a paid plan.
+
+services:
+  - type: web
+    name: astro-report
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # Set manually from the Neon connection string (Europe/Frankfurt project).
+      # `sync: false` keeps the secret out of the repository.
+      - key: DATABASE_URL
+        sync: false
+      # PORT is injected by Render itself and is deliberately not declared here:
+      # setting it would fight the value the platform assigns. It is the third
+      # required variable — see .env.example for the full set.

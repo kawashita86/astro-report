@@ -1,0 +1,113 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 08-14-2026 09:15
+last_updated: 08-14-2026
+project: astro-report
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: in-progress
+  1-1-a-deployable-application-skeleton: review
+  1-2-the-purity-boundary-enforced-by-a-test-rather-than-by-discip: backlog
+  1-3-an-ephemeris-whose-identity-is-asserted-before-the-applicati: backlog
+  1-4-sign-in-as-the-only-person-who-can-reach-this-application: backlog
+  1-5-one-home-for-every-astronomical-tuning-value: backlog
+  1-6-a-conformance-harness-that-runs-before-there-is-anything-to: backlog
+  1-7-reference-charts-chosen-to-break-the-computation-not-to-flat: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-resolve-a-birthplace-to-coordinates-and-the-offset-in-force: backlog
+  2-2-compute-a-natal-chart-as-a-pure-function: backlog
+  2-3-create-a-client-or-fail-visibly: backlog
+  2-4-resolve-the-ruler-of-every-house-traditional-and-modern: backlog
+  2-5-assemble-the-four-domain-profiles: backlog
+  2-6-see-the-chart-wheel-and-check-it-against-astro-com: backlog
+  2-7-correct-birth-data-and-know-what-it-invalidates: backlog
+  2-8-delete-a-client-and-everything-derived-from-them: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-find-every-transit-to-natal-aspect-and-the-exact-moment-it-p: backlog
+  3-2-date-every-station-and-know-what-is-standing-retrograde: backlog
+  3-3-detect-every-crossing-of-a-natal-house-cusp: backlog
+  3-4-locate-the-month-s-new-and-full-moons: backlog
+  3-5-start-a-month-s-computation-and-watch-it-finish: backlog
+  3-6-assemble-the-report-payload-each-section-needs: backlog
+  3-7-project-the-two-day-lists-by-code-so-a-day-cannot-be-misfile: backlog
+  3-8-freeze-the-payload-so-any-report-can-be-reproduced-years-lat: backlog
+  3-9-read-the-facts-behind-a-month-entry-by-entry: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-write-the-style-guide: backlog
+  4-2-edit-the-style-guide-without-a-deploy: backlog
+  4-3-derive-a-reporttheme-from-a-payload: backlog
+  4-4-compute-what-has-changed-since-last-month: backlog
+  4-5-generate-eight-sections-as-cited-structure: backlog
+  4-6-render-cited-sentences-into-prose-i-could-read-aloud: backlog
+  4-7-write-this-month-as-a-continuation-not-a-reprint: backlog
+  4-8-absorb-a-rate-limit-without-my-involvement: backlog
+  4-9-build-against-the-generator-without-spending-quota: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-define-what-counts-as-a-claim-as-versioned-data: backlog
+  5-2-check-every-claim-against-the-payload: backlog
+  5-3-make-the-gate-the-only-path-to-an-exportable-report: backlog
+  5-4-regenerate-a-failing-report-automatically-whole: backlog
+  5-5-see-exactly-what-failed-and-what-it-contradicts: backlog
+  5-6-keep-the-gate-s-record-so-a-regression-is-visible-early: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-read-a-report-with-its-facts-one-click-away: backlog
+  6-2-export-a-passed-report-to-pdf-and-markdown: backlog
+  6-3-record-how-the-report-went-out-in-one-interaction: backlog
+  6-4-browse-everything-i-have-produced-for-a-client: backlog
+  6-5-take-a-backup-i-actually-hold: backlog
+  6-6-be-told-when-my-backup-is-out-of-date: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-add-a-past-report-to-the-corpus: backlog
+  7-2-mark-an-entry-paired-or-unpaired: backlog
+  7-3-see-how-much-corpus-i-actually-have: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-pass-conformance-across-the-full-adversarial-fixture-set: backlog
+  8-2-re-verify-the-generation-provider-s-data-terms-and-record-it: backlog
+  8-3-measure-the-latency-the-prd-only-assumed: backlog
+  8-4-project-storage-growth-against-the-free-tier-ceiling: backlog
+  8-5-restore-from-a-backup-for-real: backlog
+  epic-8-retrospective: optional

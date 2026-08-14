@@ -1,0 +1,46 @@
+# Local development: the application and a local Postgres.
+#
+# This is the only non-production environment — there is deliberately no staging.
+# The app service runs the production image unmodified, so migrations run before
+# the server starts here exactly as they do on the host.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: astro
+      POSTGRES_PASSWORD: astro
+      POSTGRES_DB: astro_report
+    ports:
+      # Loopback only: a development database has no business on every interface.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # Postgres 18 images store data under major-version-specific directory
+      # names, so the mount point is /var/lib/postgresql, not .../data.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astro -d astro_report"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build:
+      context: .
+    environment:
+      ENVIRONMENT: local
+      DATABASE_URL: postgresql://astro:astro@postgres:5432/astro_report
+      PORT: "8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  postgres-data:
