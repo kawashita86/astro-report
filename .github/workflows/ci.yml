@@ -1,0 +1,47 @@
+# Runs on every push to main and every pull request, so conformance is not an
+# on-demand check (Story 1.6, AC4) -- and, as a side effect, so the whole
+# existing test suite finally runs automatically at all (deferred-work.md,
+# story 1.1 entry): render.yaml auto-deploys every commit to main regardless
+# of whether anyone happened to run pytest by hand first.
+#
+# Deliberately not wired as a required check blocking that auto-deploy --
+# that is a separate decision (branch protection plus a Render-side
+# integration), logged in deferred-work.md (story 1.6 entry) rather than
+# defaulted into as a side effect of adding CI.
+#
+# No Postgres service container: tests/test_migration_chain.py already runs
+# Alembic in offline mode against a fake host nothing connects to.
+#
+# No extra `apt-get install` step: GitHub's `ubuntu-latest` runner image
+# ships `build-essential` by default, unlike the bare `ubuntu:latest` Docker
+# base the Dockerfile installs it onto explicitly.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # Same pinned version, installed the same way, as Dockerfile:19.
+      - name: Install uv
+        run: pip install --no-cache-dir uv==0.10.0
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest

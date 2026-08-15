@@ -94,3 +94,15 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-5-one-home-for-every-astronomical-tuning-value.md`
   summary: `version` in `data/computation.toml` accepts zero or negative integers; nothing enforces it as a genuine, monotonically-meaningful edit counter.
   evidence: Minor — the file's own comment describes it as "bumped by hand on every data edit," but nothing currently reads or compares `version` across loads, so an invalid value has no observable effect yet.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-a-conformance-harness-that-runs-before-there-is-anything-to-conform.md`
+  summary: CI now runs on every push/PR, but is deliberately not wired as a required check blocking `render.yaml`'s auto-deploy — a passing commit with a failing test still deploys.
+  evidence: That wiring needs both GitHub branch protection (a required-status-check rule) and, since Render deploys straight from a git push rather than reacting to a GitHub Actions run, either a Render deploy hook gated on CI success or moving off `autoDeployTrigger: commit`. A real decision with real trade-offs (slower deploys, single-operator-project overhead), not a default to fall into as a side effect of adding CI.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-a-conformance-harness-that-runs-before-there-is-anything-to-conform.md`
+  summary: `compare()`'s recursive dict diff uses strict `==` with no documented convention for bridging `Decimal`-typed computed output against the TOML-string-typed `expected` values the fixtures README specifies (e.g. `longitude = "312.83"`).
+  evidence: Real fixtures don't exist yet, so this has never been exercised end-to-end. Whoever writes `compute_output_for()` for Story 1.7/Epic 2 needs to either format `Decimal` values into matching strings before returning them, or `compare()` needs a numeric-aware equality path — a decision that belongs with the function that actually produces the values, not invented speculatively here.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-a-conformance-harness-that-runs-before-there-is-anything-to-conform.md`
+  summary: `discover_fixtures()` globs only the top level of `tests/conformance/fixtures/` (non-recursive), and nothing in the fixture format supports marking a fixture as known-failing/incomplete (no `xfail`-style flag).
+  evidence: Fine for the "at least three transcribed charts" BUILD-ORDER.md expects from Story 1.7, but worth revisiting once the fixture set grows large enough to want subdirectories, or once fixtures start landing incrementally against partially-implemented Epic 2/3 computation and a full-red CI stops being useful signal.
