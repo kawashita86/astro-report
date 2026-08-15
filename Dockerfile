@@ -18,6 +18,16 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv==0.10.0
 
+# build-essential (gcc/g++/make) only -- deliberately not pkg-config or
+# libsqlite3-dev. Without a compiler, pyswisseph's setup.py fails cleanly on a
+# missing gcc; with only build-essential, it falls back deterministically to
+# its own bundled libswe+sqlite3 sources. Adding pkg-config would make the
+# build depend on whatever system libraries happen to be present -- strictly
+# worse than the deterministic bundled path.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependencies first, from the committed lockfile only: --locked fails rather
 # than resolving new versions, so the image matches the checkout exactly.
 COPY pyproject.toml uv.lock ./
@@ -27,6 +37,7 @@ COPY alembic.ini docker-entrypoint.sh ./
 COPY core/ ./core/
 COPY shell/ ./shell/
 COPY migrations/ ./migrations/
+COPY data/ ./data/
 
 RUN chmod +x /app/docker-entrypoint.sh \
     && useradd --create-home --uid 10001 astro \

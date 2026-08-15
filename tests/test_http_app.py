@@ -16,8 +16,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.ephemeris.identity import EphemerisIdentity
 from shell.config import Environment, Settings
-from shell.http.app import app, create_app
+from shell.http.app import app, create_app, ephemeris_identity
 
 LOCAL = Settings(
     environment=Environment.LOCAL,
@@ -55,6 +56,17 @@ def test_debug_follows_the_environment() -> None:
 def test_the_module_level_app_exists_for_the_server_to_import() -> None:
     """`uvicorn shell.http.app:app` is what the Dockerfile runs."""
     assert isinstance(app, FastAPI)
+
+
+# --- Ephemeris identity: asserted at import time, before anything is served --
+
+
+def test_ephemeris_identity_is_verified_and_exposed_at_import_time() -> None:
+    """Importing this module is what asserts the vendored ephemeris's identity
+    (Story 1.3) -- by the time `app` exists, `sepl_18.se1`/`semo_18.se1` have
+    already been read, hashed and confirmed against the committed manifest."""
+    assert isinstance(ephemeris_identity, EphemerisIdentity)
+    assert {f.filename for f in ephemeris_identity.files} == {"sepl_18.se1", "semo_18.se1"}
 
 
 # --- Liveness -----------------------------------------------------------------
