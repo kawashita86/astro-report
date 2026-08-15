@@ -37,7 +37,7 @@ story_location: _bmad-output/implementation-artifacts
 development_status:
   epic-1: in-progress
   1-1-a-deployable-application-skeleton: done
-  1-2-the-purity-boundary-enforced-by-a-test-rather-than-by-discip: backlog
+  1-2-the-purity-boundary-enforced-by-a-test-rather-than-by-discip: review
   1-3-an-ephemeris-whose-identity-is-asserted-before-the-applicati: backlog
   1-4-sign-in-as-the-only-person-who-can-reach-this-application: backlog
   1-5-one-home-for-every-astronomical-tuning-value: backlog

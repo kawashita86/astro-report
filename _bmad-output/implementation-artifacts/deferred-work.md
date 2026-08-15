@@ -46,3 +46,11 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-reconcile-story-1-1-status.md`
   summary: Date fields in `sprint-status.yaml` use an ambiguous `MM-DD-YYYY` format instead of ISO-8601, and `generated` carries a time component while `last_updated` doesn't.
   evidence: `generated: 08-14-2026 09:15` and `last_updated: 08-15-2026` mix formats. `MM-DD-YYYY` is silently ambiguous with `DD-MM-YYYY` and will produce a genuinely wrong date the first time day and month values disagree on which is which.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-2-the-purity-boundary-enforced-by-a-test-rather-than-by-discipline.md`
+  summary: Randomness (`random`, `uuid.uuid4`) is not a checked facility in `tests/test_import_boundary.py`, though it threatens the same byte-identical-Payload guarantee as the clock does.
+  evidence: The story's own AC and frozen Boundaries name exactly four facilities — network, clock, filesystem, environment — mirroring epics.md's Story 1.2 acceptance criteria verbatim. Unseeded randomness inside `core/` would break reproducibility just as reading the clock does, but it was never in scope here; adding a fifth denylist category is a spec-level decision (does core ever need seeded randomness? is `uuid.uuid4()` for a non-persisted, non-computed value acceptable?) for a future story to make deliberately.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-2-the-purity-boundary-enforced-by-a-test-rather-than-by-discipline.md`
+  summary: Neither `tests/test_import_boundary.py` nor the sibling `tests/test_env_access_is_centralized.py` it mirrors handles a `SyntaxError`/`UnicodeDecodeError` from `ast.parse`/`read_text` on a malformed source file — the guard would crash with a raw traceback instead of a clear assertion.
+  evidence: Both files call `ast.parse(path.read_text(encoding="utf-8"), ...)` unguarded. Fixing only the new file would leave the two guards inconsistent with each other; the spec for 1.2 explicitly forbids touching `test_env_access_is_centralized.py`, so this is a cross-cutting hardening pass for both files together, better done as its own small story.
