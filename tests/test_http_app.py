@@ -13,14 +13,16 @@ allowlist: it must stay empty of data.
 from __future__ import annotations
 
 import time
+from decimal import Decimal
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.ephemeris.identity import EphemerisIdentity
+from core.types.computation import ComputationConfig
 from shell.config import Environment, Settings
-from shell.http.app import app, create_app, ephemeris_identity
+from shell.http.app import app, computation_config, create_app, ephemeris_identity
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
 
 #: Argon2 hash of "correct horse battery staple" — a fixed test password,
@@ -91,6 +93,19 @@ def test_ephemeris_identity_is_verified_and_exposed_at_import_time() -> None:
     already been read, hashed and confirmed against the committed manifest."""
     assert isinstance(ephemeris_identity, EphemerisIdentity)
     assert {f.filename for f in ephemeris_identity.files} == {"sepl_18.se1", "semo_18.se1"}
+
+
+# --- Computation config: loaded and exposed at import time --------------------
+
+
+def test_computation_config_is_loaded_and_exposed_at_import_time() -> None:
+    """Importing this module is also what loads `data/computation.toml`
+    (Story 1.5) -- by the time `app` exists, the file has already been read,
+    hashed and validated, exactly like `ephemeris_identity`."""
+    assert isinstance(computation_config, ComputationConfig)
+    assert computation_config.orbs.natal == Decimal("7.0")
+    assert computation_config.orbs.transit == Decimal("2.0")
+    assert computation_config.house_system.name == "placidus"
 
 
 # --- Liveness -----------------------------------------------------------------

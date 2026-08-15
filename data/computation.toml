@@ -1,0 +1,69 @@
+# The one home for every astronomical tuning value this application uses
+# (Story 1.5, AD-18). Nothing downstream may invent a second copy of any value
+# below -- the chart builder and the transit engine both read this same file.
+#
+# `version` is bumped by hand on every data edit. The file's content hash is
+# computed by the loader (`shell/computation.py`) from these raw bytes -- it is
+# not, and cannot be, a field stored here.
+#
+# Orb values are quoted strings, parsed as `Decimal`, never binary float
+# (angles are `Decimal` everywhere in this codebase).
+
+version = 1
+
+[orbs]
+# Natal aspect orb: default +/-7.0 degrees, permitted range 6.0-8.0.
+natal = "7.0"
+# Transit-to-natal aspect orb: default +/-2.0 degrees, permitted range 1.5-2.5.
+transit = "2.0"
+
+[house_system]
+# The only house system defined anywhere in the planning artifacts.
+name = "placidus"
+
+[bodies]
+# Transiting bodies covered by transit-to-natal aspect detection (PRD FR-9).
+# The transiting Moon is deliberately excluded everywhere.
+fast = ["sun", "mercury", "venus", "mars"]
+slow = ["jupiter", "saturn", "uranus", "neptune", "pluto"]
+
+# House rulers, traditional and modern. Identical for both systems except
+# Scorpio, Aquarius and Pisces (brief addendum Section 3).
+[rulers.traditional]
+aries = "mars"
+taurus = "venus"
+gemini = "mercury"
+cancer = "moon"
+leo = "sun"
+virgo = "mercury"
+libra = "venus"
+scorpio = "mars"
+sagittarius = "jupiter"
+capricorn = "saturn"
+aquarius = "saturn"
+pisces = "jupiter"
+
+[rulers.modern]
+aries = "mars"
+taurus = "venus"
+gemini = "mercury"
+cancer = "moon"
+leo = "sun"
+virgo = "mercury"
+libra = "venus"
+scorpio = "pluto"
+sagittarius = "jupiter"
+capricorn = "saturn"
+aquarius = "uranus"
+pisces = "neptune"
+
+[harmonic]
+# Harmonic/disharmonic classification rule (PRD FR-13, confirmed domain fact
+# 2026-08-14). Aspect-type-based classification:
+harmonic_aspects = ["trine", "sextile"]
+disharmonic_aspects = ["square", "opposition"]
+# Conjunction is classified by which body is transiting, not by aspect type.
+# A transiting body named in neither list below is neutral on conjunction --
+# present in neither day list, never forced to a value.
+harmonic_conjunction_bodies = ["venus", "jupiter"]
+disharmonic_conjunction_bodies = ["mars", "saturn", "pluto"]

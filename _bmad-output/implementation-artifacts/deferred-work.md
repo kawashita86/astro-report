@@ -82,3 +82,15 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-4-sign-in-as-the-only-person-who-can-reach-this-application.md`
   summary: `log_failed_login_attempt()` is the only log line sign-in ever writes — there is no corresponding line for a successful sign-in, so the log can show that access was denied but never that it was granted.
   evidence: The story's own Boundaries only required a failure log line (AC5's literal wording), so this isn't a spec violation, but an audit trail that only ever shows failures can't answer "when did Francesco actually sign in" from logs alone.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-5-one-home-for-every-astronomical-tuning-value.md`
+  summary: `shell/computation.py` validates each field in isolation but performs no cross-field/semantic checks: `bodies.fast`/`bodies.slow` could overlap, `harmonic.harmonic_aspects`/`disharmonic_aspects` could name the same aspect in both lists, and `harmonic_conjunction_bodies`/`disharmonic_conjunction_bodies` could overlap or name a body absent from `bodies.fast ∪ bodies.slow` — all syntactically valid, all silently accepted.
+  evidence: Flagged independently by two of three reviewers. Real, but adding it means deciding exactly what "contradictory" means for each pair (e.g. is a body in both `bodies.fast` and `bodies.slow` an error, or is the union just informational?) — a design call beyond this story's frozen scope (orb-range validation only), better made once a real consumer (Epic 2+) defines what breaks if these are wrong.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-5-one-home-for-every-astronomical-tuning-value.md`
+  summary: `house_system.name` accepts any non-empty string; nothing checks it against `"placidus"`, the only value defined anywhere in the planning artifacts.
+  evidence: A typo (`"placidis"`) or garbage value loads successfully and would only surface when a future story tries to use it. Deliberately not locked to an enum of one value now, since that decision (is a second house system ever expected, or is this permanently fixed?) belongs to whoever actually adds a second consumer.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-5-one-home-for-every-astronomical-tuning-value.md`
+  summary: `version` in `data/computation.toml` accepts zero or negative integers; nothing enforces it as a genuine, monotonically-meaningful edit counter.
+  evidence: Minor — the file's own comment describes it as "bumped by hand on every data edit," but nothing currently reads or compares `version` across loads, so an invalid value has no observable effect yet.

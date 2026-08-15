@@ -11,6 +11,11 @@ Importing this module is also where the ephemeris identity is asserted: like
 runs eagerly at import time so a missing or mismatched vendored file aborts
 startup — non-zero exit, naming the offender — before the app can serve
 anything. See ``core/ephemeris/identity.py``.
+
+The same eager-load shape loads ``data/computation.toml`` (Story 1.5, AD-18)
+into ``computation_config`` -- a malformed file or an out-of-range orb aborts
+startup the same way, even though nothing reads the value yet. See
+``shell/computation.py``.
 """
 
 from __future__ import annotations
@@ -23,7 +28,9 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.templating import Jinja2Templates
 
 from core.ephemeris.identity import EphemerisIdentity, verify_ephemeris_identity
+from core.types.computation import ComputationConfig
 from shell import config
+from shell.computation import load_computation_config
 from shell.config import Environment, Settings
 from shell.http.auth import (
     SESSION_COOKIE_NAME,
@@ -34,7 +41,7 @@ from shell.http.auth import (
     verify_password,
 )
 
-__all__ = ["app", "create_app", "ephemeris_identity"]
+__all__ = ["app", "computation_config", "create_app", "ephemeris_identity"]
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -140,6 +147,11 @@ def create_app(settings: Settings) -> FastAPI:
 #: time. Nothing persists it yet — Epic 3's Report Payload does that — but it
 #: is available here for any component that must record it later.
 ephemeris_identity: EphemerisIdentity = verify_ephemeris_identity()
+
+#: The one home for every astronomical tuning value (AD-18), loaded once at
+#: import time. Nothing in this story consumes it yet — Epic 2+ does — but a
+#: malformed file must still abort startup before anything can serve.
+computation_config: ComputationConfig = load_computation_config()
 
 #: The instance the ASGI server imports (``shell.http.app:app``).
 app = create_app(config.settings)

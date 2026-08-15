@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__all__ = ["EphemerisIntegrityError"]
+__all__ = ["ComputationConfigError", "EphemerisIntegrityError"]
 
 
 class EphemerisIntegrityError(RuntimeError):
@@ -20,4 +20,19 @@ class EphemerisIntegrityError(RuntimeError):
     touch the filesystem. Letting it propagate uncaught is the non-zero exit;
     no explicit ``sys.exit`` is needed, mirroring how ``ConfigError`` already
     aborts startup from ``shell/config.py``.
+    """
+
+
+class ComputationConfigError(RuntimeError):
+    """``data/computation.toml`` -- the one home for every astronomical tuning
+    value (AD-18) -- cannot be trusted.
+
+    Raised when the file is missing, its TOML is malformed, or a value it
+    holds falls outside its permitted range (e.g. an orb outside FR-9's
+    bounds). There is no partial or best-guess ``ComputationConfig`` to
+    proceed with: the process refuses to start rather than compute against a
+    value it cannot verify.
+
+    Raised only at load time, from :mod:`shell.computation` -- mirrors how
+    ``ConfigError`` and ``EphemerisIntegrityError`` already abort startup.
     """
