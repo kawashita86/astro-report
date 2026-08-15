@@ -28,5 +28,16 @@ services:
       - key: DATABASE_URL
         sync: false
       # PORT is injected by Render itself and is deliberately not declared here:
-      # setting it would fight the value the platform assigns. It is the third
-      # required variable — see .env.example for the full set.
+      # setting it would fight the value the platform assigns. It is one of the
+      # required variables — see .env.example for the full set.
+      # Set manually to an Argon2 hash of Francesco's real sign-in password
+      # (Story 1.4). `sync: false` keeps it out of the repository, same as
+      # DATABASE_URL above. Generate with:
+      #   uv run python -c "import argon2; print(argon2.PasswordHasher().hash('...'))"
+      - key: AUTH_PASSWORD_HASH
+        sync: false
+      # Set manually to a random string of at least 32 characters that signs
+      # the session cookie. `sync: false` for the same reason. Generate with:
+      #   uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+      - key: SESSION_SECRET_KEY
+        sync: false

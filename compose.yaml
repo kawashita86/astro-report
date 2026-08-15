@@ -31,6 +31,13 @@ services:
       ENVIRONMENT: local
       DATABASE_URL: postgresql://astro:astro@postgres:5432/astro_report
       PORT: "8000"
+      # Local-only credentials (Story 1.4) — never used in production, where
+      # both are supplied via render.yaml's sync: false secrets instead.
+      # Hashes "local-dev-password"; see .env.example for how to regenerate.
+      # `$` is doubled: compose interpolates a bare `$var` in this file, and the
+      # hash's own `$`-delimited fields must survive as literal characters.
+      AUTH_PASSWORD_HASH: "$$argon2id$$v=19$$m=65536,t=3,p=4$$BoNaYBFxFkVYK0EWHFpjhQ$$siqk2ea0LCm0U9ClzlqGrirWdOUG70cH8vNB1cGODMU"
+      SESSION_SECRET_KEY: local-dev-only-session-secret-key-change-me-0000
     ports:
       - "8000:8000"
     depends_on:

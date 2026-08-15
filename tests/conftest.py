@@ -15,10 +15,21 @@ from __future__ import annotations
 
 import os
 
+#: Argon2 hash of "correct horse battery staple" — a fixed test password, never
+#: a real one. Only its well-formedness matters for import-time validation;
+#: tests that exercise sign-in call ``verify_password`` against this hash and
+#: password explicitly.
+_TEST_AUTH_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$hQD4AS+0CkX36kCpbKWmRg$"
+    "5qiPb5sRKvlOqu1vvnP861fs5dcBQgq8OJvSlHPL3Mo"
+)
+
 _IMPORTABLE_ENVIRONMENT = {
     "ENVIRONMENT": "local",
     "DATABASE_URL": "postgresql://astro:astro@localhost:5432/astro_report",
     "PORT": "8000",
+    "AUTH_PASSWORD_HASH": _TEST_AUTH_PASSWORD_HASH,
+    "SESSION_SECRET_KEY": "test-session-secret-key-at-least-32-chars-long",
 }
 
 os.environ.update(_IMPORTABLE_ENVIRONMENT)

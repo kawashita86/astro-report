@@ -70,3 +70,15 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-3-an-ephemeris-whose-identity-is-asserted-before-the-application-serves-anything.md`
   summary: Local development now requires a C/C++ compiler toolchain (for `uv sync` to build `pyswisseph` from source), and this is undocumented in the README.
   evidence: `pyswisseph==2.10.3.2` ships as an sdist only; every environment running `uv sync --locked` — not only the Docker image — needs `gcc`/`g++`/`make` present. A contributor without one installed gets an opaque build failure with no pointer to the fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-sign-in-as-the-only-person-who-can-reach-this-application.md`
+  summary: No response anywhere in the application sets security headers — no CSP, no `X-Frame-Options`, nothing — and `/login` is the one page an anonymous caller can always reach.
+  evidence: `create_app()` never adds a headers middleware. This is a broader decision than Story 1.4's own scope (it would apply to every response, not just login), and the story's own Boundaries already scoped CSRF out for the same reason — a single-form, single-operator login is low-risk without it, but the decision should be made deliberately once more pages exist, not bolted onto this story piecemeal.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-sign-in-as-the-only-person-who-can-reach-this-application.md`
+  summary: `AuthMiddleware` matches `request.url.path` against `ALLOWLIST` by exact string equality, with no trailing-slash or path normalization.
+  evidence: Currently safe — the only effect of a path variant like `/login/` is an extra, fail-closed 401 (never a bypass), and no route has a slash-variant today. Two independent reviewers flagged it as an undocumented assumption; revisit once real protected routes exist and a `/login/`-style typo becomes a plausible user-facing papercut rather than a hypothetical.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-sign-in-as-the-only-person-who-can-reach-this-application.md`
+  summary: `log_failed_login_attempt()` is the only log line sign-in ever writes — there is no corresponding line for a successful sign-in, so the log can show that access was denied but never that it was granted.
+  evidence: The story's own Boundaries only required a failure log line (AC5's literal wording), so this isn't a spec violation, but an audit trail that only ever shows failures can't answer "when did Francesco actually sign in" from logs alone.

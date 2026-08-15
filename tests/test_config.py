@@ -18,10 +18,19 @@ from shell.config import ConfigError, Environment, Settings, load_settings
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+#: Argon2 hash of "correct horse battery staple" — a fixed test password, never
+#: a real one.
+VALID_AUTH_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$hQD4AS+0CkX36kCpbKWmRg$"
+    "5qiPb5sRKvlOqu1vvnP861fs5dcBQgq8OJvSlHPL3Mo"
+)
+
 VALID_ENVIRONMENT = {
     "ENVIRONMENT": "local",
     "DATABASE_URL": "postgresql://astro:astro@localhost:5432/astro_report",
     "PORT": "8000",
+    "AUTH_PASSWORD_HASH": VALID_AUTH_PASSWORD_HASH,
+    "SESSION_SECRET_KEY": "test-session-secret-key-at-least-32-chars-long",
 }
 
 
@@ -42,6 +51,8 @@ def test_valid_environment_builds_settings() -> None:
     assert settings.environment is Environment.LOCAL
     assert settings.database_url == VALID_ENVIRONMENT["DATABASE_URL"]
     assert settings.port == 8000
+    assert settings.auth_password_hash == VALID_AUTH_PASSWORD_HASH
+    assert settings.session_secret_key == VALID_ENVIRONMENT["SESSION_SECRET_KEY"]
 
 
 def test_production_is_a_permitted_environment() -> None:
@@ -159,7 +170,52 @@ def test_a_port_outside_the_permitted_range_aborts(out_of_range: str) -> None:
     assert "range" in message
 
 
-# --- Matrix row: unrecognized enum -------------------------------------------
+# --- Matrix row: AUTH_PASSWORD_HASH must be a well-formed Argon2 hash ---------
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "not-a-hash-at-all",
+        "plaintext-password",
+        "$bcrypt$2b$12$abcdefghijklmnopqrstuv",
+    ],
+)
+def test_a_malformed_auth_password_hash_aborts(malformed: str) -> None:
+    """``argon2.extract_parameters()`` raising ``InvalidHashError`` is the
+    failure signal -- this needs no password to check, only the hash's shape."""
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_with(AUTH_PASSWORD_HASH=malformed))
+
+    message = str(raised.value)
+    assert "AUTH_PASSWORD_HASH" in message
+
+
+def test_a_well_formed_auth_password_hash_is_accepted() -> None:
+    settings = load_settings(VALID_ENVIRONMENT)
+
+    assert settings.auth_password_hash == VALID_AUTH_PASSWORD_HASH
+
+
+# --- Matrix row: SESSION_SECRET_KEY must be at least 32 characters -----------
+
+
+@pytest.mark.parametrize("short", ["", "short-key", "x" * 31])
+def test_a_session_secret_key_shorter_than_32_chars_aborts(short: str) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_with(SESSION_SECRET_KEY=short))
+
+    message = str(raised.value)
+    assert "SESSION_SECRET_KEY" in message
+
+
+def test_a_session_secret_key_of_exactly_32_chars_is_accepted() -> None:
+    settings = load_settings(environment_with(SESSION_SECRET_KEY="x" * 32))
+
+    assert settings.session_secret_key == "x" * 32
+
+
+# --- Matrix row: unrecognized enum --------------------------------------------
 
 
 def test_an_unrecognized_environment_names_the_permitted_values() -> None:
@@ -225,6 +281,47 @@ def test_config_errors_never_quote_the_database_url() -> None:
     message = str(raised.value)
     assert "DATABASE_URL" in message
     assert SECRET not in message
+
+
+# --- The auth secrets never reach a repr either --------------------------------
+
+
+def test_repr_does_not_leak_the_auth_password_hash_salt_or_digest() -> None:
+    """The Argon2 salt and digest are the closest thing this hash has to a
+    secret; the repr must not print them in full."""
+    settings = load_settings(VALID_ENVIRONMENT)
+
+    *_, salt, digest = VALID_AUTH_PASSWORD_HASH.split("$")
+    rendered = repr(settings)
+    assert salt not in rendered
+    assert digest not in rendered
+
+
+def test_repr_still_identifies_the_auth_password_hash_algorithm() -> None:
+    """Redaction is not erasure: the algorithm and cost parameters are not
+    secret and are useful in a log line."""
+    rendered = repr(load_settings(VALID_ENVIRONMENT))
+
+    assert "argon2id" in rendered
+    assert "***" in rendered
+
+
+def test_repr_does_not_leak_the_session_secret_key() -> None:
+    settings = load_settings(VALID_ENVIRONMENT)
+
+    assert VALID_ENVIRONMENT["SESSION_SECRET_KEY"] not in repr(settings)
+
+
+def test_redacted_auth_password_hash_falls_back_on_a_hash_with_no_dollar_fields() -> None:
+    """A redaction helper must never be the thing that crashes a repr, even
+    given a value ``load_settings`` itself would never have accepted --
+    ``Settings`` can be constructed directly, bypassing validation."""
+    settings = dataclasses.replace(
+        load_settings(VALID_ENVIRONMENT), auth_password_hash="not-a-hash-at-all"
+    )
+
+    assert settings.redacted_auth_password_hash == "<redacted>"
+    assert "not-a-hash-at-all" not in repr(settings)
 
 
 # --- Percent-encoded passwords survive intact (Alembic regression) ------------

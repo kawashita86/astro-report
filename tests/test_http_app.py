@@ -12,6 +12,8 @@ allowlist: it must stay empty of data.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -19,22 +21,44 @@ from fastapi.testclient import TestClient
 from core.ephemeris.identity import EphemerisIdentity
 from shell.config import Environment, Settings
 from shell.http.app import app, create_app, ephemeris_identity
+from shell.http.auth import SESSION_COOKIE_NAME, sign_session
+
+#: Argon2 hash of "correct horse battery staple" — a fixed test password,
+#: never a real one.
+AUTH_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$hQD4AS+0CkX36kCpbKWmRg$"
+    "5qiPb5sRKvlOqu1vvnP861fs5dcBQgq8OJvSlHPL3Mo"
+)
+AUTH_PASSWORD = "correct horse battery staple"
+SESSION_SECRET_KEY = "test-session-secret-key-at-least-32-chars-long"
 
 LOCAL = Settings(
     environment=Environment.LOCAL,
     database_url="postgresql://astro:astro@localhost:5432/astro_report",
     port=8000,
+    auth_password_hash=AUTH_PASSWORD_HASH,
+    session_secret_key=SESSION_SECRET_KEY,
 )
 PRODUCTION = Settings(
     environment=Environment.PRODUCTION,
     database_url="postgresql://astro:astro@db.example.eu:5432/astro",
     port=10000,
+    auth_password_hash=AUTH_PASSWORD_HASH,
+    session_secret_key=SESSION_SECRET_KEY,
 )
 
 
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(create_app(LOCAL))
+
+
+@pytest.fixture
+def authenticated_client(client: TestClient) -> TestClient:
+    """A client carrying a valid, unexpired session cookie."""
+    expires_at = int(time.time()) + 3600
+    client.cookies.set(SESSION_COOKIE_NAME, sign_session(expires_at, LOCAL.session_secret_key))
+    return client
 
 
 # --- The factory --------------------------------------------------------------
@@ -92,14 +116,126 @@ def test_healthz_needs_no_credentials(client: TestClient) -> None:
     assert response.status_code == 204
 
 
-# --- Nothing else is exposed --------------------------------------------------
+# --- Nothing else is exposed without authentication ---------------------------
 
 
-@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
-def test_no_schema_or_docs_surface(client: TestClient, path: str) -> None:
-    """Every surface is authenticated from Story 1.4; a schema endpoint is not."""
-    assert client.get(path).status_code == 404
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json", "/"])
+def test_anonymous_requests_to_anything_outside_the_allowlist_are_uniformly_401(
+    client: TestClient, path: str
+) -> None:
+    """Every surface is authenticated from Story 1.4. An anonymous caller gets
+    the same empty-body 401 whether the path is a real, protected route or does
+    not exist at all -- the middleware runs ahead of routing, so it never
+    leaks which case this is."""
+    response = client.get(path)
+
+    assert response.status_code == 401
+    assert response.content == b""
 
 
-def test_unknown_routes_are_not_found(client: TestClient) -> None:
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json", "/"])
+def test_authenticated_requests_still_get_fastapis_own_404_for_unknown_paths(
+    authenticated_client: TestClient, path: str
+) -> None:
+    """Past the auth checkpoint, an unknown path is just an unknown path:
+    `/docs`/`/redoc`/`/openapi.json` were never registered (`docs_url=None`
+    etc.) and `/` has no route either."""
+    assert authenticated_client.get(path).status_code == 404
+
+
+# --- Sign-in --------------------------------------------------------------------
+
+
+def test_login_form_is_served_without_credentials(client: TestClient) -> None:
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert b"password" in response.content.lower()
+
+
+def test_login_form_needs_no_credentials_because_login_is_allowlisted(
+    client: TestClient,
+) -> None:
+    """`/login` is in `shell.http.auth.ALLOWLIST`; an anonymous GET succeeds."""
+    assert client.get("/login").status_code == 200
+
+
+def test_correct_password_sets_the_session_cookie(client: TestClient) -> None:
+    response = client.post("/login", data={"password": AUTH_PASSWORD})
+
+    assert response.status_code == 200
+    assert SESSION_COOKIE_NAME in response.cookies
+
+
+def test_wrong_password_sets_no_cookie(client: TestClient) -> None:
+    response = client.post("/login", data={"password": "wrong password"})
+
+    assert SESSION_COOKIE_NAME not in response.cookies
+
+
+def test_wrong_password_is_a_uniform_failure_response(client: TestClient) -> None:
+    response = client.post("/login", data={"password": "wrong password"})
+
+    assert response.status_code == 401
+
+
+def test_a_non_utf8_login_body_fails_cleanly_rather_than_crashing(client: TestClient) -> None:
+    response = client.post(
+        "/login",
+        content=b"password=\xff\xfe",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+
+    assert response.status_code == 401
+    assert SESSION_COOKIE_NAME not in response.cookies
+
+
+def test_an_oversized_login_body_fails_cleanly_rather_than_reaching_argon2(
+    client: TestClient,
+) -> None:
+    """The one endpoint reachable without a session must not spend Argon2's
+    64 MiB-per-verify cost on an arbitrarily large garbage body."""
+    huge_password = "x" * 100_000
+    response = client.post("/login", data={"password": huge_password})
+
+    assert response.status_code == 401
+    assert SESSION_COOKIE_NAME not in response.cookies
+
+
+def test_a_login_post_missing_the_password_field_fails_cleanly(client: TestClient) -> None:
+    response = client.post(
+        "/login",
+        content=b"not_password=whatever",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+
+    assert response.status_code == 401
+    assert SESSION_COOKIE_NAME not in response.cookies
+
+
+def test_the_session_cookie_is_http_only_and_same_site_lax(client: TestClient) -> None:
+    response = client.post("/login", data={"password": AUTH_PASSWORD})
+
+    set_cookie = response.headers["set-cookie"]
+    assert "HttpOnly" in set_cookie
+    assert "samesite=lax" in set_cookie.lower()
+
+
+def test_the_session_cookie_is_secure_only_in_production() -> None:
+    local = TestClient(create_app(LOCAL)).post("/login", data={"password": AUTH_PASSWORD})
+    production = TestClient(create_app(PRODUCTION)).post(
+        "/login", data={"password": AUTH_PASSWORD}
+    )
+
+    assert "Secure" not in local.headers["set-cookie"]
+    assert "Secure" in production.headers["set-cookie"]
+
+
+def test_a_session_from_signing_in_authenticates_later_requests(client: TestClient) -> None:
+    """A cookie earned by posting the real password behaves like the
+    hand-signed one `authenticated_client` uses: it clears the auth
+    checkpoint and lets an unknown path reach FastAPI's own routing."""
+    login = client.post("/login", data={"password": AUTH_PASSWORD})
+    assert SESSION_COOKIE_NAME in login.cookies
+
     assert client.get("/").status_code == 404
