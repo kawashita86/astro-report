@@ -1,0 +1,133 @@
+[metadata]
+name = "two-lunations-month"
+adversarial_case = "a calendar month containing two full moons of the same kind (a 'blue moon' month)"
+source = "August 2023: full moons on 2023-08-01 at 18:31 UTC and 2023-08-31 at 01:35 UTC (the second widely reported as a 'super blue moon'). Lunation timestamps corroborated independently across NASA (science.nasa.gov), Space.com, timeanddate.com and Star Walk -- not sourced from astro.com. Transit snapshot (all bodies except the Moon) computed via astro.com's 'Natal chart and transits' tool at 2023-08-01 00:00 UT against the near-midnight-birth.toml natal chart as anchor. Logged in against an Astro.com account on 2026-08-15."
+note = "The transit snapshot is a single moment (month start, 00:00 UT), not a walk of the whole month -- it exists to give the future computation a real, checkable reference point, not to enumerate every aspect that forms and separates across August. The two full-moon timestamps are the actual adversarial fact under test here."
+
+[birth_data]
+anchor_natal_fixture = "near-midnight-birth"
+month = "2023-08"
+transit_snapshot_utc = "2023-08-01T00:00:00Z"
+
+[expected]
+
+[[expected.lunations]]
+type = "full_moon"
+date = "2023-08-01"
+time_utc = "18:31:00"
+
+[[expected.lunations]]
+type = "full_moon"
+date = "2023-08-31"
+time_utc = "01:35:00"
+
+[[expected.transit_positions]]
+name = "sun"
+longitude = "128.5333"
+
+[[expected.transit_positions]]
+name = "moon"
+longitude = "297.4833"
+
+[[expected.transit_positions]]
+name = "mercury"
+longitude = "154.2333"
+
+[[expected.transit_positions]]
+name = "venus"
+longitude = "147.0167"
+retrograde = true
+
+[[expected.transit_positions]]
+name = "mars"
+longitude = "163.2333"
+
+[[expected.transit_positions]]
+name = "jupiter"
+longitude = "43.6833"
+retrograde = true
+
+[[expected.transit_positions]]
+name = "saturn"
+longitude = "335.7167"
+retrograde = true
+
+[[expected.transit_positions]]
+name = "uranus"
+longitude = "52.7500"
+retrograde = true
+
+[[expected.transit_positions]]
+name = "neptune"
+longitude = "357.4333"
+retrograde = true
+
+[[expected.transit_positions]]
+name = "pluto"
+longitude = "298.9000"
+retrograde = true
+
+# Transit-to-natal aspects at the snapshot moment, derived from the
+# positions above using this project's own orb rules (data/computation.toml:
+# transit orb 2.0 degrees, fast+slow bodies per FR-9, excluding the
+# transiting Moon).
+
+[[expected.transit_events]]
+transiting = "sun"
+natal = "moon"
+aspect = "sextile"
+orb = "1.9336"
+
+[[expected.transit_events]]
+transiting = "venus"
+natal = "uranus"
+aspect = "square"
+orb = "0.9258"
+
+[[expected.transit_events]]
+transiting = "mars"
+natal = "mars"
+aspect = "trine"
+orb = "0.3536"
+
+[[expected.transit_events]]
+transiting = "jupiter"
+natal = "mars"
+aspect = "trine"
+orb = "0.8036"
+
+[[expected.transit_events]]
+transiting = "uranus"
+natal = "jupiter"
+aspect = "sextile"
+orb = "1.4250"
+
+[[expected.transit_events]]
+transiting = "neptune"
+natal = "mercury"
+aspect = "square"
+orb = "1.5997"
+
+[[expected.transit_events]]
+transiting = "neptune"
+natal = "saturn"
+aspect = "conjunction"
+orb = "1.2514"
+
+[[expected.transit_events]]
+transiting = "neptune"
+natal = "uranus"
+aspect = "sextile"
+orb = "0.5092"
+
+[[expected.transit_events]]
+transiting = "pluto"
+natal = "uranus"
+aspect = "trine"
+orb = "0.9575"
+
+[[expected.transit_events]]
+transiting = "pluto"
+natal = "neptune"
+aspect = "sextile"
+orb = "0.6100"

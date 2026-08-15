@@ -1,0 +1,276 @@
+[metadata]
+name = "dst-fallback-before"
+adversarial_case = "birth minutes before a historical DST 'fall back' switch — the first (EDT) occurrence of an ambiguous repeated local hour"
+source = "Real, widely-reported case: twin brothers born at Cape Cod Hospital, Barnstable/Hyannis, MA on 2016-11-06, the night clocks fell back at 2:00am local. This is the elder-born twin, recorded before the clock changed (EDT, UTC-4). His brother, born ~31 minutes later but after the clock fell back, is the companion fixture 'dst-fallback-after.toml' — same event, same location, testing the ambiguous repeated 1am-1:59am hour from both sides. Positions/houses/aspects computed by astro.com's free chart tool (Placidus, Web default style), timezone explicitly forced to EDT (w04:00 AST/EDT) rather than left on 'automatic', since astro.com itself flags this hour as ambiguous. Logged in against an Astro.com account on 2026-08-15."
+note = "Astro.com profile label 'Case2 Samuel DST' used in place of the real name. Real news coverage: NBC Boston/NBC 7 San Diego, ABC News, 'Twins' Daylight Saving Time Birth Results in Bizarre Age Twist'."
+
+[birth_data]
+date = "2016-11-06"
+time = "01:39:00"
+timezone = "America/New_York"
+utc_offset_hours = "-4"
+dst_in_effect = true
+latitude = "41.65"
+longitude = "-70.2833"
+place = "Hyannis, MA, US"
+
+[expected]
+
+[[expected.planets]]
+name = "sun"
+longitude = "224.2414"
+
+[[expected.planets]]
+name = "moon"
+longitude = "295.7058"
+
+[[expected.planets]]
+name = "mercury"
+longitude = "230.0714"
+
+[[expected.planets]]
+name = "venus"
+longitude = "262.8492"
+
+[[expected.planets]]
+name = "mars"
+longitude = "297.7992"
+
+[[expected.planets]]
+name = "jupiter"
+longitude = "192.2425"
+
+[[expected.planets]]
+name = "saturn"
+longitude = "254.9361"
+
+[[expected.planets]]
+name = "uranus"
+longitude = "21.6494"
+retrograde = true
+
+[[expected.planets]]
+name = "neptune"
+longitude = "339.2958"
+retrograde = true
+
+[[expected.planets]]
+name = "pluto"
+longitude = "285.3381"
+
+[[expected.planets]]
+name = "true_node"
+longitude = "160.2547"
+
+[[expected.planets]]
+name = "chiron"
+longitude = "350.9614"
+retrograde = true
+
+[[expected.houses]]
+number = 1
+cusp_longitude = "156.7333"
+
+[[expected.houses]]
+number = 2
+cusp_longitude = "180.3000"
+
+[[expected.houses]]
+number = 3
+cusp_longitude = "209.0833"
+
+[[expected.houses]]
+number = 4
+cusp_longitude = "242.4167"
+
+[[expected.houses]]
+number = 5
+cusp_longitude = "277.1833"
+
+[[expected.houses]]
+number = 6
+cusp_longitude = "309.0833"
+
+[[expected.houses]]
+number = 7
+cusp_longitude = "336.7333"
+
+[[expected.houses]]
+number = 8
+cusp_longitude = "0.3000"
+
+[[expected.houses]]
+number = 9
+cusp_longitude = "29.0833"
+
+[[expected.houses]]
+number = 10
+cusp_longitude = "62.4167"
+
+[[expected.houses]]
+number = 11
+cusp_longitude = "97.1833"
+
+[[expected.houses]]
+number = 12
+cusp_longitude = "129.0833"
+
+# Aspects derived from the astro.com positions above using this project's
+# own orb rules (data/computation.toml: natal orb 7.0 degrees), not
+# astro.com's own aspect grid.
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "mercury"
+aspect = "conjunction"
+orb = "5.8300"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "neptune"
+aspect = "trine"
+orb = "4.9456"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "pluto"
+aspect = "sextile"
+orb = "1.0967"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "true_node"
+aspect = "sextile"
+orb = "3.9867"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "chiron"
+aspect = "trine"
+orb = "6.7200"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "mercury"
+aspect = "sextile"
+orb = "5.6344"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "mars"
+aspect = "conjunction"
+orb = "2.0933"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "uranus"
+aspect = "square"
+orb = "4.0564"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "chiron"
+aspect = "sextile"
+orb = "4.7444"
+
+[[expected.aspects]]
+body1 = "mercury"
+body2 = "pluto"
+aspect = "sextile"
+orb = "4.7333"
+
+[[expected.aspects]]
+body1 = "mercury"
+body2 = "chiron"
+aspect = "trine"
+orb = "0.8900"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "uranus"
+aspect = "trine"
+orb = "1.1997"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "chiron"
+aspect = "square"
+orb = "1.8878"
+
+[[expected.aspects]]
+body1 = "mars"
+body2 = "uranus"
+aspect = "square"
+orb = "6.1497"
+
+[[expected.aspects]]
+body1 = "mars"
+body2 = "chiron"
+aspect = "sextile"
+orb = "6.8378"
+
+[[expected.aspects]]
+body1 = "jupiter"
+body2 = "saturn"
+aspect = "sextile"
+orb = "2.6936"
+
+[[expected.aspects]]
+body1 = "jupiter"
+body2 = "pluto"
+aspect = "square"
+orb = "3.0956"
+
+[[expected.aspects]]
+body1 = "saturn"
+body2 = "uranus"
+aspect = "trine"
+orb = "6.7133"
+
+[[expected.aspects]]
+body1 = "saturn"
+body2 = "neptune"
+aspect = "square"
+orb = "5.6403"
+
+[[expected.aspects]]
+body1 = "saturn"
+body2 = "true_node"
+aspect = "square"
+orb = "4.6814"
+
+[[expected.aspects]]
+body1 = "saturn"
+body2 = "chiron"
+aspect = "square"
+orb = "6.0253"
+
+[[expected.aspects]]
+body1 = "uranus"
+body2 = "pluto"
+aspect = "square"
+orb = "6.3114"
+
+[[expected.aspects]]
+body1 = "neptune"
+body2 = "pluto"
+aspect = "sextile"
+orb = "6.0422"
+
+[[expected.aspects]]
+body1 = "neptune"
+body2 = "true_node"
+aspect = "opposition"
+orb = "0.9589"
+
+[[expected.aspects]]
+body1 = "pluto"
+body2 = "true_node"
+aspect = "trine"
+orb = "5.0833"
+
+[[expected.aspects]]
+body1 = "pluto"
+body2 = "chiron"
+aspect = "sextile"
+orb = "5.6233"

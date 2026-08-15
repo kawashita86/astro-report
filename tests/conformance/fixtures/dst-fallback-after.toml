@@ -1,0 +1,278 @@
+[metadata]
+name = "dst-fallback-after"
+adversarial_case = "birth minutes after a historical DST 'fall back' switch — the second (EST) occurrence of an ambiguous repeated local hour, chronologically later than a sibling whose displayed clock time is later"
+source = "Real, widely-reported case: twin brothers born at Cape Cod Hospital, Barnstable/Hyannis, MA on 2016-11-06, the night clocks fell back at 2:00am local. This is the younger-born twin (born ~31 minutes after his brother, real time), but because the clock fell back between the two births, his recorded local time (1:10am EST) is numerically earlier than his brother's (1:39am EDT) -- companion fixture 'dst-fallback-before.toml'. A naive datetime comparison that ignores the UTC-offset change would conclude this twin was born first. Positions/houses/aspects computed by astro.com's free chart tool (Placidus, Web default style), timezone explicitly forced to EST (w05:00 EST/CDT) rather than left on 'automatic'. Logged in against an Astro.com account on 2026-08-15."
+note = "Astro.com profile label 'Case2 Ronan DST' used in place of the real name. Astro.com's place-name autocomplete resolved to 'Hyannis Port, MA' rather than plain 'Hyannis' (a few km apart, same town of Barnstable) -- coordinates differ slightly from the sibling fixture as a result; this does not affect the DST-ambiguity behavior under test. Real news coverage: NBC Boston/NBC 7 San Diego, ABC News, 'Twins' Daylight Saving Time Birth Results in Bizarre Age Twist'."
+
+[birth_data]
+date = "2016-11-06"
+time = "01:10:00"
+timezone = "America/New_York"
+utc_offset_hours = "-5"
+dst_in_effect = false
+latitude = "41.6333"
+longitude = "-70.3"
+place = "Hyannis Port, MA, US"
+
+[expected]
+
+[[expected.planets]]
+name = "sun"
+longitude = "224.2631"
+
+[[expected.planets]]
+name = "moon"
+longitude = "295.9733"
+
+[[expected.planets]]
+name = "mercury"
+longitude = "230.1056"
+
+[[expected.planets]]
+name = "venus"
+longitude = "262.8750"
+
+[[expected.planets]]
+name = "mars"
+longitude = "297.8150"
+
+[[expected.planets]]
+name = "jupiter"
+longitude = "192.2467"
+
+[[expected.planets]]
+name = "saturn"
+longitude = "254.9383"
+
+[[expected.planets]]
+name = "uranus"
+longitude = "21.6486"
+retrograde = true
+
+[[expected.planets]]
+name = "neptune"
+longitude = "339.2956"
+retrograde = true
+
+[[expected.planets]]
+name = "pluto"
+longitude = "285.3386"
+
+[[expected.planets]]
+name = "true_node"
+longitude = "160.2536"
+
+[[expected.planets]]
+name = "chiron"
+longitude = "350.9608"
+retrograde = true
+
+[[expected.houses]]
+number = 1
+cusp_longitude = "162.8000"
+
+[[expected.houses]]
+number = 2
+cusp_longitude = "187.0167"
+
+[[expected.houses]]
+number = 3
+cusp_longitude = "216.2667"
+
+[[expected.houses]]
+number = 4
+cusp_longitude = "249.7500"
+
+[[expected.houses]]
+number = 5
+cusp_longitude = "284.1500"
+
+[[expected.houses]]
+number = 6
+cusp_longitude = "315.5833"
+
+[[expected.houses]]
+number = 7
+cusp_longitude = "342.8000"
+
+[[expected.houses]]
+number = 8
+cusp_longitude = "7.0167"
+
+[[expected.houses]]
+number = 9
+cusp_longitude = "36.2667"
+
+[[expected.houses]]
+number = 10
+cusp_longitude = "69.7500"
+
+[[expected.houses]]
+number = 11
+cusp_longitude = "104.1500"
+
+[[expected.houses]]
+number = 12
+cusp_longitude = "135.5833"
+
+# Aspects derived from the astro.com positions above using this project's
+# own orb rules (data/computation.toml: natal orb 7.0 degrees), not
+# astro.com's own aspect grid. Nearly identical to the sibling fixture (~31
+# real minutes apart) -- that similarity is itself part of what this pair
+# tests: the charts should be almost the same, not off by a hidden hour.
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "mercury"
+aspect = "conjunction"
+orb = "5.8425"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "neptune"
+aspect = "trine"
+orb = "4.9675"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "pluto"
+aspect = "sextile"
+orb = "1.0756"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "true_node"
+aspect = "sextile"
+orb = "4.0094"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "chiron"
+aspect = "trine"
+orb = "6.6978"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "mercury"
+aspect = "sextile"
+orb = "5.8678"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "mars"
+aspect = "conjunction"
+orb = "1.8417"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "uranus"
+aspect = "square"
+orb = "4.3247"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "chiron"
+aspect = "sextile"
+orb = "5.0125"
+
+[[expected.aspects]]
+body1 = "mercury"
+body2 = "pluto"
+aspect = "sextile"
+orb = "4.7669"
+
+[[expected.aspects]]
+body1 = "mercury"
+body2 = "chiron"
+aspect = "trine"
+orb = "0.8553"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "uranus"
+aspect = "trine"
+orb = "1.2264"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "chiron"
+aspect = "square"
+orb = "1.9142"
+
+[[expected.aspects]]
+body1 = "mars"
+body2 = "uranus"
+aspect = "square"
+orb = "6.1664"
+
+[[expected.aspects]]
+body1 = "mars"
+body2 = "chiron"
+aspect = "sextile"
+orb = "6.8542"
+
+[[expected.aspects]]
+body1 = "jupiter"
+body2 = "saturn"
+aspect = "sextile"
+orb = "2.6917"
+
+[[expected.aspects]]
+body1 = "jupiter"
+body2 = "pluto"
+aspect = "square"
+orb = "3.0919"
+
+[[expected.aspects]]
+body1 = "saturn"
+body2 = "uranus"
+aspect = "trine"
+orb = "6.7103"
+
+[[expected.aspects]]
+body1 = "saturn"
+body2 = "neptune"
+aspect = "square"
+orb = "5.6428"
+
+[[expected.aspects]]
+body1 = "saturn"
+body2 = "true_node"
+aspect = "square"
+orb = "4.6847"
+
+[[expected.aspects]]
+body1 = "saturn"
+body2 = "chiron"
+aspect = "square"
+orb = "6.0225"
+
+[[expected.aspects]]
+body1 = "uranus"
+body2 = "pluto"
+aspect = "square"
+orb = "6.3100"
+
+[[expected.aspects]]
+body1 = "neptune"
+body2 = "pluto"
+aspect = "sextile"
+orb = "6.0431"
+
+[[expected.aspects]]
+body1 = "neptune"
+body2 = "true_node"
+aspect = "opposition"
+orb = "0.9581"
+
+[[expected.aspects]]
+body1 = "pluto"
+body2 = "true_node"
+aspect = "trine"
+orb = "5.0850"
+
+[[expected.aspects]]
+body1 = "pluto"
+body2 = "chiron"
+aspect = "sextile"
+orb = "5.6222"

@@ -80,11 +80,18 @@ def test_discover_fixtures_ignores_non_toml_files(tmp_path: Path) -> None:
     assert [path.name for path in fixtures] == ["fixture.toml"]
 
 
-def test_the_default_fixtures_directory_reports_zero_fixtures() -> None:
-    """The shipped, empty ``tests/conformance/fixtures/`` never raises."""
+def test_the_default_fixtures_directory_is_discoverable_without_raising() -> None:
+    """``discover_fixtures()`` against the real directory never raises.
+
+    Story 1.6 shipped this directory empty and asserted exactly that; Story
+    1.7 transcribed the first real reference charts into it. Either state is
+    a legitimate result -- what this guards is that discovery itself stays
+    safe (AC2), not a specific fixture count, which the fixtures directory
+    itself will keep changing.
+    """
     fixtures = discover_fixtures()
 
-    assert fixtures == []
+    assert isinstance(fixtures, list)
 
 
 # --- load_fixture ---------------------------------------------------------

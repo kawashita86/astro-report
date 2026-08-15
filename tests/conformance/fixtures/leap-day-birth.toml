@@ -1,0 +1,233 @@
+[metadata]
+name = "leap-day-birth"
+adversarial_case = "birth on 29 February (leap day)"
+source = "Real, hospital-reported leap-day birth (name withheld: real minor, public record used only for date/time/place — see spec-1-7 Design Notes). Positions/houses/aspects computed by astro.com's free chart tool (Placidus, Web default style), logged in against an Astro.com account on 2026-08-15."
+note = "Astro.com profile label 'Case1 LeapDay' used in place of the real name."
+
+[birth_data]
+date = "2024-02-29"
+time = "05:12:00"
+timezone = "America/New_York"
+utc_offset_hours = "-5"
+latitude = "36.0"
+longitude = "-78.9"
+place = "Durham, NC, US"
+
+[expected]
+
+[[expected.planets]]
+name = "sun"
+longitude = "340.3122"
+
+[[expected.planets]]
+name = "moon"
+longitude = "213.5286"
+
+[[expected.planets]]
+name = "mercury"
+longitude = "341.2389"
+
+[[expected.planets]]
+name = "venus"
+longitude = "315.7814"
+
+[[expected.planets]]
+name = "mars"
+longitude = "312.4719"
+
+[[expected.planets]]
+name = "jupiter"
+longitude = "41.2164"
+
+[[expected.planets]]
+name = "saturn"
+longitude = "339.8431"
+
+[[expected.planets]]
+name = "uranus"
+longitude = "49.5631"
+
+[[expected.planets]]
+name = "neptune"
+longitude = "356.7194"
+
+[[expected.planets]]
+name = "pluto"
+longitude = "301.2008"
+
+[[expected.planets]]
+name = "true_node"
+longitude = "15.9878"
+
+[[expected.planets]]
+name = "chiron"
+longitude = "17.2050"
+
+[[expected.houses]]
+number = 1
+cusp_longitude = "306.1833"
+
+[[expected.houses]]
+number = 2
+cusp_longitude = "350.1167"
+
+[[expected.houses]]
+number = 3
+cusp_longitude = "27.3833"
+
+[[expected.houses]]
+number = 4
+cusp_longitude = "55.1667"
+
+[[expected.houses]]
+number = 5
+cusp_longitude = "77.9167"
+
+[[expected.houses]]
+number = 6
+cusp_longitude = "99.9333"
+
+[[expected.houses]]
+number = 7
+cusp_longitude = "126.1833"
+
+[[expected.houses]]
+number = 8
+cusp_longitude = "170.1167"
+
+[[expected.houses]]
+number = 9
+cusp_longitude = "207.3833"
+
+[[expected.houses]]
+number = 10
+cusp_longitude = "235.1667"
+
+[[expected.houses]]
+number = 11
+cusp_longitude = "257.9167"
+
+[[expected.houses]]
+number = 12
+cusp_longitude = "279.9333"
+
+# Aspects below are derived from the astro.com positions above using this
+# project's own orb rules (data/computation.toml: natal orb 7.0 degrees,
+# standard five aspects), not astro.com's own aspect grid (which uses
+# astro.com's own default per-planet orbs). This is deliberate: conformance
+# means our computation applied to real positions, not astro.com's own
+# aspect-detection choices.
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "moon"
+aspect = "trine"
+orb = "6.7836"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "mercury"
+aspect = "conjunction"
+orb = "0.9267"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "jupiter"
+aspect = "sextile"
+orb = "0.9042"
+
+[[expected.aspects]]
+body1 = "sun"
+body2 = "saturn"
+aspect = "conjunction"
+orb = "0.4692"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "saturn"
+aspect = "trine"
+orb = "6.3144"
+
+[[expected.aspects]]
+body1 = "moon"
+body2 = "pluto"
+aspect = "square"
+orb = "2.3278"
+
+[[expected.aspects]]
+body1 = "mercury"
+body2 = "jupiter"
+aspect = "sextile"
+orb = "0.0225"
+
+[[expected.aspects]]
+body1 = "mercury"
+body2 = "saturn"
+aspect = "conjunction"
+orb = "1.3958"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "mars"
+aspect = "conjunction"
+orb = "3.3094"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "jupiter"
+aspect = "square"
+orb = "4.5650"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "uranus"
+aspect = "square"
+orb = "3.7817"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "true_node"
+aspect = "sextile"
+orb = "0.2064"
+
+[[expected.aspects]]
+body1 = "venus"
+body2 = "chiron"
+aspect = "sextile"
+orb = "1.4236"
+
+[[expected.aspects]]
+body1 = "mars"
+body2 = "jupiter"
+aspect = "square"
+orb = "1.2556"
+
+[[expected.aspects]]
+body1 = "mars"
+body2 = "true_node"
+aspect = "sextile"
+orb = "3.5158"
+
+[[expected.aspects]]
+body1 = "mars"
+body2 = "chiron"
+aspect = "sextile"
+orb = "4.7331"
+
+[[expected.aspects]]
+body1 = "jupiter"
+body2 = "saturn"
+aspect = "sextile"
+orb = "1.3733"
+
+[[expected.aspects]]
+body1 = "neptune"
+body2 = "pluto"
+aspect = "sextile"
+orb = "4.4814"
+
+[[expected.aspects]]
+body1 = "true_node"
+body2 = "chiron"
+aspect = "conjunction"
+orb = "1.2172"

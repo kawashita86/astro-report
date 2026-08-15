@@ -23,7 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-#: Where real fixtures live once Story 1.7 adds them. Ships empty.
+#: Where real fixtures live. Story 1.6 shipped this empty; Story 1.7
+#: transcribed the first reference charts into it from Astro.com.
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 #: The three tables every fixture must declare, even if a table is empty.
@@ -79,9 +80,9 @@ class Mismatch:
 def discover_fixtures(directory: Path | None = None) -> list[Path]:
     """Every ``*.toml`` fixture under ``directory``, sorted for determinism.
 
-    Never raises on an empty or missing directory: CI runs against an empty
-    fixture set until Story 1.7, and that must report zero fixtures, not
-    fail (AC2).
+    Never raises on an empty or missing directory: an empty fixture set must
+    report zero fixtures, not fail (AC2) -- true whether that is a synthetic
+    directory in a test or (before Story 1.7) the real one.
     """
     target = directory if directory is not None else FIXTURES_DIR
     if not target.is_dir():

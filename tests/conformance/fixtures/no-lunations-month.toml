@@ -1,0 +1,107 @@
+[metadata]
+name = "no-lunations-month"
+adversarial_case = "a calendar month containing zero full moons of a kind (February is the only month short enough for this to happen)"
+source = "February 2018 had no full moon at all: the preceding full moon fell on 2018-01-31 and the next on 2018-03-01/02, so both January and March 2018 had two full moons each while February had none -- corroborated independently across king5.com, inforum.com, and Old Farmer's Almanac (astro-phile.com / almanac.com). This is the most recent such February before this fixture was written (the last prior instance was 2018 per almanac.com's tracking; the next isn't until 2037). Transit snapshot (all bodies except the Moon) computed via astro.com's 'Natal chart and transits' tool at 2018-02-01 00:00 UT against the near-midnight-birth.toml natal chart as anchor. Logged in against an Astro.com account on 2026-08-15."
+note = "expected.lunations is deliberately an empty list -- that emptiness IS the adversarial fact under test (a computation that always finds at least one full moon per month would wrongly report a nonempty list here). The transit snapshot is a single moment (month start, 00:00 UT), not a whole-month walk."
+
+[birth_data]
+anchor_natal_fixture = "near-midnight-birth"
+month = "2018-02"
+transit_snapshot_utc = "2018-02-01T00:00:00Z"
+
+[expected]
+lunations = []
+
+[[expected.transit_positions]]
+name = "sun"
+longitude = "312.0667"
+
+[[expected.transit_positions]]
+name = "moon"
+longitude = "198.1833"
+
+[[expected.transit_positions]]
+name = "mercury"
+longitude = "330.6833"
+
+[[expected.transit_positions]]
+name = "venus"
+longitude = "317.5000"
+
+[[expected.transit_positions]]
+name = "mars"
+longitude = "243.3500"
+
+[[expected.transit_positions]]
+name = "jupiter"
+longitude = "231.2500"
+retrograde = true
+
+[[expected.transit_positions]]
+name = "saturn"
+longitude = "274.8333"
+
+[[expected.transit_positions]]
+name = "uranus"
+longitude = "24.9333"
+
+[[expected.transit_positions]]
+name = "neptune"
+longitude = "342.7833"
+
+[[expected.transit_positions]]
+name = "pluto"
+longitude = "289.8167"
+
+# Transit-to-natal aspects at the snapshot moment, derived from the
+# positions above using this project's own orb rules (data/computation.toml:
+# transit orb 2.0 degrees, fast+slow bodies per FR-9, excluding the
+# transiting Moon).
+
+[[expected.transit_events]]
+transiting = "sun"
+natal = "moon"
+aspect = "trine"
+orb = "1.5997"
+
+[[expected.transit_events]]
+transiting = "mercury"
+natal = "mercury"
+aspect = "sextile"
+orb = "1.6503"
+
+[[expected.transit_events]]
+transiting = "mars"
+natal = "pluto"
+aspect = "sextile"
+orb = "0.6239"
+
+[[expected.transit_events]]
+transiting = "jupiter"
+natal = "jupiter"
+aspect = "trine"
+orb = "0.0750"
+
+[[expected.transit_events]]
+transiting = "neptune"
+natal = "sun"
+aspect = "sextile"
+orb = "1.9600"
+
+[[expected.transit_events]]
+transiting = "neptune"
+natal = "mars"
+aspect = "sextile"
+orb = "0.0964"
+
+[[expected.transit_events]]
+transiting = "neptune"
+natal = "true_node"
+aspect = "conjunction"
+orb = "1.8619"
+
+[[expected.transit_events]]
+transiting = "pluto"
+natal = "jupiter"
+aspect = "opposition"
+orb = "1.5083"

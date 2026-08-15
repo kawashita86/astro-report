@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-15-2026
+last_updated: 08-16-2026
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -42,7 +42,7 @@ development_status:
   1-4-sign-in-as-the-only-person-who-can-reach-this-application: done
   1-5-one-home-for-every-astronomical-tuning-value: done
   1-6-a-conformance-harness-that-runs-before-there-is-anything-to: review
-  1-7-reference-charts-chosen-to-break-the-computation-not-to-flat: backlog
+  1-7-reference-charts-chosen-to-break-the-computation-not-to-flat: done
   epic-1-retrospective: optional
 
   epic-2: backlog

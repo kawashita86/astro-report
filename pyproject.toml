@@ -27,6 +27,10 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# An xfail that starts passing (e.g. a conformance fixture starting to match
+# once Epic 2/3 wires in real computation) must fail the build loudly, not
+# pass silently -- that XPASS is the signal to remove the xfail marker.
+xfail_strict = true
 
 [tool.ruff]
 target-version = "py313"
