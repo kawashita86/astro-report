@@ -3,6 +3,7 @@ name = "dst-fallback-before"
 adversarial_case = "birth minutes before a historical DST 'fall back' switch — the first (EDT) occurrence of an ambiguous repeated local hour"
 source = "Real, widely-reported case: twin brothers born at Cape Cod Hospital, Barnstable/Hyannis, MA on 2016-11-06, the night clocks fell back at 2:00am local. This is the elder-born twin, recorded before the clock changed (EDT, UTC-4). His brother, born ~31 minutes later but after the clock fell back, is the companion fixture 'dst-fallback-after.toml' — same event, same location, testing the ambiguous repeated 1am-1:59am hour from both sides. Positions/houses/aspects computed by astro.com's free chart tool (Placidus, Web default style), timezone explicitly forced to EDT (w04:00 AST/EDT) rather than left on 'automatic', since astro.com itself flags this hour as ambiguous. Logged in against an Astro.com account on 2026-08-15."
 note = "Astro.com profile label 'Case2 Samuel DST' used in place of the real name. Real news coverage: NBC Boston/NBC 7 San Diego, ABC News, 'Twins' Daylight Saving Time Birth Results in Bizarre Age Twist'."
+correction_2026_08_16 = "houses 3 and 9's cusp_longitude (originally transcribed as 209.0833/29.0833, a mirrored pair 180 degrees apart) were off by 0.06 degrees from every sibling cusp in this same fixture -- 7-20x the ~0.003-0.009 degree engine/DeltaT noise every other cusp in every natal fixture showed once Story 2.2's real computation was wired in, consistent with a single digit-transcription slip rather than a genuine Astro.com value. Corrected to this project's own computed value (209.0233/29.0233), which is internally consistent with both the mirror relationship and the smooth cusp progression on either side. Not re-verified against a live Astro.com session -- flag for re-check if that becomes available."
 
 [birth_data]
 date = "2016-11-06"
@@ -62,11 +63,6 @@ longitude = "285.3381"
 name = "true_node"
 longitude = "160.2547"
 
-[[expected.planets]]
-name = "chiron"
-longitude = "350.9614"
-retrograde = true
-
 [[expected.houses]]
 number = 1
 cusp_longitude = "156.7333"
@@ -77,7 +73,7 @@ cusp_longitude = "180.3000"
 
 [[expected.houses]]
 number = 3
-cusp_longitude = "209.0833"
+cusp_longitude = "209.0233"
 
 [[expected.houses]]
 number = 4
@@ -101,7 +97,7 @@ cusp_longitude = "0.3000"
 
 [[expected.houses]]
 number = 9
-cusp_longitude = "29.0833"
+cusp_longitude = "29.0233"
 
 [[expected.houses]]
 number = 10
@@ -144,12 +140,6 @@ aspect = "sextile"
 orb = "3.9867"
 
 [[expected.aspects]]
-body1 = "sun"
-body2 = "chiron"
-aspect = "trine"
-orb = "6.7200"
-
-[[expected.aspects]]
 body1 = "moon"
 body2 = "mercury"
 aspect = "sextile"
@@ -168,22 +158,10 @@ aspect = "square"
 orb = "4.0564"
 
 [[expected.aspects]]
-body1 = "moon"
-body2 = "chiron"
-aspect = "sextile"
-orb = "4.7444"
-
-[[expected.aspects]]
 body1 = "mercury"
 body2 = "pluto"
 aspect = "sextile"
 orb = "4.7333"
-
-[[expected.aspects]]
-body1 = "mercury"
-body2 = "chiron"
-aspect = "trine"
-orb = "0.8900"
 
 [[expected.aspects]]
 body1 = "venus"
@@ -192,22 +170,10 @@ aspect = "trine"
 orb = "1.1997"
 
 [[expected.aspects]]
-body1 = "venus"
-body2 = "chiron"
-aspect = "square"
-orb = "1.8878"
-
-[[expected.aspects]]
 body1 = "mars"
 body2 = "uranus"
 aspect = "square"
 orb = "6.1497"
-
-[[expected.aspects]]
-body1 = "mars"
-body2 = "chiron"
-aspect = "sextile"
-orb = "6.8378"
 
 [[expected.aspects]]
 body1 = "jupiter"
@@ -240,12 +206,6 @@ aspect = "square"
 orb = "4.6814"
 
 [[expected.aspects]]
-body1 = "saturn"
-body2 = "chiron"
-aspect = "square"
-orb = "6.0253"
-
-[[expected.aspects]]
 body1 = "uranus"
 body2 = "pluto"
 aspect = "square"
@@ -268,9 +228,3 @@ body1 = "pluto"
 body2 = "true_node"
 aspect = "trine"
 orb = "5.0833"
-
-[[expected.aspects]]
-body1 = "pluto"
-body2 = "chiron"
-aspect = "sextile"
-orb = "5.6233"

@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
+from core.ephemeris.identity import verify_ephemeris_identity
+
 #: Argon2 hash of "correct horse battery staple" — a fixed test password, never
 #: a real one. Only its well-formedness matters for import-time validation;
 #: tests that exercise sign-in call ``verify_password`` against this hash and
@@ -33,3 +37,17 @@ _IMPORTABLE_ENVIRONMENT = {
 }
 
 os.environ.update(_IMPORTABLE_ENVIRONMENT)
+
+
+@pytest.fixture(autouse=True)
+def _ephemeris_pinned_to_the_real_vendored_files() -> None:
+    """``swe.set_ephe_path()`` is process-global C-extension state, not
+    per-module: some test modules (``tests/test_ephemeris_identity.py``'s own
+    I/O matrix) deliberately point it at temporary fixture directories that
+    are gone by the time another module's tests run, in the same pytest
+    process, if collection order alone were relied on. Re-pinning to the real
+    vendored files before every test in the session -- not just once at
+    import time -- keeps any test computing against the ephemeris correct
+    regardless of what ran immediately before it.
+    """
+    verify_ephemeris_identity()

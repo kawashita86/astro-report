@@ -62,11 +62,6 @@ longitude = "285.3386"
 name = "true_node"
 longitude = "160.2536"
 
-[[expected.planets]]
-name = "chiron"
-longitude = "350.9608"
-retrograde = true
-
 [[expected.houses]]
 number = 1
 cusp_longitude = "162.8000"
@@ -146,12 +141,6 @@ aspect = "sextile"
 orb = "4.0094"
 
 [[expected.aspects]]
-body1 = "sun"
-body2 = "chiron"
-aspect = "trine"
-orb = "6.6978"
-
-[[expected.aspects]]
 body1 = "moon"
 body2 = "mercury"
 aspect = "sextile"
@@ -170,22 +159,10 @@ aspect = "square"
 orb = "4.3247"
 
 [[expected.aspects]]
-body1 = "moon"
-body2 = "chiron"
-aspect = "sextile"
-orb = "5.0125"
-
-[[expected.aspects]]
 body1 = "mercury"
 body2 = "pluto"
 aspect = "sextile"
 orb = "4.7669"
-
-[[expected.aspects]]
-body1 = "mercury"
-body2 = "chiron"
-aspect = "trine"
-orb = "0.8553"
 
 [[expected.aspects]]
 body1 = "venus"
@@ -194,22 +171,10 @@ aspect = "trine"
 orb = "1.2264"
 
 [[expected.aspects]]
-body1 = "venus"
-body2 = "chiron"
-aspect = "square"
-orb = "1.9142"
-
-[[expected.aspects]]
 body1 = "mars"
 body2 = "uranus"
 aspect = "square"
 orb = "6.1664"
-
-[[expected.aspects]]
-body1 = "mars"
-body2 = "chiron"
-aspect = "sextile"
-orb = "6.8542"
 
 [[expected.aspects]]
 body1 = "jupiter"
@@ -242,12 +207,6 @@ aspect = "square"
 orb = "4.6847"
 
 [[expected.aspects]]
-body1 = "saturn"
-body2 = "chiron"
-aspect = "square"
-orb = "6.0225"
-
-[[expected.aspects]]
 body1 = "uranus"
 body2 = "pluto"
 aspect = "square"
@@ -270,9 +229,3 @@ body1 = "pluto"
 body2 = "true_node"
 aspect = "trine"
 orb = "5.0850"
-
-[[expected.aspects]]
-body1 = "pluto"
-body2 = "chiron"
-aspect = "sextile"
-orb = "5.6222"

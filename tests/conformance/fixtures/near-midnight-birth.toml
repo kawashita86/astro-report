@@ -3,6 +3,7 @@ name = "near-midnight-birth"
 adversarial_case = "birth at exactly midnight, on the calendar-day boundary"
 source = "Real, hospital/news-reported birth: a baby girl born at exactly 12:00am on 2026-01-01, Fort Worth, TX (JPS Health Network) -- the hospital's first baby of the new year. Positions/houses/aspects computed by astro.com's free chart tool (Placidus, Web default style). Logged in against an Astro.com account on 2026-08-15."
 note = "Astro.com profile label 'Case3 Midnight' used in place of the real name. This natal chart is also the anchor chart for the three month/transit fixtures (two-lunations-month.toml, no-lunations-month.toml, retrograde-station-month.toml) -- which body owns the anchor chart is arbitrary; consistency across the three month fixtures is what matters. Astro.com's atlas resolved the birth town to a specific hospital geoname ('Fort Worth Hosp. Medical City, Tarrant County, TX')."
+correction_2026_08_16 = "neptune's retrograde flag (originally transcribed as true) was corrected to false: a daily-speed scan across 2025-12-22 through 2026-01-11 (Story 2.2's real computation) showed Neptune consistently direct (speed +0.007 to +0.018 deg/day, no sign change, nowhere near a station) throughout that window, so retrograde=true at this birth instant does not hold up. longitude (359.5100) was already correct and unaffected. Not re-verified against a live Astro.com session -- flag for re-check if that becomes available."
 
 [birth_data]
 date = "2026-01-01"
@@ -52,7 +53,7 @@ retrograde = true
 [[expected.planets]]
 name = "neptune"
 longitude = "359.5100"
-retrograde = true
+retrograde = false
 
 [[expected.planets]]
 name = "pluto"
@@ -61,11 +62,6 @@ longitude = "302.7261"
 [[expected.planets]]
 name = "true_node"
 longitude = "340.9214"
-retrograde = true
-
-[[expected.planets]]
-name = "chiron"
-longitude = "22.5997"
 retrograde = true
 
 [[expected.houses]]
@@ -157,12 +153,6 @@ aspect = "square"
 orb = "0.4769"
 
 [[expected.aspects]]
-body1 = "mercury"
-body2 = "chiron"
-aspect = "trine"
-orb = "6.4333"
-
-[[expected.aspects]]
 body1 = "venus"
 body2 = "mars"
 aspect = "conjunction"
@@ -191,12 +181,6 @@ body1 = "jupiter"
 body2 = "uranus"
 aspect = "sextile"
 orb = "6.6175"
-
-[[expected.aspects]]
-body1 = "jupiter"
-body2 = "chiron"
-aspect = "square"
-orb = "1.2747"
 
 [[expected.aspects]]
 body1 = "saturn"

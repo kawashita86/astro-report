@@ -253,3 +253,62 @@ def test_compare_does_not_report_extra_keys_present_only_in_computed() -> None:
     mismatches = compare("synthetic", expected, computed)
 
     assert mismatches == []
+
+
+def test_compare_accepts_a_numeric_difference_within_tolerance() -> None:
+    """A last-digit rounding difference (Story 2.2's own observed noise
+    band) is within tolerance and is not reported."""
+    expected = {"longitude": "224.2631"}
+    computed = {"longitude": "224.2630"}
+
+    mismatches = compare("synthetic", expected, computed)
+
+    assert mismatches == []
+
+
+def test_compare_rejects_a_numeric_difference_beyond_tolerance() -> None:
+    """A difference well beyond the noise band (Story 2.2's own confirmed
+    transcription-error magnitude) still fails loudly."""
+    expected = {"cusp_longitude": "209.0833"}
+    computed = {"cusp_longitude": "209.0233"}
+
+    mismatches = compare("synthetic", expected, computed)
+
+    assert len(mismatches) == 1
+    assert mismatches[0].field == "expected.cusp_longitude"
+
+
+def test_compare_accepts_a_near_boundary_match_across_the_0_360_wraparound() -> None:
+    """0.0050 and 359.9975 are only 0.0075 degrees apart on a circle -- a
+    plain (non-circular) difference would read this as a ~360-degree
+    mismatch and fail it wrongly."""
+    expected = {"longitude": "0.0050"}
+    computed = {"longitude": "359.9975"}
+
+    mismatches = compare("synthetic", expected, computed)
+
+    assert mismatches == []
+
+
+def test_compare_still_rejects_a_real_mismatch_near_the_0_360_wraparound() -> None:
+    """The circular distance check must not make every value near 0/360
+    trivially pass -- only genuinely close ones."""
+    expected = {"longitude": "0.0050"}
+    computed = {"longitude": "180.0050"}
+
+    mismatches = compare("synthetic", expected, computed)
+
+    assert len(mismatches) == 1
+    assert mismatches[0].field == "expected.longitude"
+
+
+def test_compare_does_not_apply_numeric_tolerance_to_non_numeric_strings() -> None:
+    """Names, aspect types and other non-numeric strings stay exact --
+    tolerance only ever applies to Decimal-parseable values."""
+    expected = {"name": "sun"}
+    computed = {"name": "moon"}
+
+    mismatches = compare("synthetic", expected, computed)
+
+    assert len(mismatches) == 1
+    assert mismatches[0].field == "expected.name"

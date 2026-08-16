@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,28 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 #: The three tables every fixture must declare, even if a table is empty.
 _REQUIRED_TABLES = ("metadata", "birth_data", "expected")
+
+#: Numeric leaf fields (longitude/cusp_longitude/orb, recorded as TOML
+#: strings -- this project's Decimal-everywhere convention) are compared
+#: within this tolerance rather than exact equality. Story 2.2's own
+#: computation, checked against real Astro.com-transcribed fixtures, showed
+#: two distinct noise bands: ~0.0001 degrees on planet longitudes/aspect
+#: orbs (Decimal-quantization last-digit rounding) and up to ~0.0083 degrees
+#: on Placidus house cusps (engine/DeltaT differences between the vendored
+#: Swiss Ephemeris build and Astro.com's own). This tolerance sits above
+#: both observed bands with room to spare, while staying well below a
+#: transcription-sized error (one fixture's cusp mismatch was 0.06 degrees,
+#: ~6x this tolerance) so a real defect still fails loudly.
+_NUMERIC_TOLERANCE = Decimal("0.01")
+
+#: Longitudes/cusps are normalized into [0, 360) -- comparing them with a
+#: plain ``abs()`` difference would report a true near-boundary match (e.g.
+#: expected 0.0050 vs computed 359.9975, an actual 0.0075-degree difference)
+#: as a ~360-degree mismatch. Distance is measured circularly instead,
+#: mirroring core/ephemeris/chart.py's own _angular_separation(). Harmless
+#: for non-circular fields like orb magnitudes (always far below 360), so
+#: one tolerance check serves both.
+_FULL_CIRCLE = Decimal(360)
 
 
 class FixtureFormatError(ValueError):
@@ -174,5 +197,23 @@ def _walk(
             _walk(fixture_name, f"{field}[{index}]", expected_item, computed_item, mismatches)
         return
 
-    if expected != computed:
+    if expected != computed and not _within_numeric_tolerance(expected, computed):
         mismatches.append(Mismatch(fixture_name, field, expected, computed))
+
+
+def _within_numeric_tolerance(expected: Any, computed: Any) -> bool:
+    """``True`` when both sides parse as ``Decimal`` and sit within
+    ``_NUMERIC_TOLERANCE`` of each other, measured circularly (mod 360) --
+    never true for anything else (names, aspect types, booleans, house
+    numbers stay exact)."""
+    if not isinstance(expected, str) or not isinstance(computed, str):
+        return False
+    try:
+        expected_decimal = Decimal(expected)
+        computed_decimal = Decimal(computed)
+    except InvalidOperation:
+        return False
+    diff = abs(expected_decimal - computed_decimal) % _FULL_CIRCLE
+    if diff > _FULL_CIRCLE / 2:
+        diff = _FULL_CIRCLE - diff
+    return diff <= _NUMERIC_TOLERANCE

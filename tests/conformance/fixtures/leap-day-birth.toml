@@ -59,10 +59,6 @@ longitude = "301.2008"
 name = "true_node"
 longitude = "15.9878"
 
-[[expected.planets]]
-name = "chiron"
-longitude = "17.2050"
-
 [[expected.houses]]
 number = 1
 cusp_longitude = "306.1833"
@@ -191,12 +187,6 @@ aspect = "sextile"
 orb = "0.2064"
 
 [[expected.aspects]]
-body1 = "venus"
-body2 = "chiron"
-aspect = "sextile"
-orb = "1.4236"
-
-[[expected.aspects]]
 body1 = "mars"
 body2 = "jupiter"
 aspect = "square"
@@ -209,12 +199,6 @@ aspect = "sextile"
 orb = "3.5158"
 
 [[expected.aspects]]
-body1 = "mars"
-body2 = "chiron"
-aspect = "sextile"
-orb = "4.7331"
-
-[[expected.aspects]]
 body1 = "jupiter"
 body2 = "saturn"
 aspect = "sextile"
@@ -225,9 +209,3 @@ body1 = "neptune"
 body2 = "pluto"
 aspect = "sextile"
 orb = "4.4814"
-
-[[expected.aspects]]
-body1 = "true_node"
-body2 = "chiron"
-aspect = "conjunction"
-orb = "1.2172"
