@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>New Client — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>New Client</h1>
+      {% if error %}
+      <p role="alert">{{ error }}</p>
+      {% endif %}
+      <form method="post" action="/clients">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required value="{{ form.name or '' }}" />
+
+        <label for="birth_date">Birth date</label>
+        <input
+          type="date"
+          id="birth_date"
+          name="birth_date"
+          required
+          value="{{ form.birth_date or '' }}"
+        />
+
+        <label for="birth_time">Birth time</label>
+        <input
+          type="time"
+          id="birth_time"
+          name="birth_time"
+          required
+          value="{{ form.birth_time or '' }}"
+        />
+
+        {% if candidates %}
+        <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
+        <fieldset>
+          <legend>More than one place matched "{{ form.birthplace or '' }}" — choose one</legend>
+          {% for candidate in candidates %}
+          <label>
+            <input type="radio" name="candidate" value="{{ candidate.value }}" required />
+            {{ candidate.display_name }}
+          </label>
+          {% endfor %}
+        </fieldset>
+        {% else %}
+        <label for="birthplace">Birthplace</label>
+        <input
+          type="text"
+          id="birthplace"
+          name="birthplace"
+          required
+          value="{{ form.birthplace or '' }}"
+        />
+        {% endif %}
+
+        <button type="submit">Create Client</button>
+      </form>
+    </main>
+  </body>
+</html>

@@ -43,3 +43,9 @@ extend-exclude = ["_bmad", "_bmad-output", ".bmad", ".claude", ".tokensave"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+# `Depends(...)` in a parameter default is FastAPI's own dependency-injection
+# idiom (Story 2.3's `shell/http/routes/clients.py`), not the mutable-default
+# footgun B008 exists to catch.
+extend-immutable-calls = ["fastapi.Depends"]

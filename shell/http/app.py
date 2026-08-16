@@ -14,18 +14,23 @@ anything. See ``core/ephemeris/identity.py``.
 
 The same eager-load shape loads ``data/computation.toml`` (Story 1.5, AD-18)
 into ``computation_config`` -- a malformed file or an out-of-range orb aborts
-startup the same way, even though nothing reads the value yet. See
+startup the same way. Story 2.3's ``/clients`` route is the first consumer,
+reading it from ``application.state`` rather than this module's global, so a
+future second consumer never has to import this module. See
 ``shell/computation.py``.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import create_engine
+from sqlmodel import Session
 
 from core.ephemeris.identity import EphemerisIdentity, verify_ephemeris_identity
 from core.types.computation import ComputationConfig
@@ -41,7 +46,7 @@ from shell.http.auth import (
     verify_password,
 )
 
-__all__ = ["app", "computation_config", "create_app", "ephemeris_identity"]
+__all__ = ["app", "computation_config", "create_app", "ephemeris_identity", "get_session"]
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -53,6 +58,19 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 _MAX_LOGIN_BODY_BYTES = 4096
 
 
+def get_session(request: Request) -> Iterator[Session]:
+    """Yield a request-scoped session against the shared engine.
+
+    Not auto-committing: each route decides its own transaction boundary --
+    Story 2.3's ``/clients`` route must commit a Client and its Natal Chart
+    together, or not at all (AD-16). Closing the session without an explicit
+    ``commit()`` rolls back any pending work, including a nested
+    ``PLACE_CACHE`` write (``shell/adapters/postgres/place_cache.py``).
+    """
+    with Session(request.app.state.engine) as session:
+        yield session
+
+
 def create_app(settings: Settings) -> FastAPI:
     """Build the application from an already-validated :class:`Settings`.
 
@@ -60,6 +78,13 @@ def create_app(settings: Settings) -> FastAPI:
     one reader (``shell/config.py``) and tests can build an app against any
     configuration without touching the process environment.
     """
+    # Deferred, not a top-of-file import: `shell.http.routes.clients` imports
+    # `get_session` back from this module, so the router is only resolvable
+    # once `get_session` (defined above) already exists in this module's
+    # namespace -- guaranteed by the time `create_app()` is actually called,
+    # never by the time this module merely starts executing.
+    from shell.http.routes.clients import router as clients_router
+
     application = FastAPI(
         title="astro-report",
         debug=settings.environment is Environment.LOCAL,
@@ -70,7 +95,11 @@ def create_app(settings: Settings) -> FastAPI:
         openapi_url=None,
     )
     application.state.settings = settings
+    application.state.engine = create_engine(settings.sqlalchemy_url)
+    application.state.computation_config = computation_config
+    application.state.ephemeris_identity = ephemeris_identity
     application.add_middleware(AuthMiddleware)
+    application.include_router(clients_router)
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
@@ -144,13 +173,12 @@ def create_app(settings: Settings) -> FastAPI:
 
 
 #: The ephemeris this process is computing against, verified once at import
-#: time. Nothing persists it yet — Epic 3's Report Payload does that — but it
-#: is available here for any component that must record it later.
+#: time. Story 2.3's ``/clients`` route records it on every stored Natal
+#: Chart; Epic 3's Report Payload will read it too.
 ephemeris_identity: EphemerisIdentity = verify_ephemeris_identity()
 
 #: The one home for every astronomical tuning value (AD-18), loaded once at
-#: import time. Nothing in this story consumes it yet — Epic 2+ does — but a
-#: malformed file must still abort startup before anything can serve.
+#: import time. Story 2.3's ``/clients`` route is the first consumer.
 computation_config: ComputationConfig = load_computation_config()
 
 #: The instance the ASGI server imports (``shell.http.app:app``).

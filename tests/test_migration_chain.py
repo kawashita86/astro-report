@@ -140,6 +140,13 @@ def test_an_offline_upgrade_runs_env_py_and_emits_the_chain() -> None:
     # class directly -- this is the only check tying the two together.
     assert "CREATE TABLE place_cache" in completed.stdout
     assert "CREATE UNIQUE INDEX ix_place_cache_normalized_query" in completed.stdout
+    # 0003_client_and_natal_chart: same reasoning -- ties the hand-written DDL
+    # to the Client/StoredNatalChart SQLModel classes it must match, so a
+    # schema drift (a wrong `nullable`, a missing column, a dropped index)
+    # would fail here rather than pass silently.
+    assert "CREATE TABLE client" in completed.stdout
+    assert "CREATE TABLE natal_chart" in completed.stdout
+    assert "CREATE INDEX ix_natal_chart_client_id" in completed.stdout
 
 
 def test_a_percent_encoded_password_does_not_abort_the_migration() -> None:

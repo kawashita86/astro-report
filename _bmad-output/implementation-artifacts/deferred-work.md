@@ -126,3 +126,12 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-2-compute-a-natal-chart-as-a-pure-function.md`
   summary: `PlanetPosition.house`/`sign` and `Aspect.applying` are only checked for type/bounds validity in unit tests (any of the 12 signs, any of the 12 houses, any bool) -- their actual correctness against real reference data is unverified, since none of the four conformance fixtures' `expected` tables carry `sign`, `house`, or `applying` fields.
   evidence: Confirmed by verification-gap by grepping all four fixtures for these keys (no matches) and reading the relevant unit tests directly (`tests/test_natal_chart.py`'s assertions are membership/bounds checks, not known-correct-value checks). A sign-table transposition, a 0-degree-crossing house misassignment, or an inverted applying/separating sign would all currently ship undetected.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-create-a-client-or-fail-visibly.md`
+  summary: The engine built in `create_app()` (shell/http/app.py) has no dispose()/shutdown hook and no pool_pre_ping tuning for the Render free-tier deployment.
+  evidence: Story 2.3 introduces the app's first live SQLAlchemy engine; migrations/env.py's own engine is disposed after use, but the app's long-lived one has no equivalent teardown or connection-health tuning.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-create-a-client-or-fail-visibly.md`
+  summary: Client.name, Client.iana_zone and StoredNatalChart.computation_config_content_hash are unbounded String/str columns with no length constraint beyond the new request body-size cap.
+  evidence: Surfaced by blind-hunter review of Story 2.3's diff; no upper bound exists at the schema or form-validation level for these fields.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-create-a-client-or-fail-visibly.md`
+  summary: Geocoder.resolve()'s Protocol docstring in shell/ports/geocoder.py omits the ValueError it raises for a tz-aware birth_local_time, the same gap patched on the new sibling resolve_candidate() in this story.
+  evidence: Noticed while reviewing Story 2.3's new resolve_candidate() docstring against its implementation; the pre-existing resolve() method has the identical undocumented ValueError path.

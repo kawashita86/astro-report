@@ -111,6 +111,24 @@ class NominatimGeocoder:
             utc_offset=utc_offset,
         )
 
+    def resolve_candidate(
+        self, candidate: PlaceCandidate, birth_local_time: datetime
+    ) -> ResolvedPlace:
+        if birth_local_time.tzinfo is not None:
+            raise ValueError(
+                "birth_local_time must be naive: it is the wall-clock time as "
+                "entered, and the zone it belongs to is what resolution determines."
+            )
+
+        iana_zone = self._zone_for(candidate.latitude, candidate.longitude)
+        utc_offset = self._historical_offset(iana_zone, birth_local_time)
+        return ResolvedPlace(
+            latitude=candidate.latitude,
+            longitude=candidate.longitude,
+            iana_zone=iana_zone,
+            utc_offset=utc_offset,
+        )
+
     def _lookup_cache(self, place_text: str) -> CachedPlace | None:
         try:
             return lookup_cached_place(self._session, place_text)

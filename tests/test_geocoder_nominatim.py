@@ -7,7 +7,7 @@ coverage of the story's I/O & Edge-Case Matrix.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import geopy.exc
@@ -242,5 +242,94 @@ def test_a_nonexistent_spring_forward_local_time_raises_naming_the_timezone_reso
 
     with pytest.raises(PlaceResolutionError) as caught:
         geocoder.resolve("Rome, Italy", datetime(2026, 3, 29, 2, 30))
+
+    assert caught.value.step == "timezone_resolution"
+
+
+# --- resolve_candidate(): finalizing an explicit choice (Story 2.3) -----------
+
+
+def test_resolve_candidate_resolves_zone_and_offset(session: Session) -> None:
+    candidate = PlaceCandidate(
+        display_name="Rome, Italy", latitude=Decimal("41.8933"), longitude=Decimal("12.4829")
+    )
+    geocoder = NominatimGeocoder(
+        session, geolocator=_FakeGeolocator(), timezone_finder=_FakeTimezoneFinder()
+    )
+
+    result = geocoder.resolve_candidate(candidate, datetime(1975, 6, 15, 10, 30))
+
+    assert result == ResolvedPlace(
+        latitude=Decimal("41.8933"),
+        longitude=Decimal("12.4829"),
+        iana_zone="Europe/Rome",
+        utc_offset=timedelta(hours=2),  # CEST, mirroring the 1975 resolve() case
+    )
+
+
+def test_resolve_candidate_never_touches_the_geocoder_or_the_cache(session: Session) -> None:
+    """An explicit choice among ambiguous candidates is not a fresh
+    unambiguous match -- it must neither re-query the geocoder nor write
+    through to PLACE_CACHE (AD-16, AC2)."""
+    candidate = PlaceCandidate(
+        display_name="Springfield, Illinois, USA",
+        latitude=Decimal("39.7817"),
+        longitude=Decimal("-89.6501"),
+    )
+    geolocator = _FakeGeolocator()
+    geocoder = NominatimGeocoder(
+        session, geolocator=geolocator, timezone_finder=_FakeTimezoneFinder(zone="America/Chicago")
+    )
+
+    geocoder.resolve_candidate(candidate, datetime(2026, 1, 15, 12, 0))
+
+    assert geolocator.calls == []
+    assert lookup_cached_place(session, candidate.display_name) is None
+
+
+def test_resolve_candidate_rejects_a_timezone_aware_birth_local_time(session: Session) -> None:
+    candidate = PlaceCandidate(
+        display_name="Rome, Italy", latitude=Decimal("41.8933"), longitude=Decimal("12.4829")
+    )
+    geocoder = NominatimGeocoder(
+        session, geolocator=_FakeGeolocator(), timezone_finder=_FakeTimezoneFinder()
+    )
+
+    with pytest.raises(ValueError, match="naive"):
+        geocoder.resolve_candidate(candidate, datetime(2026, 1, 15, 12, 0, tzinfo=UTC))
+
+
+def test_resolve_candidate_no_timezone_found_raises_naming_the_timezone_resolution_step(
+    session: Session,
+) -> None:
+    candidate = PlaceCandidate(
+        display_name="Middle of the Ocean", latitude=Decimal("0.0"), longitude=Decimal("-160.0")
+    )
+    geocoder = NominatimGeocoder(
+        session, geolocator=_FakeGeolocator(), timezone_finder=_FakeTimezoneFinder(zone=None)
+    )
+
+    with pytest.raises(PlaceResolutionError) as caught:
+        geocoder.resolve_candidate(candidate, datetime(2026, 1, 15, 12, 0))
+
+    assert caught.value.step == "timezone_resolution"
+
+
+def test_resolve_candidate_a_spring_forward_gap_raises_naming_the_timezone_resolution_step(
+    session: Session,
+) -> None:
+    """2026-03-29 02:30 local in Europe/Rome never occurred (DST
+    spring-forward gap) -- refused rather than silently assigning it one of
+    the two neighboring offsets, mirroring ``resolve()``'s equivalent case:
+    both route through the same ``_historical_offset()`` helper."""
+    candidate = PlaceCandidate(
+        display_name="Rome, Italy", latitude=Decimal("41.8933"), longitude=Decimal("12.4829")
+    )
+    geocoder = NominatimGeocoder(
+        session, geolocator=_FakeGeolocator(), timezone_finder=_FakeTimezoneFinder()
+    )
+
+    with pytest.raises(PlaceResolutionError) as caught:
+        geocoder.resolve_candidate(candidate, datetime(2026, 3, 29, 2, 30))
 
     assert caught.value.step == "timezone_resolution"

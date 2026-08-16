@@ -35,3 +35,21 @@ class Geocoder(Protocol):
                 returns ``None`` to mean failure.
         """
         ...
+
+    def resolve_candidate(
+        self, candidate: PlaceCandidate, birth_local_time: datetime
+    ) -> ResolvedPlace:
+        """Finalize an explicitly-chosen :class:`PlaceCandidate` (Story 2.3)
+        into a zone and the UTC offset in force at ``birth_local_time`` there.
+
+        Never writes through to ``PLACE_CACHE``: an explicit choice among
+        ambiguous candidates is not the same fact as an unambiguous geocoder
+        match, and only the latter is ever cached (FR-2, AD-16).
+
+        Raises:
+            PlaceResolutionError: naming the step that failed -- historical
+                offset/zone lookup. Never returns ``None`` to mean failure.
+            ValueError: if ``birth_local_time`` is not naive (carries
+                ``tzinfo``).
+        """
+        ...
