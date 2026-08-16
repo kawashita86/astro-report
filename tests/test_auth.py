@@ -122,7 +122,17 @@ def test_a_token_signed_with_a_different_key_does_not_verify() -> None:
 
 @pytest.mark.parametrize(
     "malformed",
-    ["", "no-dot-at-all", ".", "abc.def", "123", "-5.abcdef"],
+    [
+        "",
+        "no-dot-at-all",
+        ".",
+        "abc.def",
+        "123",
+        "-5.abcdef",
+        # A Unicode "digit" character (superscript two) that isdigit() would
+        # accept but int() cannot parse -- must fail cleanly, not raise.
+        "3².abcdef",
+    ],
 )
 def test_malformed_tokens_do_not_verify(malformed: str) -> None:
     assert verify_session(malformed, SESSION_SECRET_KEY, now=1_000_000_000) is False

@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-16-2026
+last_updated: 08-16-2026 09:31
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -41,9 +41,9 @@ development_status:
   1-3-an-ephemeris-whose-identity-is-asserted-before-the-applicati: done
   1-4-sign-in-as-the-only-person-who-can-reach-this-application: done
   1-5-one-home-for-every-astronomical-tuning-value: done
-  1-6-a-conformance-harness-that-runs-before-there-is-anything-to: review
+  1-6-a-conformance-harness-that-runs-before-there-is-anything-to: done
   1-7-reference-charts-chosen-to-break-the-computation-not-to-flat: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
 
   epic-2: backlog
   2-1-resolve-a-birthplace-to-coordinates-and-the-offset-in-force: backlog
@@ -111,3 +111,54 @@ development_status:
   8-4-project-storage-growth-against-the-free-tier-ceiling: backlog
   8-5-restore-from-a-backup-for-real: backlog
   epic-8-retrospective: optional
+action_items:
+  - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"
+    epic: 1
+    action: "Fix verify_session()'s Unicode-digit crash in shell/http/auth.py:85 (use
+      .isdecimal() or wrap int() in try/except)"
+    owner: "dev"
+    status: done
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"
+  - id: "epic-1-retro-item-2-make-tests-test_ci_workflow-py-assert-on"
+    epic: 1
+    action: "Make tests/test_ci_workflow.py assert on parsed/comment-stripped structure
+      instead of raw substring match, matching test_dockerfile_ephemeris_build.py's
+      pattern"
+    owner: "dev"
+    status: done
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"
+  - id: "epic-1-retro-item-3-add-environs-to-_environment_modules-in"
+    epic: 1
+    action: "Add environs to _ENVIRONMENT_MODULES in tests/test_env_access_is_centralized.py:35"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"
+  - id: "epic-1-retro-item-4-give-the-conformance-harness-an-interval"
+    epic: 1
+    action: "Give the conformance harness an interval-aware comparison mode (or restructure
+      retrograde-station-month.toml's expected.stations shape) before story 3.2 needs
+      it to pass"
+    owner: "story-3.2"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"
+  - id: "epic-1-retro-item-5-commit-the-aspect-transit-event-derivati"
+    epic: 1
+    action: "Commit the aspect/transit-event derivation script (or document its formula)
+      used for the 7 conformance fixtures"
+    owner: "Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"
+  - id: "epic-1-retro-item-6-decide-whether-computationconfig-rulers"
+    epic: 1
+    action: "Decide whether ComputationConfig/Rulers should be hashable before Epic
+      2+ code caches or dict-keys on a ComputationConfig"
+    owner: "epic-2"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"
+  - id: "epic-1-retro-item-7-document-or-close-the-non-recursive-assu"
+    epic: 1
+    action: "Document or close the non-recursive assumption in core/ephemeris/identity.py
+      _check_for_unlisted_files"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"

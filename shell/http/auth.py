@@ -82,7 +82,10 @@ def verify_session(
     a log line, never a response.
     """
     expires_at_raw, _, signature = token.partition(_SEPARATOR)
-    if not signature or not expires_at_raw.isdigit():
+    # isdecimal(), not isdigit(): isdigit() accepts Unicode digit characters
+    # (e.g. superscripts) that int() cannot parse, which would raise instead
+    # of returning False -- isdecimal() is the subset int() always accepts.
+    if not signature or not expires_at_raw.isdecimal():
         return False
     if len(expires_at_raw) > _MAX_EXPIRY_DIGITS:
         return False
