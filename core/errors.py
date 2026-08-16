@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
-__all__ = ["ComputationConfigError", "EphemerisIntegrityError"]
+from typing import Literal
+
+__all__ = [
+    "ComputationConfigError",
+    "EphemerisIntegrityError",
+    "PlaceResolutionError",
+    "PlaceResolutionStep",
+]
+
+#: The closed set of steps birthplace resolution can fail at -- a free-form
+#: string would let a later call site introduce an inconsistent label (e.g.
+#: "geocode" vs "geocoding") that error handling or tests key off of.
+PlaceResolutionStep = Literal["geocoding", "timezone_resolution", "cache"]
 
 
 class EphemerisIntegrityError(RuntimeError):
@@ -36,3 +48,22 @@ class ComputationConfigError(RuntimeError):
     Raised only at load time, from :mod:`shell.computation` -- mirrors how
     ``ConfigError`` and ``EphemerisIntegrityError`` already abort startup.
     """
+
+
+class PlaceResolutionError(RuntimeError):
+    """A birthplace could not be resolved to coordinates and a historical
+    UTC offset (FR-2).
+
+    There is no degraded chart to fall back to -- houses, ascendant and
+    midheaven are load-bearing on the resolved place, so a Client is never
+    persisted from a partial resolution (AD-16). Raised from
+    :mod:`shell.adapters.nominatim` or :mod:`shell.adapters.postgres.place_cache`,
+    naming which step failed -- geocoding, historical offset/zone lookup, or
+    the cache read -- rather than letting a raw network or database exception
+    escape untyped. Never used to signal an ambiguous match: multiple
+    candidates are a successful resolution, returned as a list, not an error.
+    """
+
+    def __init__(self, step: PlaceResolutionStep, message: str) -> None:
+        self.step = step
+        super().__init__(f"Refusing to resolve birthplace ({step}): {message}")

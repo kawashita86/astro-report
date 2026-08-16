@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-16-2026 09:31
+last_updated: 08-16-2026 13:30
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -45,8 +45,8 @@ development_status:
   1-7-reference-charts-chosen-to-break-the-computation-not-to-flat: done
   epic-1-retrospective: done
 
-  epic-2: backlog
-  2-1-resolve-a-birthplace-to-coordinates-and-the-offset-in-force: backlog
+  epic-2: in-progress
+  2-1-resolve-a-birthplace-to-coordinates-and-the-offset-in-force: review
   2-2-compute-a-natal-chart-as-a-pure-function: backlog
   2-3-create-a-client-or-fail-visibly: backlog
   2-4-resolve-the-ruler-of-every-house-traditional-and-modern: backlog

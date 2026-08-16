@@ -135,6 +135,11 @@ def test_an_offline_upgrade_runs_env_py_and_emits_the_chain() -> None:
     assert completed.returncode == 0, completed.stderr
     assert "CREATE TABLE alembic_version" in completed.stdout
     assert "0001_baseline" in completed.stdout
+    # 0002_place_cache: the hand-written migration SQL is never exercised by
+    # tests/test_place_cache.py, which builds its schema from the SQLModel
+    # class directly -- this is the only check tying the two together.
+    assert "CREATE TABLE place_cache" in completed.stdout
+    assert "CREATE UNIQUE INDEX ix_place_cache_normalized_query" in completed.stdout
 
 
 def test_a_percent_encoded_password_does_not_abort_the_migration() -> None:
