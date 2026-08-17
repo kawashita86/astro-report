@@ -135,3 +135,6 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-create-a-client-or-fail-visibly.md`
   summary: Geocoder.resolve()'s Protocol docstring in shell/ports/geocoder.py omits the ValueError it raises for a tz-aware birth_local_time, the same gap patched on the new sibling resolve_candidate() in this story.
   evidence: Noticed while reviewing Story 2.3's new resolve_candidate() docstring against its implementation; the pre-existing resolve() method has the identical undocumented ValueError path.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-assemble-the-four-domain-profiles.md`
+  summary: The twelve-sign zodiac tuple is now duplicated a fourth time across the test suite, with no shared constant.
+  evidence: Surfaced by blind-hunter review of Story 2.5's diff. Independent copies already existed in core/domains/rulers.py (`_ZODIAC_SIGNS`), tests/test_house_rulers.py, and tests/test_natal_chart.py (as a frozenset); tests/test_domain_profiles.py adds a fourth. This story followed the exact pattern already established by Story 2.4's test file rather than introducing a new one, so fixing it means a cross-cutting extraction touching already-`done` test files — out of this story's scope.
