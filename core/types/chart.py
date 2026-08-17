@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-__all__ = ["Aspect", "HouseCusp", "NatalChart", "PlanetPosition"]
+__all__ = ["Aspect", "HouseCusp", "HouseRuler", "NatalChart", "PlanetPosition"]
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,24 @@ class HouseCusp:
 
     number: int
     longitude: Decimal
+
+
+@dataclass(frozen=True)
+class HouseRuler:
+    """The resolved traditional and modern Ruler of one house cusp (Story
+    2.4), looked up from ``ComputationConfig.rulers`` rather than a
+    hardcoded sign-to-planet mapping.
+
+    ``co_ruler`` is the traditional Ruler when it differs from the modern
+    one (true today for Scorpio, Aquarius and Pisces per the configured
+    tables) and ``None`` otherwise -- derived from the two Ruler fields, not
+    a hardcoded sign list."""
+
+    house: int
+    sign: str
+    traditional_ruler: str
+    modern_ruler: str
+    co_ruler: str | None
 
 
 @dataclass(frozen=True)
