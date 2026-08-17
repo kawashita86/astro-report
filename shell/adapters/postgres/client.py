@@ -25,7 +25,20 @@ from core.types.chart import NatalChart
 from core.types.computation import ComputationConfig
 from core.types.place import ResolvedPlace
 
-__all__ = ["Client", "StoredNatalChart", "correct_client_and_chart", "create_client_with_chart"]
+__all__ = [
+    "Client",
+    "StoredNatalChart",
+    "correct_client_and_chart",
+    "create_client_with_chart",
+    "delete_client_and_derived",
+]
+
+#: The single source of truth for every table carrying a foreign key to
+#: ``client.id`` (Story 2.8). Both :func:`delete_client_and_derived` and
+#: ``tests/test_client_store.py``'s cascade-invariant test read from this
+#: constant -- a table added here without joining the delete function below,
+#: or vice versa, is exactly the drift that invariant test exists to catch.
+_CLIENT_CASCADE_TABLES: frozenset[str] = frozenset({"natal_chart"})
 
 
 class Client(SQLModel, table=True):
@@ -196,5 +209,34 @@ def correct_client_and_chart(
     client.longitude = resolved_place.longitude
     client.iana_zone = resolved_place.iana_zone
     session.add(client)
+
+    session.flush()
+
+
+def delete_client_and_derived(session: Session, *, client: Client) -> None:
+    """Delete ``client`` and every row derived from it, in one flush (Story 2.8).
+
+    Every ``StoredNatalChart`` row for ``client`` -- current and superseded --
+    is deleted first, then the ``Client`` row itself: children before parent,
+    matching how no foreign key in this codebase declares ``ondelete`` at the
+    schema level, so the cascade is explicit application code, not the
+    database's job. :data:`_CLIENT_CASCADE_TABLES` is the single source of
+    truth for which tables that first step must cover; the cascade-invariant
+    test in ``tests/test_client_store.py`` asserts it stays equal to every
+    table in ``SQLModel.metadata`` carrying a foreign key to ``client.id``.
+
+    This function only ``delete()``s and ``flush()``es -- it never commits or
+    rolls back, exactly like :func:`create_client_with_chart` and
+    :func:`correct_client_and_chart`, so it never decides the caller's
+    transaction boundary. The caller commits only once every deletion here has
+    succeeded.
+    """
+    charts = session.exec(
+        select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
+    ).all()
+    for chart in charts:
+        session.delete(chart)
+
+    session.delete(client)
 
     session.flush()

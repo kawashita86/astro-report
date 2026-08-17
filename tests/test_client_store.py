@@ -16,7 +16,14 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.types.place import ResolvedPlace
-from shell.adapters.postgres.client import Client, StoredNatalChart, create_client_with_chart
+from shell.adapters.postgres import client as client_module
+from shell.adapters.postgres.client import (
+    Client,
+    StoredNatalChart,
+    correct_client_and_chart,
+    create_client_with_chart,
+    delete_client_and_derived,
+)
 from shell.computation import load_computation_config
 
 _EPHEMERIS_IDENTITY = verify_ephemeris_identity()
@@ -194,3 +201,93 @@ def test_ascendant_and_midheaven_are_recorded(session: Session) -> None:
     ).one()
     assert chart.ascendant == natal_chart.ascendant
     assert chart.midheaven == natal_chart.midheaven
+
+
+# --- delete_client_and_derived (Story 2.8) -----------------------------------------
+
+
+def test_delete_client_and_derived_removes_the_client_and_its_current_chart(
+    session: Session,
+) -> None:
+    client = _create(session)
+    session.commit()
+
+    delete_client_and_derived(session, client=client)
+    session.commit()
+
+    assert session.get(Client, client.id) is None
+    assert (
+        session.exec(
+            select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
+        ).first()
+        is None
+    )
+
+
+def test_delete_client_and_derived_removes_a_superseded_chart_too(session: Session) -> None:
+    client = _create(session)
+    session.commit()
+
+    correct_client_and_chart(
+        session,
+        client=client,
+        name="Ada Corrected",
+        birth_date=date(2026, 1, 2),
+        birth_time=time(1, 0),
+        resolved_place=_RESOLVED_PLACE,
+        natal_chart=_a_natal_chart(),
+        computation_config=_COMPUTATION_CONFIG,
+        ephemeris_identity=_EPHEMERIS_IDENTITY,
+    )
+    session.commit()
+    assert (
+        len(
+            session.exec(
+                select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
+            ).all()
+        )
+        == 2
+    ), "fixture did not produce a superseded chart -- test is vacuous"
+
+    delete_client_and_derived(session, client=client)
+    session.commit()
+
+    assert session.get(Client, client.id) is None
+    assert (
+        session.exec(
+            select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
+        ).first()
+        is None
+    )
+
+
+def test_delete_client_and_derived_does_not_persist_without_an_explicit_commit(
+    session: Session,
+) -> None:
+    client = _create(session)
+    session.commit()
+
+    delete_client_and_derived(session, client=client)
+    session.rollback()
+
+    assert session.get(Client, client.id) is not None
+    assert (
+        session.exec(
+            select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
+        ).first()
+        is not None
+    )
+
+
+def test_every_table_with_a_client_id_foreign_key_is_covered_by_the_cascade_constant() -> None:
+    """The cascade-invariant test: a later story that adds a new table with a
+    foreign key to ``client.id`` without also adding it to
+    ``_CLIENT_CASCADE_TABLES`` (and ``delete_client_and_derived()``) must fail
+    here, not silently leave orphaned rows behind."""
+    tables_with_client_fk = {
+        table.name
+        for table in SQLModel.metadata.tables.values()
+        for foreign_key in table.foreign_keys
+        if foreign_key.column.table.name == "client" and foreign_key.column.name == "id"
+    }
+    assert tables_with_client_fk == client_module._CLIENT_CASCADE_TABLES

@@ -10,10 +10,18 @@ acknowledgment: the correction is shown back with a warning and persists
 nothing until resubmitted with ``confirmed=1``, at which point the current
 ``StoredNatalChart`` row is marked superseded rather than overwritten.
 
+``/clients/{id}/delete`` (Story 2.8) hard-deletes a Client and every
+``StoredNatalChart`` row for it (current and superseded), gated by the same
+confirm-then-act shape as the correction route: nothing is deleted until the
+confirmation page's form is resubmitted with ``confirmed=1``.
+
 No new error hierarchy: ``PlaceResolutionError`` (``.step``) and whatever
 ``compute_natal_chart()`` raises are caught and rendered as-is, mirroring
 ``login.html``'s error-banner pattern -- a wrapper error type would only
-re-narrate a step name the domain errors already carry.
+re-narrate a step name the domain errors already carry. Deletion has no
+resolution or computation step to fail once the client is found -- a 404 for
+an unknown id and a 422 for a malformed body (``_parse_form``'s own two
+failure modes) are its only error paths.
 
 Authenticated by default: nothing here is named in ``shell.http.auth.ALLOWLIST``,
 so ``AuthMiddleware`` guards both routes before a request ever reaches this
@@ -32,7 +40,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.templating import Jinja2Templates
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from core.ephemeris.chart import compute_natal_chart
 from core.errors import EphemerisIntegrityError, PlaceResolutionError
@@ -40,10 +48,13 @@ from core.types.place import PlaceCandidate
 from shell.adapters.nominatim.geocoder import NominatimGeocoder
 from shell.adapters.postgres.client import (
     Client,
+    StoredNatalChart,
     correct_client_and_chart,
     create_client_with_chart,
+    delete_client_and_derived,
 )
 from shell.http.app import get_session
+from shell.http.auth import log_client_deleted
 from shell.ports.geocoder import Geocoder
 
 __all__ = ["get_geocoder", "router"]
@@ -184,6 +195,34 @@ def _render_edit_form(
             "warning": warning,
         },
         status_code=status_code,
+    )
+
+
+def _render_delete_form(
+    request: Request,
+    *,
+    client_id: UUID,
+    status_code: int,
+    has_superseded_chart: bool,
+    error: str | None = None,
+) -> Response:
+    return _templates.TemplateResponse(
+        request,
+        "client_delete.html",
+        {"client_id": client_id, "has_superseded_chart": has_superseded_chart, "error": error},
+        status_code=status_code,
+    )
+
+
+def _has_superseded_chart(session: Session, client_id: UUID) -> bool:
+    return (
+        session.exec(
+            select(StoredNatalChart).where(
+                StoredNatalChart.client_id == client_id,
+                StoredNatalChart.superseded_at.is_not(None),
+            )
+        ).first()
+        is not None
     )
 
 
@@ -461,3 +500,73 @@ async def correct_client(
     session.commit()
 
     return Response(content=f"Client {client.id} corrected.", media_type="text/plain")
+
+
+@router.get("/clients/{client_id}/delete", include_in_schema=False)
+def client_delete_form(
+    client_id: UUID, request: Request, session: Session = Depends(get_session)
+) -> Response:
+    """The deletion confirmation page (Story 2.8). Nothing is deleted on GET."""
+    client = session.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404)
+
+    return _render_delete_form(
+        request,
+        client_id=client_id,
+        status_code=200,
+        has_superseded_chart=_has_superseded_chart(session, client_id),
+    )
+
+
+@router.post("/clients/{client_id}/delete", include_in_schema=False)
+async def delete_client(
+    client_id: UUID, request: Request, session: Session = Depends(get_session)
+) -> Response:
+    """Delete a Client and everything derived from it (Story 2.8).
+
+    Mirrors ``correct_client``'s confirm gate: the form must carry
+    ``confirmed=1`` or nothing is deleted and the same confirmation page is
+    re-rendered. Deletion takes no new input beyond that flag, so the only
+    error paths here are the 404 for an unknown client and a 422 for a
+    malformed body -- too large or not valid UTF-8 -- mirroring
+    ``create_client``/``correct_client``'s own handling of ``_parse_form``'s
+    two failure modes (no external resolution or computation runs that could
+    fail once the client is found and the body parses).
+    """
+    client = session.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404)
+
+    try:
+        fields = await _parse_form(request)
+    except _FormTooLarge:
+        return _render_delete_form(
+            request,
+            client_id=client_id,
+            status_code=422,
+            has_superseded_chart=_has_superseded_chart(session, client_id),
+            error="the submitted form is too large.",
+        )
+    except _FormNotUtf8:
+        return _render_delete_form(
+            request,
+            client_id=client_id,
+            status_code=422,
+            has_superseded_chart=_has_superseded_chart(session, client_id),
+            error="the submitted form is not valid UTF-8.",
+        )
+
+    if fields.get("confirmed") != "1":
+        return _render_delete_form(
+            request,
+            client_id=client_id,
+            status_code=200,
+            has_superseded_chart=_has_superseded_chart(session, client_id),
+        )
+
+    delete_client_and_derived(session, client=client)
+    session.commit()
+    log_client_deleted(client_id)
+
+    return Response(content=f"Client {client_id} deleted.", media_type="text/plain")

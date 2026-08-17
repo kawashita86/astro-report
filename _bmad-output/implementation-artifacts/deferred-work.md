@@ -173,3 +173,11 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
   summary: `POST /clients/{client_id}/edit` has no CSRF protection beyond cookie-based session auth.
   evidence: Surfaced by blind-hunter review of Story 2.7's diff. Not caused by this story: identical to the pre-existing `POST /clients` create route, which has never had CSRF protection either.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-8-delete-a-client-and-everything-derived-from-them.md`
+  summary: No CSRF protection exists anywhere in this app, and the new delete route inherits that gap for an action that, unlike create/edit, is irreversible.
+  evidence: The delete confirmation form's only payload is a static hidden `confirmed=1` field, and auth is a bare session cookie (`shell/http/auth.py`) with no CSRF token anywhere in the codebase. An attacker page can auto-submit the delete form from a logged-in operator's browser with no user interaction beyond a page visit, permanently deleting a Client. This predates Story 2.8 (create/edit share the same gap) but deletion's irreversibility raises the stakes.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-8-delete-a-client-and-everything-derived-from-them.md`
+  summary: The cascade-invariant test (`tests/test_client_store.py::test_every_table_with_a_client_id_foreign_key_is_covered_by_the_cascade_constant`) only catches an uncovered Client-referencing table if that table's model module has already been imported into `SQLModel.metadata` when the test runs.
+  evidence: `tests/conftest.py` does not import every model module, and `test_client_store.py` itself only imports `shell.adapters.postgres.client`. Running the full suite together reliably registers every model (each new feature's own HTTP test file transitively imports `shell.http.app`, which imports all routers/models), but running `tests/test_client_store.py` in isolation could miss a table defined in a module nothing else in that invocation imports -- the invariant would pass vacuously despite a real gap.

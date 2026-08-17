@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import logging
 import time
+from uuid import UUID
 
 import argon2
 from argon2.exceptions import Argon2Error, InvalidHashError
@@ -31,6 +32,7 @@ __all__ = [
     "SESSION_COOKIE_NAME",
     "SESSION_MAX_AGE_SECONDS",
     "AuthMiddleware",
+    "log_client_deleted",
     "log_failed_login_attempt",
     "sign_session",
     "verify_password",
@@ -120,6 +122,17 @@ def log_failed_login_attempt() -> None:
     no-secrets-in-logs rule (epic-1-context.md) starts being honored here.
     """
     _logger.warning("failed login attempt")
+
+
+def log_client_deleted(client_id: UUID) -> None:
+    """Story 2.8's deletion log line -- carries the Client's UUID and nothing
+    else, mirroring :func:`log_failed_login_attempt`'s bare-call shape.
+
+    Only the id is interpolated -- never a name or birth data: this project's
+    no-secrets-in-logs rule (epic-1-context.md) applies here exactly as it
+    does to a failed login attempt.
+    """
+    _logger.info("client deleted: %s", client_id)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

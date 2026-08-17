@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Delete Client — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>Delete Client</h1>
+      {% if error %}
+      <p role="alert">{{ error }}</p>
+      {% endif %}
+      <p role="alert">
+        {% if has_superseded_chart -%}
+        This will permanently delete this Client and its Natal Chart, including the superseded
+        chart kept from an earlier correction.
+        {%- else -%}
+        This will permanently delete this Client and its Natal Chart.
+        {%- endif %}
+        This cannot be undone.
+      </p>
+      <form method="post" action="/clients/{{ client_id }}/delete">
+        <input type="hidden" name="confirmed" value="1" />
+        <button type="submit">Confirm delete</button>
+      </form>
+    </main>
+  </body>
+</html>
