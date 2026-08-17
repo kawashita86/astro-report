@@ -83,6 +83,7 @@ def create_app(settings: Settings) -> FastAPI:
     # once `get_session` (defined above) already exists in this module's
     # namespace -- guaranteed by the time `create_app()` is actually called,
     # never by the time this module merely starts executing.
+    from shell.http.routes.chart import router as chart_router
     from shell.http.routes.clients import router as clients_router
 
     application = FastAPI(
@@ -100,6 +101,7 @@ def create_app(settings: Settings) -> FastAPI:
     application.state.ephemeris_identity = ephemeris_identity
     application.add_middleware(AuthMiddleware)
     application.include_router(clients_router)
+    application.include_router(chart_router)
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
