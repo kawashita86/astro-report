@@ -49,7 +49,10 @@ def chart_wheel_view(
         raise HTTPException(status_code=404)
 
     stored_chart = session.exec(
-        select(StoredNatalChart).where(StoredNatalChart.client_id == client_id)
+        select(StoredNatalChart).where(
+            StoredNatalChart.client_id == client_id,
+            StoredNatalChart.superseded_at.is_(None),
+        )
     ).first()
     if stored_chart is None:
         raise HTTPException(status_code=404)

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Correct Client — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>Correct Client</h1>
+      {% if error %}
+      <p role="alert">{{ error }}</p>
+      {% endif %}
+
+      {% if warning %}
+      <p role="alert">
+        Applying this correction will supersede the current chart. The previous chart is kept,
+        marked superseded, and stays queryable -- but any work already generated against it may no
+        longer match. Confirm to apply.
+      </p>
+      <form method="post" action="/clients/{{ client_id }}/edit">
+        <input type="hidden" name="name" value="{{ form.name or '' }}" />
+        <input type="hidden" name="birth_date" value="{{ form.birth_date or '' }}" />
+        <input type="hidden" name="birth_time" value="{{ form.birth_time or '' }}" />
+        <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
+        {% if form.candidate %}
+        <input type="hidden" name="candidate" value="{{ form.candidate }}" />
+        {% endif %}
+        <input type="hidden" name="confirmed" value="1" />
+        <button type="submit">Confirm and apply</button>
+      </form>
+      {% else %}
+      <form method="post" action="/clients/{{ client_id }}/edit">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required value="{{ form.name or '' }}" />
+
+        <label for="birth_date">Birth date</label>
+        <input
+          type="date"
+          id="birth_date"
+          name="birth_date"
+          required
+          value="{{ form.birth_date or '' }}"
+        />
+
+        <label for="birth_time">Birth time</label>
+        <input
+          type="time"
+          id="birth_time"
+          name="birth_time"
+          required
+          value="{{ form.birth_time or '' }}"
+        />
+
+        {% if candidates %}
+        <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
+        <fieldset>
+          <legend>More than one place matched "{{ form.birthplace or '' }}" — choose one</legend>
+          {% for candidate in candidates %}
+          <label>
+            <input type="radio" name="candidate" value="{{ candidate.value }}" required />
+            {{ candidate.display_name }}
+          </label>
+          {% endfor %}
+        </fieldset>
+        {% else %}
+        <label for="birthplace">Birthplace</label>
+        <input
+          type="text"
+          id="birthplace"
+          name="birthplace"
+          required
+          value="{{ form.birthplace or '' }}"
+        />
+        <p>Birthplace is never prefilled -- retype it, even to reconfirm the same place.</p>
+        {% endif %}
+
+        <button type="submit">Review correction</button>
+      </form>
+      {% endif %}
+    </main>
+  </body>
+</html>

@@ -141,3 +141,35 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-see-the-chart-wheel-and-check-it-against-astro-com.md`
   summary: `GET /clients/{client_id}/chart`'s `StoredNatalChart` lookup takes `.first()` with no ordering, which will become ambiguous once a Client can have more than one stored chart.
   evidence: Surfaced by edge-case-hunter and blind-hunter review of Story 2.6's diff. Today `create_client_with_chart()` is the only writer and runs exactly once per Client, so exactly one row ever exists and `.first()` is harmless. Story 2.7 ("Correct birth data, and know what it invalidates") introduces superseded charts retained alongside the current one for the same `client_id` — at that point this route must pick the non-superseded chart explicitly (or order by recency) rather than an arbitrary row.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
+  summary: The "at most one current (`superseded_at IS NULL`) chart per Client" invariant is enforced only in application code, with no DB-level constraint and no handling if it's ever violated.
+  evidence: Surfaced by blind-hunter, edge-case-hunter and verification-gap review of Story 2.7's diff. `correct_client_and_chart()`'s `select(...).where(superseded_at.is_(None)).one()` raises an unhandled `NoResultFound`/`MultipleResultsFound` (bare 500) if the invariant is ever broken, and `chart.py`'s `.first()` on the same predicate would silently serve an arbitrary chart instead. Two concurrent correction requests for the same Client (no `SELECT ... FOR UPDATE` or unique partial index on `natal_chart(client_id) WHERE superseded_at IS NULL`) could each read the same "current" row and both commit, leaving two current rows. Low real-world likelihood for this single-operator tool, and fixing it needs a Postgres-specific partial unique index that can't be verified against a real Postgres instance in this environment (no local Postgres was reachable during this story's implementation) — worth a deliberate follow-up rather than an unverified patch.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
+  summary: A superseded `StoredNatalChart` row keeps no snapshot of the birth_date/birth_time/birthplace that produced it, since `correct_client_and_chart()` overwrites those fields on the `Client` row in place.
+  evidence: Surfaced by blind-hunter review of Story 2.7's diff. The epic's AC only requires the superseded chart row itself to "remain readable and stay associated with" whatever was generated against it — satisfied here — but once a correction lands, there is no way to recover *what birth data* produced the superseded chart from the DB alone (only the current `Client` row's values are stored). Matters if this project ever needs to explain "why does this old chart differ from the current one."
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
+  summary: A correction has no audit trail (who/when/why) beyond the new chart row's implicit `superseded_at` timestamp on the old one.
+  evidence: Surfaced by blind-hunter review of Story 2.7's diff. Low value today (single-operator tool, "who" is always Francesco), but "why a correction was made" is unrecoverable, and would matter if this tool is ever used by more than one operator.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
+  summary: The correction warning screen shows only the proposed new values, not a diff against the Client's current stored values.
+  evidence: Surfaced by blind-hunter review of Story 2.7's diff. The AC requires warning that prior Reports were generated against the previous chart, which the warning text does — but a reviewer confirming a correction currently has no side-by-side to check exactly which fields are changing before applying it.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
+  summary: No route or view lets Francesco see a Client's correction history; superseded chart rows are retained but only reachable via direct DB access.
+  evidence: Surfaced by blind-hunter review of Story 2.7's diff. The epic AC only requires superseded charts to stay queryable, which they do — but nothing in the app currently queries or displays them.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
+  summary: The correction's `confirmed=1` gate isn't bound to a specific prior warning response (no token/nonce), so a request could submit `confirmed=1` on its very first POST and skip ever seeing the rendered warning.
+  evidence: Surfaced by blind-hunter review of Story 2.7's diff. Low risk today — this is a single-operator, authenticated-only tool, not a multi-party workflow — but worth hardening if this route is ever exposed to more than one trusted operator.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
+  summary: `geocoder.resolve()`/`resolve_candidate()` or `compute_natal_chart()` raising an exception outside the explicitly caught types (`PlaceResolutionError`, `ValueError`, `EphemerisIntegrityError`) surfaces as a bare 500 rather than a rendered error.
+  evidence: Surfaced by edge-case-hunter review of Story 2.7's diff. Not caused by this story: `shell/http/routes/clients.py`'s new `/clients/{id}/edit` POST handler is a field-for-field mirror of the pre-existing `POST /clients` create handler's exception handling, confirmed by verification-gap review — the same gap already exists in Story 2.3's create route.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-correct-birth-data-and-know-what-it-invalidates.md`
+  summary: `POST /clients/{client_id}/edit` has no CSRF protection beyond cookie-based session auth.
+  evidence: Surfaced by blind-hunter review of Story 2.7's diff. Not caused by this story: identical to the pre-existing `POST /clients` create route, which has never had CSRF protection either.
