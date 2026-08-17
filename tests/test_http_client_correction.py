@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
@@ -26,20 +27,24 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from core.errors import EphemerisIntegrityError, PlaceResolutionError
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.place import PlaceCandidate, ResolvedPlace
+from shell.adapters.nominatim.geocoder import NominatimGeocoder
 from shell.adapters.postgres.client import Client, StoredNatalChart, create_client_with_chart
+from shell.adapters.postgres.place_cache import lookup_cached_place
 from shell.config import Environment, Settings
 from shell.http.app import create_app, get_session
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
 from shell.http.routes import clients as clients_module
 from shell.http.routes.clients import get_geocoder
+from shell.ports.geocoder import Geocoder
 
 AUTH_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$hQD4AS+0CkX36kCpbKWmRg$"
@@ -182,13 +187,25 @@ class _FakeGeocoder:
 
 
 @pytest.fixture
-def db_session() -> Session:
+def engine() -> Engine:
     # `check_same_thread=False` + `StaticPool`: `TestClient` dispatches the
-    # ASGI app on its own worker thread, distinct from this fixture's thread.
-    engine = create_engine(
+    # ASGI app on its own worker thread, distinct from this fixture's thread,
+    # and (per the `client` fixture below) each simulated request now opens
+    # its own fresh `Session` against this engine, mirroring production's
+    # `get_session` exactly -- `StaticPool` keeps every one of those sessions
+    # on the same single in-memory SQLite connection rather than each seeing
+    # an empty database.
+    built = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
-    SQLModel.metadata.create_all(engine)
+    SQLModel.metadata.create_all(built)
+    return built
+
+
+@pytest.fixture
+def db_session(engine: Engine) -> Iterator[Session]:
+    """A `Session` for this test's own seeding/assertions -- never the
+    session a simulated HTTP request runs on (see `client` below)."""
     with Session(engine) as session:
         yield session
 
@@ -199,8 +216,20 @@ def app_instance() -> FastAPI:
 
 
 @pytest.fixture
-def client(app_instance: FastAPI, db_session: Session) -> TestClient:
-    app_instance.dependency_overrides[get_session] = lambda: db_session
+def client(app_instance: FastAPI, engine: Engine) -> TestClient:
+    """Overrides `get_session` to open and close a fresh `Session(engine)`
+    per simulated request, matching production's own per-request lifecycle
+    (`shell/http/app.py`'s `get_session`) rather than sharing one
+    never-closed session across every request in a test -- the gap the
+    retro's action item 2 named as what let the PLACE_CACHE rollback bug
+    ship undetected.
+    """
+
+    def _get_session() -> Iterator[Session]:
+        with Session(engine) as session:
+            yield session
+
+    app_instance.dependency_overrides[get_session] = _get_session
     return TestClient(app_instance)
 
 
@@ -223,6 +252,60 @@ def fake_chart_computation(monkeypatch: pytest.MonkeyPatch) -> NatalChart:
 
 def _use_geocoder(app_instance: FastAPI, geocoder: _FakeGeocoder) -> None:
     app_instance.dependency_overrides[get_geocoder] = lambda: geocoder
+
+
+@dataclass
+class _FakeLocation:
+    """Mirrors `tests/test_geocoder_nominatim.py`'s own class of the same
+    name -- not imported across test files, per that file's own docstring
+    convention."""
+
+    address: str
+    latitude: float
+    longitude: float
+
+
+class _FakeGeolocator:
+    """Mirrors `tests/test_geocoder_nominatim.py`'s own class of the same
+    name: records every call so "the geocoder was asked exactly once" is
+    provable rather than assumed."""
+
+    def __init__(self, results: list[_FakeLocation] | None = None) -> None:
+        self._results = results
+        self.calls: list[str] = []
+
+    def geocode(self, query: str, exactly_one: bool) -> list[_FakeLocation] | None:
+        self.calls.append(query)
+        return self._results
+
+
+class _FakeTimezoneFinder:
+    """Mirrors `tests/test_geocoder_nominatim.py`'s own class of the same
+    name."""
+
+    def __init__(self, zone: str | None = "Europe/Rome") -> None:
+        self._zone = zone
+
+    def timezone_at(self, *, lat: float, lng: float) -> str | None:
+        return self._zone
+
+
+def _use_real_geocoder(
+    app_instance: FastAPI, geolocator: _FakeGeolocator, timezone_finder: _FakeTimezoneFinder
+) -> None:
+    """Overrides `get_geocoder` with a real `NominatimGeocoder` (fake
+    `geolocator`/`timezone_finder`, no network) bound to the *active
+    per-request* session via `Depends(get_session)` -- not a session
+    captured once at override time -- so this exercises the same
+    request-scoped session the route's own `PLACE_CACHE` write goes through,
+    mirroring `get_geocoder`'s own production definition (`shell/http/routes/
+    clients.py`).
+    """
+
+    def _get_real_geocoder(session: Session = Depends(get_session)) -> Geocoder:
+        return NominatimGeocoder(session, geolocator=geolocator, timezone_finder=timezone_finder)
+
+    app_instance.dependency_overrides[get_geocoder] = _get_real_geocoder
 
 
 def _seed_client_with_chart(
@@ -484,6 +567,82 @@ def test_unchanged_birthplace_text_resolves_again_on_confirm_and_the_correction_
     assert len(geocoder.resolve_calls) == 2
     assert all(call[0] == "Fort Worth, TX" for call in geocoder.resolve_calls)
     assert len(_charts_for(db_session, seeded.id)) == 2
+
+
+# --- Regression: the warning step's PLACE_CACHE write survives (epic-2 retro,
+# action items 1-2) ---------------------------------------------------------------------------
+
+
+def test_a_fresh_places_cache_write_from_the_warning_step_survives_and_confirm_gets_a_cache_hit(
+    authenticated_client: TestClient,
+    app_instance: FastAPI,
+    db_session: Session,
+    fake_chart_computation: NatalChart,
+) -> None:
+    """Proves the fix for the retro's verified defect: `correct_client`'s
+    warning branch now commits its session before returning, so a genuinely
+    new place's `PLACE_CACHE` write-through (`NominatimGeocoder.resolve()`)
+    is durable independent of whether the correction is ever confirmed --
+    and the confirming resubmission then gets an actual cache hit, matching
+    the route's own "PLACE_CACHE absorbs a repeat lookup" docstring claim.
+    Uses the real `NominatimGeocoder` (fake geolocator/timezone_finder, no
+    network) through `get_geocoder`, bound to each request's own fresh
+    per-request session (the `client` fixture above), so this is
+    structurally capable of catching the rollback the old shared-session
+    fixture could not.
+    """
+    seeded = _seed_client_with_chart(db_session, app_instance)
+    geolocator = _FakeGeolocator([_FakeLocation("Berlin, Germany", 52.52, 13.405)])
+    timezone_finder = _FakeTimezoneFinder(zone="Europe/Berlin")
+    _use_real_geocoder(app_instance, geolocator, timezone_finder)
+
+    form = {**_CORRECTION_FORM, "birthplace": "Berlin, Germany"}
+    warning_response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=form)
+
+    assert warning_response.status_code == 200
+    assert "supersede" in warning_response.text.lower()
+    assert len(geolocator.calls) == 1
+    assert lookup_cached_place(db_session, "Berlin, Germany") is not None
+
+    confirm_form = {**form, "confirmed": "1"}
+    confirm_response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=confirm_form)
+
+    assert confirm_response.status_code == 200, confirm_response.text
+    assert len(geolocator.calls) == 1, "the confirm step must be served from PLACE_CACHE"
+
+
+def test_a_fresh_places_cache_write_survives_a_chart_computation_failure_on_the_warning_step(
+    authenticated_client: TestClient,
+    app_instance: FastAPI,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Covers the Spec Change Log's loopback finding: a genuinely new
+    place's `PLACE_CACHE` write must survive not only the warning branch's
+    own early return, but also a `compute_natal_chart()` failure that
+    returns 422 *before* the warning branch is ever reached. Mirrors
+    `test_a_chart_computation_failure_is_refused_and_the_old_chart_stays_
+    current`'s monkeypatch style, but with the real `NominatimGeocoder`
+    (fake geolocator/timezone_finder, no network) instead of the fake
+    `Geocoder`, since the fake never touches `PLACE_CACHE` and so could not
+    have caught this.
+    """
+    seeded = _seed_client_with_chart(db_session, app_instance)
+    geolocator = _FakeGeolocator([_FakeLocation("Tokyo, Japan", 35.6762, 139.6503)])
+    timezone_finder = _FakeTimezoneFinder(zone="Asia/Tokyo")
+    _use_real_geocoder(app_instance, geolocator, timezone_finder)
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise EphemerisIntegrityError("simulated ephemeris failure")
+
+    monkeypatch.setattr(clients_module, "compute_natal_chart", _raise)
+
+    form = {**_CORRECTION_FORM, "birthplace": "Tokyo, Japan"}
+    response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=form)
+
+    assert response.status_code == 422
+    assert "simulated ephemeris failure" in response.text
+    assert lookup_cached_place(db_session, "Tokyo, Japan") is not None
 
 
 # --- AC: no correction ever submitted => no second chart row --------------------------------

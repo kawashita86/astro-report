@@ -464,6 +464,21 @@ async def correct_client(
             form=fields,
         )
 
+    # Commit right after a successful resolve (via `resolve()` or
+    # `resolve_candidate()`) and before `compute_natal_chart()` is even
+    # attempted, so a fresh place's PLACE_CACHE write-through (nested
+    # transaction, `store_resolved_place()`) survives this request's
+    # session closing -- `get_session`'s own docstring: closing a session
+    # without an explicit commit rolls back any pending work, including a
+    # nested PLACE_CACHE write. This covers every early-return path between
+    # here and the confirm gate uniformly (a `compute_natal_chart()`
+    # failure below, or the warning-branch return further down), not only
+    # the warning branch. Nothing else is pending on this session at this
+    # point (no Client/Chart write happens before the confirm gate), so
+    # this commit only ever durably persists that cache write, never a
+    # partial correction.
+    session.commit()
+
     birth_instant_utc = (birth_local_time - resolved.utc_offset).replace(tzinfo=UTC)
 
     computation_config = request.app.state.computation_config
