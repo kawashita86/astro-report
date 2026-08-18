@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-17-2026 00:00
+last_updated: 08-18-2026 12:00
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -56,8 +56,8 @@ development_status:
   2-8-delete-a-client-and-everything-derived-from-them: done
   epic-2-retrospective: done
 
-  epic-3: backlog
-  3-1-find-every-transit-to-natal-aspect-and-the-exact-moment-it-p: backlog
+  epic-3: in-progress
+  3-1-find-every-transit-to-natal-aspect-and-the-exact-moment-it-p: review
   3-2-date-every-station-and-know-what-is-standing-retrograde: backlog
   3-3-detect-every-crossing-of-a-natal-house-cusp: backlog
   3-4-locate-the-month-s-new-and-full-moons: backlog

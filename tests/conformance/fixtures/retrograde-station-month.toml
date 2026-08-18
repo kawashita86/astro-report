@@ -3,6 +3,7 @@ name = "retrograde-station-month"
 adversarial_case = "a calendar month containing a planetary station (direct-to-retrograde turn)"
 source = "December 2022: Mercury turned retrograde partway through the month (the widely-reported Dec 2022 - Jan 2023 Mercury retrograde cycle). Rather than trust a third-party 'exact station time' claim, the station is bracketed directly from astro.com's own ephemeris: Mercury is still moving direct on 2022-12-28 (24 Sagittarius 11', up from 21 Sagittarius 03' on 2022-12-01) and has reversed to retrograde motion by 2022-12-31 (24 Sagittarius 07', astro.com's own 'r' marker present) -- the station itself falls inside that three-day window. Transit snapshot (all bodies except the Moon) computed via astro.com's 'Natal chart and transits' tool at 2022-12-01 00:00 UT against the near-midnight-birth.toml natal chart as anchor. Logged in against an Astro.com account on 2026-08-15."
 note = "The station date is recorded as a bracketing range (last-seen-direct / first-seen-retrograde), not a fabricated exact instant -- that is the honest precision this transcription method actually supports. A future computation is expected to report an exact station moment inside this range, not equal to either bracket endpoint."
+correction_2026_08_18 = "mars and jupiter's transit_positions longitudes were each transcribed one zodiac sign short (mars 48.8833 -> 78.8833, jupiter 28.8833 -> 358.8833): Story 3.1's real find_transit_aspects() computation independently placed both bodies a full sign later (matching the well-documented real events that Jupiter was transiting late Pisces, not Aries, and Mars was retrograde in Gemini, not Taurus, in December 2022), while the other seven bodies' longitudes already matched within the runner's existing noise band. expected.transit_events (absent until now) is newly derived from the corrected positions above, using this project's own orb rules -- the same method the other two month fixtures already document."
 
 [birth_data]
 anchor_natal_fixture = "near-midnight-birth"
@@ -39,12 +40,12 @@ longitude = "258.5000"
 
 [[expected.transit_positions]]
 name = "mars"
-longitude = "48.8833"
+longitude = "78.8833"
 retrograde = true
 
 [[expected.transit_positions]]
 name = "jupiter"
-longitude = "28.8833"
+longitude = "358.8833"
 
 [[expected.transit_positions]]
 name = "saturn"
@@ -62,3 +63,50 @@ longitude = "352.6500"
 [[expected.transit_positions]]
 name = "pluto"
 longitude = "296.7833"
+
+# Transit-to-natal aspects at the snapshot moment, derived from the
+# (corrected) positions above using this project's own orb rules
+# (data/computation.toml: transit orb 2.0 degrees, fast+slow bodies per
+# FR-9, excluding the transiting Moon) -- see correction_2026_08_18.
+
+[[expected.transit_events]]
+transiting = "sun"
+natal = "moon"
+aspect = "opposition"
+orb = "1.7169"
+
+[[expected.transit_events]]
+transiting = "jupiter"
+natal = "mercury"
+aspect = "square"
+orb = "0.1498"
+
+[[expected.transit_events]]
+transiting = "jupiter"
+natal = "uranus"
+aspect = "sextile"
+orb = "0.9408"
+
+[[expected.transit_events]]
+transiting = "jupiter"
+natal = "neptune"
+aspect = "conjunction"
+orb = "0.6267"
+
+[[expected.transit_events]]
+transiting = "neptune"
+natal = "jupiter"
+aspect = "trine"
+orb = "1.3250"
+
+[[expected.transit_events]]
+transiting = "pluto"
+natal = "saturn"
+aspect = "sextile"
+orb = "0.6014"
+
+[[expected.transit_events]]
+transiting = "pluto"
+natal = "uranus"
+aspect = "trine"
+orb = "1.1592"

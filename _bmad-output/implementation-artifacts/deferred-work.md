@@ -193,3 +193,15 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-retro-place-cache-warn-confirm-fix.md`
   summary: No test exercises two back-to-back unconfirmed warning-step submissions for the same not-yet-cached place (which would call `store_resolved_place()` twice for the same normalized query text).
   evidence: Surfaced by blind-hunter review of this fix's diff. `store_resolved_place()`'s own docstring states it "silently no-ops on a duplicate insert" via its nested `SAVEPOINT` + caught `IntegrityError` -- the underlying mechanism is already designed to be safe under this scenario -- but nothing exercises that path end-to-end through `correct_client`'s now-earlier commit point to confirm a second warning submission for the same new place doesn't raise or behave unexpectedly.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-1-find-every-transit-to-natal-aspect-and-the-exact-moment-it-perfects.md`
+  summary: The coarse-grid-plus-bisection scan's "no orb window is ever hidden inside a grid step" correctness guarantee is asserted only in `core/transits/aspects.py`'s module docstring, not enforced or tested against future config changes (a tighter transit orb, or a faster body added to `config.bodies`).
+  evidence: `_GRID_STEP` (6 hours) and `_BISECTION_ITERATIONS` (40) are hardcoded constants sized against today's fixed body set and orb range (Mercury's ~2.2 deg/day, orb 1.5-2.5 deg). Nothing recomputes or asserts this margin against `ComputationConfig` at call time, so a future data/computation.toml edit widening the permitted body/orb ranges could silently violate the assumption with no test catching it.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-1-find-every-transit-to-natal-aspect-and-the-exact-moment-it-perfects.md`
+  summary: `TransitAspectEvent` carries no orb/degree-of-separation value, only timestamps, so any consumer wanting "how close is this aspect" (e.g. a future Report Payload or day-list renderer) must independently recompute it via the low-level position helpers.
+  evidence: `tests/test_conformance.py`'s `_transit_events_for_month_fixture()` already has to do exactly this recomputation to check fixture conformance, duplicating logic that arguably belongs on the type -- unlike the natal `Aspect` type, which carries its own `orb` field.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-1-find-every-transit-to-natal-aspect-and-the-exact-moment-it-perfects.md`
+  summary: The `correction_YYYY_MM_DD` free-form-prose field this story added (again) to two conformance fixtures has no structural mechanism to keep a correction consistent with the fixture's own `source`/`note` fields over time.
+  evidence: Two fixtures now each carry a `correction_2026_08_18` key documenting a transcription fix, following the precedent `correction_2026_08_16` already set in `near-midnight-birth.toml`. As more corrections accumulate across fixtures there is no validation that a correction's claims don't drift out of sync with the original `source` prose it's amending.

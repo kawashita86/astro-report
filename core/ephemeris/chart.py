@@ -2,7 +2,8 @@
 
 Calls ``pyswisseph`` directly -- no Kerykeion -- for planetary positions,
 Placidus cusps and natal Aspects. Purity (AD-1): no I/O, clock, network or
-randomness; imports only ``swisseph`` and ``core/types/``. This module
+randomness; imports only ``swisseph``, ``core/ephemeris/positions.py``'s
+shared low-level helpers (Story 3.1) and ``core/types/``. This module
 assumes ``core.ephemeris.identity.verify_ephemeris_identity()`` has already
 run (normally at shell import time, see ``shell/http/app.py``) and does not
 call ``swe.set_ephe_path()`` or re-verify the vendored files itself.
@@ -27,7 +28,16 @@ from decimal import Decimal
 
 import swisseph as swe
 
-from core.errors import EphemerisIntegrityError
+from core.ephemeris.positions import (
+    FULL_CIRCLE,
+    HALF_CIRCLE,
+    QUANTUM,
+    _angular_separation,
+    _calc_body,
+    _julian_day_ut,
+    _normalize_decimal,
+    _to_normalized_decimal,
+)
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.computation import ComputationConfig
 
@@ -81,16 +91,8 @@ _ASPECTS: tuple[tuple[str, Decimal], ...] = (
 )
 
 _DEGREES_PER_SIGN = Decimal(30)
-_FULL_CIRCLE = Decimal(360)
-_HALF_CIRCLE = Decimal(180)
-_QUANTUM = Decimal("0.0001")
 _ZERO_OFFSET = timedelta(0)
 
-#: Swiss Ephemeris, with daily motion so retrograde/applying can be derived.
-#: The returned flags are checked against ``FLG_SWIEPH`` below on every call
-#: -- a Moshier fallback is never silently accepted (mirrors the same rule
-#: already enforced at boot by ``core/ephemeris/identity.py``).
-_CALC_FLAGS = swe.FLG_SWIEPH | swe.FLG_SPEED
 _HOUSE_SYSTEM = b"P"
 
 
@@ -137,7 +139,7 @@ def compute_natal_chart(
         for name, _body_id in _PLANET_BODIES
     ]
     true_node_longitude, true_node_speed = positions["true_node"]
-    south_node_longitude = _normalize_decimal(true_node_longitude + _HALF_CIRCLE)
+    south_node_longitude = _normalize_decimal(true_node_longitude + HALF_CIRCLE)
     planets.append(
         _planet_position("south_node", south_node_longitude, true_node_speed, cusp_longitudes)
     )
@@ -162,64 +164,9 @@ def _require_utc(instant: datetime) -> None:
         )
 
 
-def _julian_day_ut(instant: datetime) -> float:
-    seconds = instant.second + instant.microsecond / 1_000_000
-    _jd_et, jd_ut = swe.utc_to_jd(
-        instant.year,
-        instant.month,
-        instant.day,
-        instant.hour,
-        instant.minute,
-        seconds,
-        swe.GREG_CAL,
-    )
-    return jd_ut
-
-
-def _calc_body(jd_ut: float, body_id: int) -> tuple[Decimal, Decimal]:
-    xx, retflag = swe.calc_ut(jd_ut, body_id, _CALC_FLAGS)
-    # A negative retflag is pyswisseph's own error signal. Checked before the
-    # bitwise SEFLG_SWIEPH test below: in two's-complement, a negative int
-    # has high bits set, so `retflag & swe.FLG_SWIEPH` can be truthy even on
-    # error and would otherwise let a failed computation through unnoticed.
-    if retflag < 0 or not retflag & swe.FLG_SWIEPH:
-        raise EphemerisIntegrityError(
-            f"Refusing to compute: body {body_id} was not computed via the Swiss "
-            f"Ephemeris (calc_ut returned flags {retflag}); "
-            "a Moshier fallback is never acceptable."
-        )
-    longitude = _to_normalized_decimal(xx[0])
-    speed = Decimal(str(xx[3]))
-    return longitude, speed
-
-
-def _to_normalized_decimal(value: float) -> Decimal:
-    """``Decimal(str(value))`` -- never ``Decimal(value)`` on the raw float,
-    which would compound binary-float imprecision rather than merely
-    preserving it (mirrors ``shell/adapters/nominatim/geocoder.py``'s
-    ``_to_decimal()``) -- then normalized into ``[0, 360)`` and quantized to
-    4 decimal places, matching the precision Astro.com's values were
-    transcribed at.
-    """
-    return _normalize_decimal(Decimal(str(value)))
-
-
-def _normalize_decimal(value: Decimal) -> Decimal:
-    normalized = value % _FULL_CIRCLE
-    if normalized < 0:
-        normalized += _FULL_CIRCLE
-    quantized = normalized.quantize(_QUANTUM)
-    # Quantizing can round a value just under 360 up to exactly 360.0000
-    # (e.g. 359.99996), which would violate the [0, 360) invariant every
-    # caller relies on (house lookup, sign index). 360 degrees is 0 degrees.
-    if quantized >= _FULL_CIRCLE:
-        quantized -= _FULL_CIRCLE
-    return quantized
-
-
 def _sign_and_degree(longitude: Decimal) -> tuple[str, Decimal]:
     sign_index = int(longitude // _DEGREES_PER_SIGN)
-    degree = (longitude - sign_index * _DEGREES_PER_SIGN).quantize(_QUANTUM)
+    degree = (longitude - sign_index * _DEGREES_PER_SIGN).quantize(QUANTUM)
     return _ZODIAC_SIGNS[sign_index], degree
 
 
@@ -256,20 +203,12 @@ def _planet_position(
     )
 
 
-def _angular_separation(lon1: Decimal, lon2: Decimal) -> Decimal:
-    """The shortest angular distance between two longitudes, in ``[0, 180]``."""
-    diff = abs(lon1 - lon2) % _FULL_CIRCLE
-    if diff > _HALF_CIRCLE:
-        diff = _FULL_CIRCLE - diff
-    return diff
-
-
 def _match_aspect(lon1: Decimal, lon2: Decimal, orb_limit: Decimal) -> tuple[str, Decimal] | None:
     separation = _angular_separation(lon1, lon2)
     for aspect_name, target_degrees in _ASPECTS:
         orb = abs(separation - target_degrees)
         if orb <= orb_limit:
-            return aspect_name, orb.quantize(_QUANTUM)
+            return aspect_name, orb.quantize(QUANTUM)
     return None
 
 
@@ -286,9 +225,9 @@ def _is_applying(
     treated as applying by convention; it is never exercised by a
     conformance fixture either way.
     """
-    diff = (lon1 - lon2) % _FULL_CIRCLE
-    if diff > _HALF_CIRCLE:
-        diff -= _FULL_CIRCLE
+    diff = (lon1 - lon2) % FULL_CIRCLE
+    if diff > HALF_CIRCLE:
+        diff -= FULL_CIRCLE
     angle = abs(diff)
     relative_speed = speed1 - speed2
     rate_of_change = relative_speed if diff >= 0 else -relative_speed
