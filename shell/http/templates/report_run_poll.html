@@ -1,0 +1,27 @@
+{% if not request.headers.get("hx-request") %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Report run — astro-report</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  </head>
+  <body>
+    <main>
+      <h1>Report run — {{ run.month }}</h1>
+{% endif %}
+      <div
+        id="run-status"
+        hx-get="/report-runs/{{ run.id }}"
+        hx-trigger="every 2s"
+        hx-swap="outerHTML"
+      >
+        <p>Stage: {{ run.stage or "starting" }}</p>
+      </div>
+{% if not request.headers.get("hx-request") %}
+    </main>
+  </body>
+</html>
+{% endif %}

@@ -21,9 +21,10 @@ from sqlmodel import Field, Session, SQLModel, select
 from uuid6 import uuid7
 
 from core.ephemeris.identity import EphemerisIdentity
-from core.types.chart import NatalChart
+from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.computation import ComputationConfig
 from core.types.place import ResolvedPlace
+from shell.adapters.postgres.report_run import ReportRun
 
 __all__ = [
     "Client",
@@ -31,6 +32,7 @@ __all__ = [
     "correct_client_and_chart",
     "create_client_with_chart",
     "delete_client_and_derived",
+    "deserialize_natal_chart",
 ]
 
 #: The single source of truth for every table carrying a foreign key to
@@ -38,7 +40,7 @@ __all__ = [
 #: ``tests/test_client_store.py``'s cascade-invariant test read from this
 #: constant -- a table added here without joining the delete function below,
 #: or vice versa, is exactly the drift that invariant test exists to catch.
-_CLIENT_CASCADE_TABLES: frozenset[str] = frozenset({"natal_chart"})
+_CLIENT_CASCADE_TABLES: frozenset[str] = frozenset({"natal_chart", "report_run"})
 
 
 class Client(SQLModel, table=True):
@@ -108,6 +110,49 @@ def _json_safe(value: Any) -> Any:
 def _serialize(instance: Any) -> dict[str, Any]:
     assert is_dataclass(instance)
     return {key: _json_safe(value) for key, value in asdict(instance).items()}
+
+
+def deserialize_natal_chart(stored: StoredNatalChart) -> NatalChart:
+    """Reverse :func:`_serialize`'s ``Decimal``-to-``str`` JSON encoding back
+    into the frozen :mod:`core.types.chart` dataclasses (Story 3.5).
+
+    ``shell/runner/driver.py``'s ``drive()`` needs an already-computed chart
+    as a real :class:`NatalChart` -- the shape ``core/transits/*``'s four
+    scan functions take -- not the JSON rows ``StoredNatalChart`` persists it
+    as. ``stored.ascendant``/``stored.midheaven`` are already ``Decimal``
+    (they are their own typed columns, never JSON-encoded), so only the
+    ``planets``/``houses``/``aspects`` JSON lists need their ``Decimal``
+    fields converted back from ``str``.
+    """
+    return NatalChart(
+        ascendant=stored.ascendant,
+        midheaven=stored.midheaven,
+        planets=tuple(
+            PlanetPosition(
+                name=planet["name"],
+                longitude=Decimal(planet["longitude"]),
+                sign=planet["sign"],
+                degree=Decimal(planet["degree"]),
+                house=planet["house"],
+                retrograde=planet["retrograde"],
+            )
+            for planet in stored.planets
+        ),
+        houses=tuple(
+            HouseCusp(number=house["number"], longitude=Decimal(house["longitude"]))
+            for house in stored.houses
+        ),
+        aspects=tuple(
+            Aspect(
+                body1=aspect["body1"],
+                body2=aspect["body2"],
+                aspect=aspect["aspect"],
+                orb=Decimal(aspect["orb"]),
+                applying=aspect["applying"],
+            )
+            for aspect in stored.aspects
+        ),
+    )
 
 
 def create_client_with_chart(
@@ -214,16 +259,18 @@ def correct_client_and_chart(
 
 
 def delete_client_and_derived(session: Session, *, client: Client) -> None:
-    """Delete ``client`` and every row derived from it, in one flush (Story 2.8).
+    """Delete ``client`` and every row derived from it, in one flush (Story 2.8;
+    ``ReportRun`` joined the cascade in Story 3.5).
 
     Every ``StoredNatalChart`` row for ``client`` -- current and superseded --
-    is deleted first, then the ``Client`` row itself: children before parent,
-    matching how no foreign key in this codebase declares ``ondelete`` at the
-    schema level, so the cascade is explicit application code, not the
-    database's job. :data:`_CLIENT_CASCADE_TABLES` is the single source of
-    truth for which tables that first step must cover; the cascade-invariant
-    test in ``tests/test_client_store.py`` asserts it stays equal to every
-    table in ``SQLModel.metadata`` carrying a foreign key to ``client.id``.
+    and every ``ReportRun`` row for ``client`` are deleted first, then the
+    ``Client`` row itself: children before parent, matching how no foreign key
+    in this codebase declares ``ondelete`` at the schema level, so the cascade
+    is explicit application code, not the database's job.
+    :data:`_CLIENT_CASCADE_TABLES` is the single source of truth for which
+    tables that first step must cover; the cascade-invariant test in
+    ``tests/test_client_store.py`` asserts it stays equal to every table in
+    ``SQLModel.metadata`` carrying a foreign key to ``client.id``.
 
     This function only ``delete()``s and ``flush()``es -- it never commits or
     rolls back, exactly like :func:`create_client_with_chart` and
@@ -236,6 +283,10 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     ).all()
     for chart in charts:
         session.delete(chart)
+
+    runs = session.exec(select(ReportRun).where(ReportRun.client_id == client.id)).all()
+    for run in runs:
+        session.delete(run)
 
     session.delete(client)
 

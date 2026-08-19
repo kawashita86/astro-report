@@ -85,6 +85,7 @@ def create_app(settings: Settings) -> FastAPI:
     # never by the time this module merely starts executing.
     from shell.http.routes.chart import router as chart_router
     from shell.http.routes.clients import router as clients_router
+    from shell.http.routes.report_runs import router as report_runs_router
 
     application = FastAPI(
         title="astro-report",
@@ -102,6 +103,7 @@ def create_app(settings: Settings) -> FastAPI:
     application.add_middleware(AuthMiddleware)
     application.include_router(clients_router)
     application.include_router(chart_router)
+    application.include_router(report_runs_router)
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
