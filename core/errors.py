@@ -9,6 +9,7 @@ __all__ = [
     "EphemerisIntegrityError",
     "PlaceResolutionError",
     "PlaceResolutionStep",
+    "SectionsConfigError",
 ]
 
 #: The closed set of steps birthplace resolution can fail at -- a free-form
@@ -47,6 +48,22 @@ class ComputationConfigError(RuntimeError):
 
     Raised only at load time, from :mod:`shell.computation` -- mirrors how
     ``ConfigError`` and ``EphemerisIntegrityError`` already abort startup.
+    """
+
+
+class SectionsConfigError(RuntimeError):
+    """``data/sections.toml`` -- the declarative Section-to-Payload mapping
+    (Story 3.6, AD-13) -- cannot be trusted.
+
+    Raised when the file is missing, its TOML is malformed, it does not
+    contain exactly the six required Section keys, or a value it holds is
+    the wrong shape or names an unsupported ``house_bodies``/``aspect_bodies``
+    selector. There is no partial or best-guess ``SectionsConfig`` to proceed
+    with: the process refuses to start rather than assemble a Payload against
+    a mapping it cannot verify.
+
+    Raised only at load time, from :mod:`shell.sections` -- mirrors how
+    ``ComputationConfigError`` already aborts startup.
     """
 
 

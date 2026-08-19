@@ -1,0 +1,47 @@
+# The declarative Section-to-Payload mapping (Story 3.6, AD-13). Nothing in
+# `core/payload/assemble.py` branches per Section name -- one generic filter
+# reads each Section's spec below. To add or adjust a Section's filter, edit
+# this file only; no code change is needed.
+#
+# `version` is bumped by hand on every data edit. The file's content hash is
+# computed by the loader (`shell/sections.py`) from these raw bytes -- it is
+# not, and cannot be, a field stored here.
+#
+# `sections` must contain exactly these six keys, no more, no fewer:
+# energia_generale, amore, lavoro, denaro, benessere, consiglio_finale.
+
+version = 1
+
+[sections.energia_generale]
+# No single Domain Profile -- the overall picture across the angular houses.
+houses = [1, 4, 7, 10]
+house_bodies = "slow"
+aspect_natal_points = ["sun", "moon", "mercury", "venus", "mars"]
+aspect_bodies = "slow"
+retrogrades = true
+
+[sections.amore]
+domain_profile = "amore"
+houses = [5, 7]
+aspect_natal_points = ["venus", "mars"]
+
+[sections.lavoro]
+domain_profile = "lavoro"
+houses = [10, 6]
+aspect_natal_points = ["mercury", "mars", "saturn"]
+
+[sections.denaro]
+domain_profile = "denaro"
+houses = [2, 8]
+aspect_natal_points = ["jupiter", "saturn"]
+
+[sections.benessere]
+domain_profile = "benessere"
+houses = [1, 6]
+aspect_natal_points = ["mars", "saturn", "moon"]
+
+[sections.consiglio_finale]
+# "Against the overall transit picture" -- unfiltered: every computed event
+# for the month. Lunations already carry `natal_house`, satisfying "the
+# natal houses the month's Lunations fall in" without a separate filter.
+include_all_events = true

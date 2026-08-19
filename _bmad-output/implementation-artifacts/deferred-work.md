@@ -253,3 +253,23 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-5-start-a-month-s-computation-and-watch-it-finish.md`
   summary: No mutating POST route in the application (`/clients`, `/clients/{id}/edit`, `/clients/{id}/delete`, and now `/clients/{id}/report-runs`) carries CSRF protection -- authentication is session-cookie-only, the classic CSRF shape.
   evidence: Surfaced by blind-hunter review of this story's diff, but confirmed pre-existing: `shell/http/routes/clients.py`'s `create_client`/`correct_client`/`delete_client` already follow the identical session-cookie-plus-form-body pattern with no token check, predating this story. Grep for `csrf`/`CSRF` across `shell/` returns nothing.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-6-assemble-the-report-payload-each-section-needs.md`
+  summary: `data/sections.toml`'s `aspect_natal_points` values are validated only as "a list of strings" -- a typo like `"venuz"` loads without error and silently produces a filter that can never match, with no load-time warning.
+  evidence: Surfaced by blind-hunter review of this story's diff. Unlike `domain_profile`/`house_bodies`/`aspect_bodies`, which `shell/sections.py` checks against closed enums, `_read_optional_string_tuple` accepts any string. The shipped file's values are all correct today; this only bites a future hand-edit.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-6-assemble-the-report-payload-each-section-needs.md`
+  summary: `shell/sections.py::load_sections_config` never checks for stray extra top-level keys in `data/sections.toml` (only `[sections]`'s own keys and each `[sections.*]` table's keys are checked) -- an unrecognized top-level key is silently ignored.
+  evidence: Surfaced by blind-hunter review of this story's diff. The same gap exists in `shell/computation.py`, which this module deliberately mirrors per the story's Code Map -- fixing it only here would diverge from that precedent rather than close the gap consistently.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-6-assemble-the-report-payload-each-section-needs.md`
+  summary: `shell/sections.py::_read_table`'s error message (`"[{name}] is required."`) fires identically whether a table key is missing or present with the wrong type, misleading whoever is debugging a malformed `data/sections.toml`.
+  evidence: Surfaced by blind-hunter review of this story's diff. Inherited verbatim from `shell/computation.py`'s own `_read_table`, which has the identical ambiguity -- same reasoning as the sibling top-level-keys gap above: a shared fix belongs in the mirrored module, not a one-off deviation here.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-6-assemble-the-report-payload-each-section-needs.md`
+  summary: A Section can set `house_bodies`/`aspect_bodies` with no corresponding `houses`/`aspect_natal_points` key -- the loader accepts it, but at runtime the body selector becomes dead configuration (the empty `houses`/`aspect_natal_points` check short-circuits `_matches_ingress`/`_matches_aspect` to `False` before the body selector is ever consulted), with no load-time warning.
+  evidence: Surfaced by blind-hunter review of this story's diff. Harmless today (no Section in the shipped file does this), but a future hand-edit could set one field expecting it to matter and be silently wrong.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-6-assemble-the-report-payload-each-section-needs.md`
+  summary: A domain Section (`amore`/`lavoro`/`denaro`/`benessere`) with every filter field empty/false and `include_all_events=false` loads successfully and yields a `SectionPayload` carrying only its `profile` with every event list empty -- almost certainly a configuration mistake, but nothing flags it at load time.
+  evidence: Surfaced by blind-hunter review of this story's diff. `shell/sections.py` has no "at least one filter is active" check for a non-`include_all_events` Section. The shipped file's five domain-adjacent Sections are all correctly populated today; this only bites a future hand-edit that empties one by accident.
