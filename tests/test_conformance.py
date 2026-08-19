@@ -75,9 +75,10 @@ from core.ephemeris.chart import _ASPECTS, compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.ephemeris.positions import QUANTUM, _angular_separation, _calc_body, _julian_day_ut
 from core.transits.aspects import _TRANSIT_BODY_IDS, _natal_targets, find_transit_aspects
+from core.transits.ingresses import find_ingresses
 from core.transits.stations import find_stations
 from core.types.chart import NatalChart
-from core.types.transits import Station
+from core.types.transits import Ingress, Station
 from shell.computation import load_computation_config
 from tests.conformance.runner import (
     FIXTURES_DIR,
@@ -336,6 +337,17 @@ _IMPLEMENTED_MONTH_SCOPE = "transit_events"
 #: docstring).
 _STATIONS_KEY = "stations"
 
+#: A month fixture's ``expected.ingresses`` key -- excluded from
+#: ``"remainder"``'s own expected-dict slice (``_expected_for_scope``) the
+#: same way ``_STATIONS_KEY`` is: Story 3.3 checks it for real, just not
+#: through this module's generic ``compute_output_for()``/``compare()``
+#: scope machinery -- see
+#: ``test_ingresses_fall_within_conformance_fixture_brackets``, which
+#: mirrors ``test_stations_fall_within_conformance_fixture_brackets``
+#: exactly (a bracket comparison, not dict equality, since Astro.com
+#: publishes no exact ingress instant either).
+_INGRESSES_KEY = "ingresses"
+
 
 def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, Any]:
     """Compute the output a real chart/transit engine produces for
@@ -383,7 +395,7 @@ def _expected_for_scope(fixture: Fixture, scope: str | None) -> dict[str, Any]:
     return {
         key: value
         for key, value in fixture.expected.items()
-        if key not in (_IMPLEMENTED_MONTH_SCOPE, _STATIONS_KEY)
+        if key not in (_IMPLEMENTED_MONTH_SCOPE, _STATIONS_KEY, _INGRESSES_KEY)
     }
 
 
@@ -572,4 +584,68 @@ def test_stations_fall_within_conformance_fixture_brackets(fixture_path: Path) -
             f"{fixture.name}: body {body!r} longitude {station.longitude!r} is not within "
             f"{_STATION_LONGITUDE_TOLERANCE} degrees of either bracket longitude "
             f"({bracket_start_longitude!r}, {bracket_end_longitude!r})"
+        )
+
+
+# --- Story 3.3: find_ingresses() against the bracketed fixtures -----------------
+
+
+def _ingresses_for_month_fixture(fixture: Fixture) -> tuple[Ingress, ...]:
+    """``find_ingresses()``'s real Ingress records for ``fixture``'s month,
+    against the same real ``NatalChart`` its ``anchor_natal_fixture`` builds
+    (``_anchor_natal_chart``) -- mirrors ``_stations_for_month_fixture``."""
+    chart = _anchor_natal_chart(fixture)
+    month_start_utc, month_end_utc = _month_interval_utc(fixture)
+    return find_ingresses(chart, month_start_utc, month_end_utc, _COMPUTATION_CONFIG)
+
+
+def _ingress_bracket_utc(entry: dict[str, Any]) -> tuple[datetime, datetime]:
+    """``entry``'s ``bracket_start_date``/``bracket_end_date`` (``"YYYY-MM-DD"``
+    calendar dates, each read as that day's own 00:00 UTC) as a UTC instant
+    pair -- mirrors ``_station_bracket_utc``: the honest precision a
+    last-seen-in-house-A/first-seen-in-house-B transcription actually
+    supports (see the story's Ask First note), never a fabricated exact
+    third-party instant."""
+    start = datetime.fromisoformat(entry["bracket_start_date"]).replace(tzinfo=UTC)
+    end = datetime.fromisoformat(entry["bracket_end_date"]).replace(tzinfo=UTC)
+    return start, end
+
+
+@pytest.mark.parametrize("fixture_path", _month_fixture_params())
+def test_ingresses_fall_within_conformance_fixture_brackets(fixture_path: Path) -> None:
+    """Every ``expected.ingresses`` entry is matched to whichever computed
+    Ingress's own ``crossed_at`` falls inside *that entry's own* bracket
+    window -- body name alone is never enough (``find_ingresses()`` can
+    legitimately locate two crossings of the same cusp for the same body in
+    one month, exercised directly in ``tests/test_ingresses.py``), so it is
+    matched by body *and* house_departed *and* house_entered *and* falling
+    inside the bracket, mirroring
+    ``test_stations_fall_within_conformance_fixture_brackets``'s own shape."""
+    fixture = load_fixture(fixture_path)
+    computed_ingresses = _ingresses_for_month_fixture(fixture)
+
+    for entry in fixture.expected.get(_INGRESSES_KEY, []):
+        body = entry["body"]
+        house_departed = int(entry["house_departed"])
+        house_entered = int(entry["house_entered"])
+        bracket_start_utc, bracket_end_utc = _ingress_bracket_utc(entry)
+
+        matches = [
+            ingress
+            for ingress in computed_ingresses
+            if ingress.body == body
+            and ingress.house_departed == house_departed
+            and ingress.house_entered == house_entered
+            and bracket_start_utc < ingress.crossed_at < bracket_end_utc
+        ]
+        assert matches, (
+            f"{fixture.name}: expected an Ingress for body {body!r} "
+            f"(house {house_departed} -> {house_entered}) inside bracket "
+            f"({bracket_start_utc!r}, {bracket_end_utc!r}), but find_ingresses() computed "
+            f"none there (computed: {computed_ingresses!r})"
+        )
+        assert len(matches) == 1, (
+            f"{fixture.name}: expected exactly one computed Ingress for body {body!r} "
+            f"(house {house_departed} -> {house_entered}) inside bracket "
+            f"({bracket_start_utc!r}, {bracket_end_utc!r}), found {len(matches)}: {matches!r}"
         )

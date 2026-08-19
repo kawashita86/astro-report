@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-__all__ = ["Station", "StandingRetrograde", "TransitAspectEvent"]
+__all__ = ["Ingress", "Station", "StandingRetrograde", "TransitAspectEvent"]
 
 
 @dataclass(frozen=True)
@@ -90,3 +90,30 @@ class StandingRetrograde:
     body: str
     retrograde_start_utc: datetime
     retrograde_end_utc: datetime
+
+
+@dataclass(frozen=True)
+class Ingress:
+    """One crossing of a natal house cusp located within an analyzed month
+    (Story 3.3): the instant a transiting body's signed longitude offset
+    from one of the natal chart's twelve Placidus cusps changes sign,
+    bisected to sub-second precision by the same coarse-grid-plus-bisection
+    method ``core/transits/aspects.py``/``core/transits/stations.py`` use.
+
+    ``house_departed``/``house_entered`` are derived from the crossing's
+    direction, not stored ambiently: a direct crossing (offset - to +) exits
+    the house before the cusp and enters the cusp's own house; a retrograde
+    crossing (offset + to -) exits the cusp's own house and re-enters the
+    house before it. Unlike :class:`Station`, no ``longitude`` field is
+    carried -- the crossed cusp's longitude is already exact and known from
+    ``NatalChart.houses``, never re-derived per event.
+
+    A body re-crossing the same cusp later in the month (a retrograde loop)
+    produces a second, distinct Ingress -- never merged or deduplicated with
+    the first.
+    """
+
+    body: str
+    house_departed: int
+    house_entered: int
+    crossed_at: datetime

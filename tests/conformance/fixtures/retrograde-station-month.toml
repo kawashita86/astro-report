@@ -12,6 +12,14 @@ transit_snapshot_utc = "2022-12-01T00:00:00Z"
 
 [expected]
 
+[[expected.ingresses]]
+body = "mercury"
+house_departed = 3
+house_entered = 4
+bracket_start_date = "2022-12-09"
+bracket_end_date = "2022-12-10"
+source_2026_08_19 = "Bracketed directly from astro.com's own 'Natal chart and transits' tool against the near-midnight-birth.toml anchor chart (Case3 Midnight), the same method used for the Mercury station bracket above: transiting Mercury sits at 3 Capricorn 5' (273.0833 degrees) on 2022-12-09 00:00 UT, still short of house 4's cusp (273.2667 degrees, this fixture's own anchor chart), and has advanced to 4 Capricorn 33' (274.55 degrees) by 2022-12-10 00:00 UT, already past it -- the crossing itself falls inside that one-day window. Logged in against an Astro.com account on 2026-08-19."
+
 [[expected.stations]]
 body = "mercury"
 motion = "retrograde"
