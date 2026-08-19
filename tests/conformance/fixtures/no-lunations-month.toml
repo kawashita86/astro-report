@@ -2,8 +2,9 @@
 name = "no-lunations-month"
 adversarial_case = "a calendar month containing zero full moons of a kind (February is the only month short enough for this to happen)"
 source = "February 2018 had no full moon at all: the preceding full moon fell on 2018-01-31 and the next on 2018-03-01/02, so both January and March 2018 had two full moons each while February had none -- corroborated independently across king5.com, inforum.com, and Old Farmer's Almanac (astro-phile.com / almanac.com). This is the most recent such February before this fixture was written (the last prior instance was 2018 per almanac.com's tracking; the next isn't until 2037). Transit snapshot (all bodies except the Moon) computed via astro.com's 'Natal chart and transits' tool at 2018-02-01 00:00 UT against the near-midnight-birth.toml natal chart as anchor. Logged in against an Astro.com account on 2026-08-15."
-note = "expected.lunations is deliberately an empty list -- that emptiness IS the adversarial fact under test (a computation that always finds at least one full moon per month would wrongly report a nonempty list here). The transit snapshot is a single moment (month start, 00:00 UT), not a whole-month walk."
+note = "expected.lunations carries zero full_moon entries -- that absence IS the adversarial fact under test (a computation that always finds at least one full moon per month would wrongly report one here). It does carry one new_moon entry (see correction_2026_08_19): the adversarial claim under test was always about full moons specifically, not about the month having no Lunations at all. The transit snapshot is a single moment (month start, 00:00 UT), not a whole-month walk."
 correction_2026_08_18 = "mercury's transit_positions longitude was transcribed one zodiac sign ahead (330.6833 Pisces -> 300.6871 Aquarius), and jupiter's retrograde flag was a false positive (Jupiter's real 2018 retrograde ran March 8 - July 10; on 2018-02-01 it was still direct, decelerating toward that station): Story 3.1's real find_transit_aspects() computation caught both, the other eight bodies' longitudes already matching within the runner's existing noise band. expected.transit_events[1] (mercury's own transiting-to-natal match) is corrected accordingly -- from a self-consistent-but-wrong 'mercury sextile natal mercury' (only true under the mistranscribed position) to the real 'mercury sextile natal neptune' -- every other transit_events entry reproduces unchanged from the same derivation method against the seven already-correct positions."
+correction_2026_08_19 = "expected.lunations was deliberately an empty list, but that only ever accounted for this file's own adversarial claim (zero *full* moons in February 2018) -- February 2018 also had a real new moon, on 2018-02-15 at 21:05 UTC, independently corroborated by astropixels.com's canonical Six Millennium Catalog of Phases of the Moon and lunaf.com, omitted from the original transcription. Added below; Story 3.4's real find_lunations() computation reproduces it exactly."
 
 [birth_data]
 anchor_natal_fixture = "near-midnight-birth"
@@ -11,7 +12,11 @@ month = "2018-02"
 transit_snapshot_utc = "2018-02-01T00:00:00Z"
 
 [expected]
-lunations = []
+
+[[expected.lunations]]
+type = "new_moon"
+date = "2018-02-15"
+time_utc = "21:05:00"
 
 [[expected.transit_positions]]
 name = "sun"

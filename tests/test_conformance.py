@@ -39,7 +39,9 @@ Two tests, matching the story's own AC2/AC3 split:
   Stories 3.2-3.4 wire those in. A month fixture is therefore parametrized
   *twice* -- once per section, each with its own pass/xfail signal -- so a
   real defect in transit-Aspect detection can never be masked by (nor
-  mistaken for) the still-missing Lunation/Station/position sections.
+  mistaken for) the still-missing Lunation/Station/position sections. (Story
+  3.4 wires Lunations in for real too -- see below -- leaving only
+  ``expected.transit_positions`` behind the ``xfail``.)
 
   Story 3.2 wires ``find_stations()`` in for real too, but not through this
   same ``compute_output_for()``/``compare()`` machinery: a Station's
@@ -53,6 +55,21 @@ Two tests, matching the story's own AC2/AC3 split:
   never full dict equality. ``"remainder"``'s own expected-dict slice is
   narrowed accordingly, to stop claiming ``stations`` is still
   unimplemented there.
+
+  Story 3.3 wires ``find_ingresses()`` in the same bracket-match shape as
+  Story 3.2's Stations (Astro.com publishes no exact Ingress instant
+  either) -- see ``test_ingresses_fall_within_conformance_fixture_brackets``.
+
+  Story 3.4 wires ``find_lunations()`` in through this same
+  ``compute_output_for()``/``compare()`` machinery instead, back in the
+  Story 3.1 shape: unlike a Station/Ingress instant, the public sources a
+  Lunation fixture transcribes from (NASA, timeanddate.com,
+  astropixels.com, lunaf.com) publish an exact instant, to the minute, so
+  full dict equality fits it (after minute-truncation -- see
+  ``_lunations_for_month_fixture``). A month fixture's own
+  ``expected.lunations`` section is only ever parametrized when it exists
+  at all (``_fixture_params``) -- ``retrograde-station-month`` carries no
+  such section and stays untouched by this story.
 
 Reading ``data/computation.toml`` and asserting the ephemeris identity here,
 rather than in ``core/``, mirrors ``shell/http/app.py``'s own eager-load
@@ -76,6 +93,7 @@ from core.ephemeris.identity import verify_ephemeris_identity
 from core.ephemeris.positions import QUANTUM, _angular_separation, _calc_body, _julian_day_ut
 from core.transits.aspects import _TRANSIT_BODY_IDS, _natal_targets, find_transit_aspects
 from core.transits.ingresses import find_ingresses
+from core.transits.lunations import find_lunations
 from core.transits.stations import find_stations
 from core.types.chart import NatalChart
 from core.types.transits import Ingress, Station
@@ -348,6 +366,71 @@ _STATIONS_KEY = "stations"
 #: publishes no exact ingress instant either).
 _INGRESSES_KEY = "ingresses"
 
+#: A month fixture's ``expected.lunations`` section (Story 3.4) -- checked
+#: for real through this module's generic ``compute_output_for()``/
+#: ``compare()`` scope machinery (unlike ``_STATIONS_KEY``/``_INGRESSES_KEY``,
+#: which use a dedicated bracket-match test instead: Astro.com publishes no
+#: exact Station/Ingress instant, but the public sources a Lunation fixture
+#: transcribes from -- NASA, timeanddate.com, astropixels.com, lunaf.com --
+#: do publish an exact instant, to the minute). Excluded from
+#: ``"remainder"``'s own expected-dict slice (``_expected_for_scope``) the
+#: same way ``_STATIONS_KEY``/``_INGRESSES_KEY`` are.
+_LUNATIONS_SCOPE = "lunations"
+
+
+def _truncated_to_the_minute(instant: datetime) -> datetime:
+    """``instant`` with its seconds/microseconds dropped -- see
+    ``_lunations_for_month_fixture``'s own docstring for why truncation,
+    not nearest-minute rounding, is the precision every corroborating
+    public source's own published Lunation time actually matches."""
+    return instant.replace(second=0, microsecond=0)
+
+
+def _lunations_for_month_fixture(fixture: Fixture) -> list[dict[str, Any]]:
+    """``find_lunations()``'s real output for ``fixture``'s month, sorted
+    chronologically and shaped to the fixture's own ``type``/``date``/
+    ``time_utc`` dict format.
+
+    ``find_lunations()`` itself returns records kind-major (every new moon,
+    then every full moon -- see ``core/transits/lunations.py``'s own
+    docstring), not chronologically; sorted here by ``occurred_at`` since
+    that is the order a fixture's own transcribed rows read most naturally
+    in, and the order every corroborating public source (NASA, Space.com,
+    timeanddate.com, astropixels.com, lunaf.com) itself lists a month's
+    Lunations in.
+
+    ``occurred_at`` has its seconds truncated (not rounded) before
+    formatting -- every one of those same public sources only ever
+    publishes a Lunation to minute precision, never seconds, and both of
+    ``two-lunations-month``'s own real bisected instants land ~38-40
+    seconds past their published minute (e.g. the real 2023-08-01 full moon
+    bisects to ``18:31:40``, not the nearest-minute-rounded ``18:32``, yet
+    every one of NASA/Space.com/timeanddate.com/Star Walk still reports it
+    as ``18:31``) -- these sources truncate the seconds, they do not round
+    them, so this shaping function truncates too rather than rounding to
+    nearest (which would spuriously fail against exactly these real,
+    independently-corroborated values). ``Lunation.occurred_at`` itself
+    stays full precision -- this truncation is scoped to this test-shaping
+    function only, never into ``core/``.
+    """
+    chart = _anchor_natal_chart(fixture)
+    month_start_utc, month_end_utc = _month_interval_utc(fixture)
+
+    lunations = find_lunations(chart, month_start_utc, month_end_utc)
+    ordered = sorted(lunations, key=lambda lunation: lunation.occurred_at)
+
+    rows: list[dict[str, Any]] = []
+    for lunation in ordered:
+        truncated = _truncated_to_the_minute(lunation.occurred_at)
+        rows.append(
+            {
+                "type": lunation.kind,
+                "date": truncated.date().isoformat(),
+                "time_utc": truncated.strftime("%H:%M:%S"),
+            }
+        )
+    return rows
+
 
 def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, Any]:
     """Compute the output a real chart/transit engine produces for
@@ -377,9 +460,12 @@ def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, 
     if scope == _IMPLEMENTED_MONTH_SCOPE:
         return {"transit_events": _transit_events_for_month_fixture(fixture)}
 
+    if scope == _LUNATIONS_SCOPE:
+        return {_LUNATIONS_SCOPE: _lunations_for_month_fixture(fixture)}
+
     raise NotImplementedError(
-        "real Lunation/position computation is not wired in yet "
-        f"(Stories 3.3-3.4): fixture {fixture.name!r}, scope {scope!r}"
+        "real position computation is not wired in yet "
+        f"(Story 3.4 wired Lunations in): fixture {fixture.name!r}, scope {scope!r}"
     )
 
 
@@ -392,10 +478,12 @@ def _expected_for_scope(fixture: Fixture, scope: str | None) -> dict[str, Any]:
         return fixture.expected
     if scope == _IMPLEMENTED_MONTH_SCOPE:
         return {_IMPLEMENTED_MONTH_SCOPE: fixture.expected.get(_IMPLEMENTED_MONTH_SCOPE, [])}
+    if scope == _LUNATIONS_SCOPE:
+        return {_LUNATIONS_SCOPE: fixture.expected.get(_LUNATIONS_SCOPE, [])}
     return {
         key: value
         for key, value in fixture.expected.items()
-        if key not in (_IMPLEMENTED_MONTH_SCOPE, _STATIONS_KEY, _INGRESSES_KEY)
+        if key not in (_IMPLEMENTED_MONTH_SCOPE, _STATIONS_KEY, _INGRESSES_KEY, _LUNATIONS_SCOPE)
     }
 
 
@@ -413,12 +501,17 @@ def test_reports_zero_fixtures_without_failing() -> None:
 
 def _fixture_params() -> list[Any]:
     """One ``pytest.param`` per discovered natal fixture (real, Story 2.2)
-    and *two* per discovered month fixture: ``transit_events`` (real, Story
-    3.1) and ``remainder`` -- lunations/positions, still behind the same
+    and *two or three* per discovered month fixture: ``transit_events``
+    (real, Story 3.1), ``lunations`` (real, Story 3.4 -- only emitted when
+    the fixture's own ``expected`` table carries a ``"lunations"`` key,
+    since only ``two-lunations-month``/``no-lunations-month`` do) and
+    ``remainder`` -- ``transit_positions``, still behind the same
     ``xfail(raises=NotImplementedError)`` shape Story 1.6 gave every
-    fixture, now scoped to only the sections actually still unimplemented
-    (``stations`` is real too, Story 3.2, but checked outside this
-    parametrization -- see ``test_stations_fall_within_conformance_fixture_brackets``).
+    fixture, now scoped to only the section actually still unimplemented
+    (``stations``/``ingresses`` are real too, Stories 3.2/3.3, but checked
+    outside this parametrization -- see
+    ``test_stations_fall_within_conformance_fixture_brackets``/
+    ``test_ingresses_fall_within_conformance_fixture_brackets``).
     Each ``pytest.param`` carries ``(fixture_path, scope)``."""
     params: list[Any] = []
     for path in discover_fixtures():
@@ -429,6 +522,8 @@ def _fixture_params() -> list[Any]:
         params.append(
             pytest.param(path, _IMPLEMENTED_MONTH_SCOPE, id=f"{path.stem}-transit_events")
         )
+        if _LUNATIONS_SCOPE in fixture.expected:
+            params.append(pytest.param(path, _LUNATIONS_SCOPE, id=f"{path.stem}-lunations"))
         params.append(
             pytest.param(
                 path,
@@ -437,8 +532,8 @@ def _fixture_params() -> list[Any]:
                 marks=pytest.mark.xfail(
                     raises=NotImplementedError,
                     reason=(
-                        "real Lunation/position computation is not wired in yet "
-                        "(Stories 3.3-3.4) -- see compute_output_for()"
+                        "real position computation is not wired in yet "
+                        "(Story 3.4 wired Lunations in) -- see compute_output_for()"
                     ),
                 ),
             )

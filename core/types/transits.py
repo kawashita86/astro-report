@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-__all__ = ["Ingress", "Station", "StandingRetrograde", "TransitAspectEvent"]
+__all__ = ["Ingress", "Lunation", "Station", "StandingRetrograde", "TransitAspectEvent"]
 
 
 @dataclass(frozen=True)
@@ -117,3 +117,31 @@ class Ingress:
     house_departed: int
     house_entered: int
     crossed_at: datetime
+
+
+@dataclass(frozen=True)
+class Lunation:
+    """One new moon or full moon located within an analyzed month (Story
+    3.4): the instant Delta-lambda = (Moon longitude - Sun longitude) mod
+    360 degrees crosses 0 degrees (``"new_moon"``) or 180 degrees
+    (``"full_moon"``), bisected to sub-second precision by the same
+    coarse-grid-plus-bisection method
+    ``core/transits/aspects.py``/``core/transits/stations.py``/
+    ``core/transits/ingresses.py`` use.
+
+    Unlike :class:`Ingress`, there is no direction/departed-entered concept
+    here: Delta-lambda increases monotonically all month (the Moon's
+    angular speed always exceeds the Sun's), so every crossing is a simple
+    forward crossing.
+
+    ``longitude`` is the Moon's zodiacal degree at ``occurred_at``;
+    ``natal_house`` is which of the natal chart's twelve house spans that
+    longitude falls within. Zero or two Lunations of one kind in a month is
+    a normal outcome -- each is recorded, never merged or treated as an
+    error.
+    """
+
+    kind: str
+    occurred_at: datetime
+    longitude: Decimal
+    natal_house: int

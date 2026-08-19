@@ -3,6 +3,7 @@ name = "two-lunations-month"
 adversarial_case = "a calendar month containing two full moons of the same kind (a 'blue moon' month)"
 source = "August 2023: full moons on 2023-08-01 at 18:31 UTC and 2023-08-31 at 01:35 UTC (the second widely reported as a 'super blue moon'). Lunation timestamps corroborated independently across NASA (science.nasa.gov), Space.com, timeanddate.com and Star Walk -- not sourced from astro.com. Transit snapshot (all bodies except the Moon) computed via astro.com's 'Natal chart and transits' tool at 2023-08-01 00:00 UT against the near-midnight-birth.toml natal chart as anchor. Logged in against an Astro.com account on 2026-08-15."
 note = "The transit snapshot is a single moment (month start, 00:00 UT), not a walk of the whole month -- it exists to give the future computation a real, checkable reference point, not to enumerate every aspect that forms and separates across August. The two full-moon timestamps are the actual adversarial fact under test here."
+correction_2026_08_19 = "expected.lunations originally listed only the two full moons (the adversarial fact this fixture's name is about) and omitted August 2023's own new moon, which falls squarely inside the same calendar month (2023-08-16 09:38 UTC), independently corroborated across NASA (moon.nasa.gov), timeanddate.com and lunaf.com. Story 3.4's real find_lunations() computation -- which walks the whole month, not just the two full-moon instants -- correctly locates all three, so the missing entry is added below (chronologically, between the two full moons) rather than narrowing the computation to only the kinds this fixture happened to transcribe first."
 
 [birth_data]
 anchor_natal_fixture = "near-midnight-birth"
@@ -15,6 +16,11 @@ transit_snapshot_utc = "2023-08-01T00:00:00Z"
 type = "full_moon"
 date = "2023-08-01"
 time_utc = "18:31:00"
+
+[[expected.lunations]]
+type = "new_moon"
+date = "2023-08-16"
+time_utc = "09:38:00"
 
 [[expected.lunations]]
 type = "full_moon"
