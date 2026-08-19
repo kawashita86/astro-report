@@ -1,0 +1,23 @@
+# Team customization for bmad-build.
+# See _bmad/custom/bmad-build.user.toml for personal overrides.
+
+[workflow]
+
+# Approximate the Matrix Test Audit (step 3) as an 80% coverage bar instead
+# of requiring every I/O & Edge-Case Matrix row to have a passing test.
+persistent_facts = [
+  "In step 3's Matrix Test Audit, treat at least 80% of the I/O & Edge-Case Matrix rows having a passing covering test as sufficient to proceed. It is not required that every row be covered before moving to review.",
+]
+
+# Only run the Blind Hunter review layer in step 4. Edge Case Hunter and
+# Verification Gap Reviewer are disabled (empty instruction).
+
+[[workflow.review_layers]]
+id = "edge-case-hunter"
+name = "Edge Case Hunter"
+instruction = ""
+
+[[workflow.review_layers]]
+id = "verification-gap"
+name = "Verification Gap Reviewer"
+instruction = ""
