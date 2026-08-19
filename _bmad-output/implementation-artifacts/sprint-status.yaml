@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-19-2026 05:00
+last_updated: 08-19-2026 07:00
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -63,7 +63,7 @@ development_status:
   3-4-locate-the-month-s-new-and-full-moons: review
   3-5-start-a-month-s-computation-and-watch-it-finish: review
   3-6-assemble-the-report-payload-each-section-needs: review
-  3-7-project-the-two-day-lists-by-code-so-a-day-cannot-be-misfile: backlog
+  3-7-project-the-two-day-lists-by-code-so-a-day-cannot-be-misfile: review
   3-8-freeze-the-payload-so-any-report-can-be-reproduced-years-lat: backlog
   3-9-read-the-facts-behind-a-month-entry-by-entry: backlog
   epic-3-retrospective: optional
