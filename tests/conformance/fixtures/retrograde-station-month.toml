@@ -16,11 +16,12 @@ transit_snapshot_utc = "2022-12-01T00:00:00Z"
 body = "mercury"
 motion = "retrograde"
 bracket_start_date = "2022-12-28"
-bracket_start_longitude = "264.1833"
+bracket_start_longitude = "294.1833"
 bracket_start_retrograde = false
 bracket_end_date = "2022-12-31"
-bracket_end_longitude = "264.1167"
+bracket_end_longitude = "294.1167"
 bracket_end_retrograde = true
+correction_2026_08_19 = "bracket_start_longitude/bracket_end_longitude were each transcribed one zodiac sign short (264.1833 -> 294.1833, 264.1167 -> 294.1167), the same transcription bug already documented and corrected for mars/jupiter's transit_positions in this fixture (correction_2026_08_18 above): Story 3.2's real find_stations() computation independently locates Mercury's actual Dec 2022 station at 294.3567 degrees (24 Capricorn), and the same low-level position math confirms 294.1797 degrees on 2022-12-28 00:00 UTC (still direct) and 294.1108 degrees on 2022-12-31 00:00 UTC (already retrograde) -- both in Capricorn, not Sagittarius. bracket_start_date/bracket_end_date and bracket_start_retrograde/bracket_end_retrograde were already correct; only the longitude values needed the same +30-degree sign correction."
 
 [[expected.transit_positions]]
 name = "sun"

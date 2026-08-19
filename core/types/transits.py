@@ -13,8 +13,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
-__all__ = ["TransitAspectEvent"]
+__all__ = ["Station", "StandingRetrograde", "TransitAspectEvent"]
 
 
 @dataclass(frozen=True)
@@ -48,3 +49,44 @@ class TransitAspectEvent:
     never_perfected: bool
     orb_entry_at: datetime
     orb_exit_at: datetime | None
+
+
+@dataclass(frozen=True)
+class Station:
+    """One retrograde/direct turn located within an analyzed month (Story
+    3.2): the instant a transiting body's longitudinal velocity (dλ/dt, the
+    same ``speed`` value ``core/ephemeris/positions.py``'s ``_calc_body``
+    already returns) changes sign, bisected to sub-second precision by the
+    same coarse-grid-plus-bisection method ``core/transits/aspects.py`` uses
+    for Aspect perfection instants.
+
+    ``direction`` is the motion the body *entered* at ``station_at`` --
+    always exactly one of ``"retrograde"`` (dλ/dt crossed from positive to
+    negative) or ``"direct"`` (dλ/dt crossed from negative to positive).
+    ``longitude`` is the body's zodiacal degree at that same instant.
+    """
+
+    body: str
+    direction: str
+    station_at: datetime
+    longitude: Decimal
+
+
+@dataclass(frozen=True)
+class StandingRetrograde:
+    """A body retrograde across an analyzed month's entire span, with no
+    Station (direction change) inside it (Story 3.2) -- recorded rather than
+    silently omitted, since a whole month of retrograde motion with no turn
+    to report is still a real fact about the month. A body *direct* the
+    whole month is never recorded at all: there is nothing to report.
+
+    ``retrograde_start_utc``/``retrograde_end_utc`` are the analyzed month's
+    own boundaries, clamped exactly like ``TransitAspectEvent.orb_entry_at``
+    clamps to a boundary already in view -- the body's true retrograde span
+    may extend beyond this one-month window in either direction, but that is
+    outside what this pure function's single-month view can see.
+    """
+
+    body: str
+    retrograde_start_utc: datetime
+    retrograde_end_utc: datetime

@@ -41,6 +41,19 @@ Two tests, matching the story's own AC2/AC3 split:
   real defect in transit-Aspect detection can never be masked by (nor
   mistaken for) the still-missing Lunation/Station/position sections.
 
+  Story 3.2 wires ``find_stations()`` in for real too, but not through this
+  same ``compute_output_for()``/``compare()`` machinery: a Station's
+  ``expected.stations`` entry only transcribes a *bracket* (Astro.com
+  publishes no exact station instant -- see the story's own Design Notes
+  and Never bullet), so ``compare()``'s dict-equality walk doesn't fit it.
+  ``test_stations_fall_within_conformance_fixture_brackets`` checks it
+  separately, directly against every month fixture's real
+  ``find_stations()`` output, asserting each expected entry's body and
+  direction match and its bracketed instant contains the computed one --
+  never full dict equality. ``"remainder"``'s own expected-dict slice is
+  narrowed accordingly, to stop claiming ``stations`` is still
+  unimplemented there.
+
 Reading ``data/computation.toml`` and asserting the ephemeris identity here,
 rather than in ``core/``, mirrors ``shell/http/app.py``'s own eager-load
 shape (AD-1/AD-18): this test module -- like the rest of ``tests/`` -- is
@@ -62,7 +75,9 @@ from core.ephemeris.chart import _ASPECTS, compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.ephemeris.positions import QUANTUM, _angular_separation, _calc_body, _julian_day_ut
 from core.transits.aspects import _TRANSIT_BODY_IDS, _natal_targets, find_transit_aspects
+from core.transits.stations import find_stations
 from core.types.chart import NatalChart
+from core.types.transits import Station
 from shell.computation import load_computation_config
 from tests.conformance.runner import (
     FIXTURES_DIR,
@@ -305,11 +320,21 @@ def _transit_events_for_month_fixture(fixture: Fixture) -> list[dict[str, Any]]:
     return rows
 
 
-#: The one month-fixture section real computation produces today (Story
-#: 3.1). Every other top-level ``expected`` key for a month fixture --
-#: ``lunations``, ``transit_positions``, ``stations`` -- is still Stories
-#: 3.2-3.4's job.
+#: The one month-fixture section real computation produces today through
+#: ``compute_output_for()``/``compare()`` (Story 3.1). Every other top-level
+#: ``expected`` key for a month fixture -- ``lunations``, ``transit_positions``
+#: -- is still Stories 3.3-3.4's job. ``stations`` (Story 3.2) is real too,
+#: but checked by its own dedicated test
+#: (``test_stations_fall_within_conformance_fixture_brackets``), not through
+#: this scope machinery -- see ``_STATIONS_KEY``.
 _IMPLEMENTED_MONTH_SCOPE = "transit_events"
+
+#: A month fixture's ``expected.stations`` key -- excluded from
+#: ``"remainder"``'s own expected-dict slice (``_expected_for_scope``) since
+#: Story 3.2 checks it for real, just not through this module's generic
+#: ``compute_output_for()``/``compare()`` scope machinery (see the module
+#: docstring).
+_STATIONS_KEY = "stations"
 
 
 def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, Any]:
@@ -322,8 +347,11 @@ def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, 
     ``None`` there -- a natal fixture is never split into sections). Story
     3.1 wires in ``find_transit_aspects()`` for a month fixture's
     ``scope="transit_events"`` only; any other ``scope`` for a month fixture
-    (``"remainder"``, standing in for lunations/positions/stations) still
-    raises, exactly as the whole fixture used to before this story.
+    (``"remainder"``, standing in for lunations/positions) still raises,
+    exactly as the whole fixture used to before this story. Story 3.2 wires
+    ``find_stations()`` in for real too, but not through this function --
+    see the module docstring and
+    ``test_stations_fall_within_conformance_fixture_brackets``.
     """
     if _is_natal_fixture(fixture):
         birth_instant_utc = _birth_instant_utc(fixture.birth_data)
@@ -338,8 +366,8 @@ def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, 
         return {"transit_events": _transit_events_for_month_fixture(fixture)}
 
     raise NotImplementedError(
-        "real Lunation/Station/position computation is not wired in yet "
-        f"(Stories 3.2-3.4): fixture {fixture.name!r}, scope {scope!r}"
+        "real Lunation/position computation is not wired in yet "
+        f"(Stories 3.3-3.4): fixture {fixture.name!r}, scope {scope!r}"
     )
 
 
@@ -353,7 +381,9 @@ def _expected_for_scope(fixture: Fixture, scope: str | None) -> dict[str, Any]:
     if scope == _IMPLEMENTED_MONTH_SCOPE:
         return {_IMPLEMENTED_MONTH_SCOPE: fixture.expected.get(_IMPLEMENTED_MONTH_SCOPE, [])}
     return {
-        key: value for key, value in fixture.expected.items() if key != _IMPLEMENTED_MONTH_SCOPE
+        key: value
+        for key, value in fixture.expected.items()
+        if key not in (_IMPLEMENTED_MONTH_SCOPE, _STATIONS_KEY)
     }
 
 
@@ -372,9 +402,11 @@ def test_reports_zero_fixtures_without_failing() -> None:
 def _fixture_params() -> list[Any]:
     """One ``pytest.param`` per discovered natal fixture (real, Story 2.2)
     and *two* per discovered month fixture: ``transit_events`` (real, Story
-    3.1) and ``remainder`` -- lunations/positions/stations, still behind the
-    same ``xfail(raises=NotImplementedError)`` shape Story 1.6 gave every
-    fixture, now scoped to only the sections actually still unimplemented.
+    3.1) and ``remainder`` -- lunations/positions, still behind the same
+    ``xfail(raises=NotImplementedError)`` shape Story 1.6 gave every
+    fixture, now scoped to only the sections actually still unimplemented
+    (``stations`` is real too, Story 3.2, but checked outside this
+    parametrization -- see ``test_stations_fall_within_conformance_fixture_brackets``).
     Each ``pytest.param`` carries ``(fixture_path, scope)``."""
     params: list[Any] = []
     for path in discover_fixtures():
@@ -393,8 +425,8 @@ def _fixture_params() -> list[Any]:
                 marks=pytest.mark.xfail(
                     raises=NotImplementedError,
                     reason=(
-                        "real Lunation/Station/position computation is not wired in yet "
-                        "(Stories 3.2-3.4) -- see compute_output_for()"
+                        "real Lunation/position computation is not wired in yet "
+                        "(Stories 3.3-3.4) -- see compute_output_for()"
                     ),
                 ),
             )
@@ -414,3 +446,130 @@ def test_computed_output_matches_conformance_fixture(fixture_path: Path, scope: 
         f"{mismatch.field}: expected {mismatch.expected!r}, computed {mismatch.computed!r}"
         for mismatch in mismatches
     )
+
+
+# --- Story 3.2: find_stations() against the bracketed fixtures ------------------
+
+#: A Station's own longitude at the bracketed instant sits only a few tenths
+#: of a degree from either bracket endpoint's transcribed longitude -- the
+#: body is nearly stationary throughout a several-day bracket window, but
+#: not exactly stationary (both endpoints are themselves still slightly
+#: moving toward/away from the peak or trough the Station instant actually
+#: is), so exact equality is never expected. Generous enough to absorb that
+#: honest drift while still catching a genuine defect -- in particular the
+#: exact one-sign (30 degree) transcription bug already found and fixed
+#: once in this same fixture (see the mercury station's own
+#: ``correction_2026_08_19`` note): that bug is 30x this tolerance (roughly
+#: one and a half orders of magnitude, not two), comfortably enough margin
+#: to still trip this check.
+_STATION_LONGITUDE_TOLERANCE = Decimal("1.0")
+
+_FULL_CIRCLE_DEGREES = Decimal(360)
+
+
+def _circular_distance(first: Decimal, second: Decimal) -> Decimal:
+    """The shortest angular distance between two longitudes, in ``[0, 180]``
+    -- mirrors ``core/ephemeris/positions.py``'s own ``_angular_separation``
+    (a private cross-module reimplementation here rather than an import
+    since this test module already keeps its own comparison helpers, e.g.
+    ``tests/conformance/runner.py``'s ``_within_numeric_tolerance``, doing
+    the exact same fold)."""
+    diff = abs(first - second) % _FULL_CIRCLE_DEGREES
+    if diff > _FULL_CIRCLE_DEGREES / 2:
+        diff = _FULL_CIRCLE_DEGREES - diff
+    return diff
+
+
+def _stations_for_month_fixture(fixture: Fixture) -> tuple[Station, ...]:
+    """``find_stations()``'s real Station records (standing-retrograde
+    conditions excluded) for ``fixture``'s month -- the Astro.com brackets a
+    fixture transcribes only ever describe a turn, never a whole-month
+    standing condition."""
+    month_start_utc, month_end_utc = _month_interval_utc(fixture)
+    records = find_stations(month_start_utc, month_end_utc, _COMPUTATION_CONFIG)
+    return tuple(record for record in records if isinstance(record, Station))
+
+
+def _station_bracket_utc(entry: dict[str, Any]) -> tuple[datetime, datetime]:
+    """``entry``'s ``bracket_start_date``/``bracket_end_date`` (``"YYYY-MM-DD"``
+    calendar dates, each read as that day's own 00:00 UTC) as a UTC instant
+    pair -- the honest precision a last-seen-direct/first-seen-retrograde
+    transcription actually supports (see the story's Never bullet): a real
+    station is bracketed, never claimed as an exact third-party instant."""
+    start = datetime.fromisoformat(entry["bracket_start_date"]).replace(tzinfo=UTC)
+    end = datetime.fromisoformat(entry["bracket_end_date"]).replace(tzinfo=UTC)
+    return start, end
+
+
+def _month_fixture_params() -> list[Any]:
+    """One ``pytest.param`` per discovered month fixture -- natal fixtures
+    carry no ``expected.stations`` table at all, so they are out of scope
+    for this test entirely (unlike ``_fixture_params()``, which also covers
+    them)."""
+    return [
+        pytest.param(path, id=path.stem)
+        for path in discover_fixtures()
+        if not _is_natal_fixture(load_fixture(path))
+    ]
+
+
+@pytest.mark.parametrize("fixture_path", _month_fixture_params())
+def test_stations_fall_within_conformance_fixture_brackets(fixture_path: Path) -> None:
+    """Every ``expected.stations`` entry (only ``retrograde-station-month``
+    has one -- ``two-lunations-month``/``no-lunations-month`` carry none, so
+    this loop runs for real but finds nothing to check for them, exactly as
+    the story's Code Map describes) is matched to whichever computed
+    Station's own ``station_at`` falls inside *that entry's own* bracket
+    window -- body name alone is never enough (``find_stations()`` can
+    legitimately locate two turns for the same body in one month, exercised
+    directly in ``tests/test_stations.py``, so two ``expected.stations``
+    entries for the same body must each resolve to their own bracket's
+    Station, not collide on a body-only lookup). The matched Station's
+    direction must agree with the entry's ``motion``, and its computed
+    ``longitude`` must sit within ``_STATION_LONGITUDE_TOLERANCE`` degrees
+    of either bracket endpoint's own transcribed longitude."""
+    fixture = load_fixture(fixture_path)
+    computed_stations = _stations_for_month_fixture(fixture)
+
+    for entry in fixture.expected.get(_STATIONS_KEY, []):
+        body = entry["body"]
+        motion = entry["motion"]
+        bracket_start_utc, bracket_end_utc = _station_bracket_utc(entry)
+
+        # Matched by body *and* by falling inside this entry's own bracket
+        # window -- never against a fabricated exact instant (see the
+        # story's Never bullet), and never against body name alone (see
+        # this test's own docstring).
+        matches = [
+            station
+            for station in computed_stations
+            if station.body == body and bracket_start_utc < station.station_at < bracket_end_utc
+        ]
+        assert matches, (
+            f"{fixture.name}: expected a Station for body {body!r} inside bracket "
+            f"({bracket_start_utc!r}, {bracket_end_utc!r}), but find_stations() computed "
+            f"none there (computed: {computed_stations!r})"
+        )
+        assert len(matches) == 1, (
+            f"{fixture.name}: expected exactly one computed Station for body {body!r} "
+            f"inside bracket ({bracket_start_utc!r}, {bracket_end_utc!r}), found "
+            f"{len(matches)}: {matches!r}"
+        )
+        station = matches[0]
+
+        assert station.direction == motion, (
+            f"{fixture.name}: body {body!r} direction expected {motion!r}, "
+            f"computed {station.direction!r}"
+        )
+
+        bracket_start_longitude = Decimal(entry["bracket_start_longitude"])
+        bracket_end_longitude = Decimal(entry["bracket_end_longitude"])
+        closest_bracket_distance = min(
+            _circular_distance(station.longitude, bracket_start_longitude),
+            _circular_distance(station.longitude, bracket_end_longitude),
+        )
+        assert closest_bracket_distance <= _STATION_LONGITUDE_TOLERANCE, (
+            f"{fixture.name}: body {body!r} longitude {station.longitude!r} is not within "
+            f"{_STATION_LONGITUDE_TOLERANCE} degrees of either bracket longitude "
+            f"({bracket_start_longitude!r}, {bracket_end_longitude!r})"
+        )
