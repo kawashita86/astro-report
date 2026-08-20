@@ -34,6 +34,7 @@ from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, 
 from shell.adapters.postgres.client import create_client_with_chart, deserialize_natal_chart
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
+from shell.adapters.postgres.report_theme import StoredReportTheme
 from shell.computation import load_computation_config
 from shell.runner.driver import _STAGE_FUNCTIONS, _deserialize_transit_events, drive
 from shell.sections import load_sections_config
@@ -203,6 +204,31 @@ def test_payload_ready_advances_and_persists_a_report_payload_row(session: Sessi
     }
 
 
+# --- Story 4.3's own row: payload_ready also derives and persists a ReportTheme -
+
+
+def test_payload_ready_also_derives_and_persists_a_report_theme_row(session: Session) -> None:
+    """Acceptance Criteria: exactly one ``StoredReportTheme`` row exists for
+    ``run.id`` once ``_run_payload_ready`` completes, derived purely from the
+    just-assembled ``Payload`` -- no new AD-10 stage, reusing
+    ``payload``/``config`` already in scope after ``store_report_payload()``."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    result = _drive(session, run, natal_chart)
+
+    assert result.stage == "payload_ready"
+    stored_themes = session.exec(
+        select(StoredReportTheme).where(StoredReportTheme.report_run_id == run.id)
+    ).all()
+    assert len(stored_themes) == 1
+    stored_theme = stored_themes[0]
+    assert stored_theme.client_id == client.id
+    assert set(stored_theme.theme) == {"dominant_aspects", "lunations", "standing_retrogrades"}
+
+
 # --- Re-drive after natal_ready alone -------------------------------------------
 
 
@@ -276,6 +302,12 @@ def test_re_drive_after_full_completion_is_a_noop(
         select(ReportPayload).where(ReportPayload.report_run_id == run.id)
     ).all()
     assert len(stored_payloads) == 1
+
+    # Nor a second ReportTheme row (Story 4.3).
+    stored_themes = session.exec(
+        select(StoredReportTheme).where(StoredReportTheme.report_run_id == run.id)
+    ).all()
+    assert len(stored_themes) == 1
 
 
 # --- A transiently failing stage still advances normally via with_backoff -----------

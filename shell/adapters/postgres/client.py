@@ -26,6 +26,7 @@ from core.types.computation import ComputationConfig
 from core.types.place import ResolvedPlace
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
+from shell.adapters.postgres.report_theme import StoredReportTheme
 
 __all__ = [
     "Client",
@@ -42,7 +43,7 @@ __all__ = [
 #: constant -- a table added here without joining the delete function below,
 #: or vice versa, is exactly the drift that invariant test exists to catch.
 _CLIENT_CASCADE_TABLES: frozenset[str] = frozenset(
-    {"natal_chart", "report_run", "report_payload"}
+    {"natal_chart", "report_run", "report_payload", "report_theme"}
 )
 
 
@@ -263,18 +264,20 @@ def correct_client_and_chart(
 
 def delete_client_and_derived(session: Session, *, client: Client) -> None:
     """Delete ``client`` and every row derived from it, in one flush (Story 2.8;
-    ``ReportRun`` joined the cascade in Story 3.5).
+    ``ReportRun`` joined the cascade in Story 3.5; ``StoredReportTheme`` in
+    Story 4.3).
 
     Every ``StoredNatalChart`` row for ``client`` -- current and superseded --
-    every ``ReportPayload`` row and every ``ReportRun`` row for ``client`` are
-    deleted first, then the ``Client`` row itself: children before parent,
-    matching how no foreign key in this codebase declares ``ondelete`` at the
-    schema level, so the cascade is explicit application code, not the
-    database's job. ``ReportPayload`` rows are deleted before ``ReportRun``
-    rows specifically -- ``ReportPayload.report_run_id`` is itself a foreign
-    key to ``report_run.id`` (Story 3.8), so a ``ReportRun`` row still
-    referenced by a ``ReportPayload`` row would violate that constraint if
-    deleted first.
+    every ``ReportPayload`` row, every ``StoredReportTheme`` row and every
+    ``ReportRun`` row for ``client`` are deleted first, then the ``Client``
+    row itself: children before parent, matching how no foreign key in this
+    codebase declares ``ondelete`` at the schema level, so the cascade is
+    explicit application code, not the database's job. ``ReportPayload`` and
+    ``StoredReportTheme`` rows are both deleted before ``ReportRun`` rows
+    specifically -- ``ReportPayload.report_run_id`` (Story 3.8) and
+    ``StoredReportTheme.report_run_id`` (Story 4.3) are themselves foreign
+    keys to ``report_run.id``, so a ``ReportRun`` row still referenced by
+    either would violate that constraint if deleted first.
     :data:`_CLIENT_CASCADE_TABLES` is the single source of truth for which
     tables that first step must cover; the cascade-invariant test in
     ``tests/test_client_store.py`` asserts it stays equal to every table in
@@ -297,6 +300,12 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     ).all()
     for stored_payload in payloads:
         session.delete(stored_payload)
+
+    themes = session.exec(
+        select(StoredReportTheme).where(StoredReportTheme.client_id == client.id)
+    ).all()
+    for stored_theme in themes:
+        session.delete(stored_theme)
 
     runs = session.exec(select(ReportRun).where(ReportRun.client_id == client.id)).all()
     for run in runs:

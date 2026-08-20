@@ -231,11 +231,13 @@ No arrow runs from `core` to `shell`. There is no exception.
 - **Binds:** FR-18, FR-27, PRD extension seam 3, UJ-2
 - **Prevents:** non-deterministic memory, where two runs of the same month seed different continuity
   the following month and drift compounds across a recurring client's year.
-- **Rule:** `derive_theme(payload) -> ReportTheme` is pure and model-free, yielding dominant
-  slow-planet aspects ordered by tightness, lunation houses, and standing retrogrades. FR-18's
-  "nothing significant has changed" is computed by comparing two ReportThemes, not judged by the
-  Generator. The theme store is separate from generation, so multi-year memory later changes the
-  store and not the Generator contract.
+- **Rule:** `derive_theme(payload, config) -> ReportTheme` is pure and model-free, yielding dominant
+  slow-planet aspects ordered by tightness, lunation houses, and standing retrogrades. `config` is
+  read only for `config.bodies.slow` -- the single source of truth for the slow/fast split, so
+  `core/memory/` never carries a second, drifting hardcoded body list. FR-18's "nothing significant
+  has changed" is computed by comparing two ReportThemes, not judged by the Generator. The theme
+  store is separate from generation, so multi-year memory later changes the store and not the
+  Generator contract.
 
 ### AD-15 — Exactly one principal, enforced structurally
 

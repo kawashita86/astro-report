@@ -279,6 +279,13 @@ def test_delete_client_and_derived_does_not_persist_without_an_explicit_commit(
     )
 
 
+def test_the_cascade_constant_includes_report_theme() -> None:
+    """Story 4.3: ``report_theme`` must join ``_CLIENT_CASCADE_TABLES`` --
+    a regression on top of the general invariant test below, naming the
+    table this story added explicitly."""
+    assert "report_theme" in client_module._CLIENT_CASCADE_TABLES
+
+
 def test_every_table_with_a_client_id_foreign_key_is_covered_by_the_cascade_constant() -> None:
     """The cascade-invariant test: a later story that adds a new table with a
     foreign key to ``client.id`` without also adding it to

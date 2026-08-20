@@ -71,7 +71,7 @@ development_status:
   epic-4: in-progress
   4-1-write-the-style-guide: review
   4-2-edit-the-style-guide-without-a-deploy: review
-  4-3-derive-a-reporttheme-from-a-payload: backlog
+  4-3-derive-a-reporttheme-from-a-payload: review
   4-4-compute-what-has-changed-since-last-month: backlog
   4-5-generate-eight-sections-as-cited-structure: backlog
   4-6-render-cited-sentences-into-prose-i-could-read-aloud: backlog

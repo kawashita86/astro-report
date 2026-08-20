@@ -329,3 +329,11 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
   summary: The Style Guide gives no fixed Italian nomenclature for recurring astrological terms (house names, aspect names, "casa" vs. "domicilio," etc.), leaving terminology free to vary between Reports.
   evidence: §4 requires every claim to name "a planet, transit, or house" but nothing pins the Italian vocabulary for those terms consistently. Not part of FR-30's minimum content list; worth a glossary pass once real generated output surfaces actual inconsistencies.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-3-derive-a-reporttheme-from-a-payload.md`
+  summary: `ReportTheme` carries no signal for Ingress events (a slow planet crossing into a new natal house), so Story 4.4's diffing cannot detect "a slow planet just changed houses" as a continuity event.
+  evidence: AD-14 and this story's spec both scope `ReportTheme` to Aspects/Lunations/StandingRetrogrades only — a deliberate architecture-level boundary, not an oversight in this story. Worth revisiting once Story 4.4/4.7 show whether house-ingress continuity is something the eight Sections actually need to narrate.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-3-derive-a-reporttheme-from-a-payload.md`
+  summary: `report_theme` has no composite index for "latest theme for a Client," and there's no documented plan for how Story 4.4 will fetch "this run's theme" and "the prior run's theme" for the same Client.
+  evidence: Only single-column indexes exist (`client_id`, unique `report_run_id`) — fine for this story's write pattern, but Story 4.4's diffing needs exactly two comparable rows per Client and should settle whether that goes through `ReportRun` lookups first or a direct `report_theme` query before deciding if an index is actually needed.

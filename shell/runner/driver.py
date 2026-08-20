@@ -52,6 +52,7 @@ from sqlmodel import Session
 from core.domains.profiles import assemble_domain_profiles
 from core.domains.rulers import resolve_house_rulers
 from core.ephemeris.identity import EphemerisIdentity
+from core.memory.derive import derive_theme
 from core.payload.assemble import assemble_payload
 from core.payload.day_lists import project_day_lists
 from core.payload.freeze import freeze_payload
@@ -66,6 +67,7 @@ from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, 
 from shell.adapters.postgres.client import Client
 from shell.adapters.postgres.report_payload import store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
+from shell.adapters.postgres.report_theme import store_report_theme
 from shell.runner.backoff import with_backoff
 from shell.runner.month import client_month_interval_utc
 
@@ -288,7 +290,10 @@ def _run_payload_ready(
 ) -> None:
     """``payload_ready``: assemble this month's ``Payload`` (Story 3.6),
     project its two day lists (Story 3.7), freeze both into canonical JSON
-    (Story 3.8) and persist a ``ReportPayload`` row for ``run``.
+    (Story 3.8) and persist a ``ReportPayload`` row for ``run`` -- then
+    derive and persist this month's ``ReportTheme`` from that same
+    ``Payload`` (Story 4.3, AD-14), reusing ``payload``/``config`` already in
+    scope rather than a new AD-10 stage.
 
     ``run.transit_events`` is read back and split by
     ``_deserialize_transit_events`` -- never recomputed, mirroring how
@@ -317,6 +322,9 @@ def _run_payload_ready(
         ephemeris_identity=ephemeris_identity,
     )
     store_report_payload(session, run=run, frozen=frozen)
+
+    theme = derive_theme(payload, config)
+    store_report_theme(session, run=run, theme=theme)
 
 
 #: Only the stages implemented so far -- Story 3.9+ registers the rest,
