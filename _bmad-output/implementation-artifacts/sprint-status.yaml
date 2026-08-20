@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-20-2026 12:00
+last_updated: 08-20-2026 13:26
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -223,7 +223,7 @@ action_items:
       session, and consider documenting the +/-0.01 degree compare() tolerance as
       project-wide policy"
     owner: "Francesco"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-2-retro-item-16-add-environs-to-_environment_modules-in"
     epic: 2
@@ -270,7 +270,7 @@ action_items:
       (mercury/mars/jupiter transit_positions) and 3.2's (Mercury station bracket)
       self-corrected fixtures"
     owner: "Francesco"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
   - id: "epic-3-retro-item-22-record-that-story-3-9-s-payload-view-and"
     epic: 3
