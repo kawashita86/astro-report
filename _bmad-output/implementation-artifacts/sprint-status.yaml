@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-20-2026
+last_updated: 08-20-2026 12:00
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -57,16 +57,16 @@ development_status:
   epic-2-retrospective: done
 
   epic-3: in-progress
-  3-1-find-every-transit-to-natal-aspect-and-the-exact-moment-it-p: review
-  3-2-date-every-station-and-know-what-is-standing-retrograde: review
-  3-3-detect-every-crossing-of-a-natal-house-cusp: review
-  3-4-locate-the-month-s-new-and-full-moons: review
-  3-5-start-a-month-s-computation-and-watch-it-finish: review
-  3-6-assemble-the-report-payload-each-section-needs: review
-  3-7-project-the-two-day-lists-by-code-so-a-day-cannot-be-misfile: review
-  3-8-freeze-the-payload-so-any-report-can-be-reproduced-years-lat: review
-  3-9-read-the-facts-behind-a-month-entry-by-entry: review
-  epic-3-retrospective: optional
+  3-1-find-every-transit-to-natal-aspect-and-the-exact-moment-it-p: done
+  3-2-date-every-station-and-know-what-is-standing-retrograde: done
+  3-3-detect-every-crossing-of-a-natal-house-cusp: done
+  3-4-locate-the-month-s-new-and-full-moons: done
+  3-5-start-a-month-s-computation-and-watch-it-finish: done
+  3-6-assemble-the-report-payload-each-section-needs: done
+  3-7-project-the-two-day-lists-by-code-so-a-day-cannot-be-misfile: done
+  3-8-freeze-the-payload-so-any-report-can-be-reproduced-years-lat: done
+  3-9-read-the-facts-behind-a-month-entry-by-entry: done
+  epic-3-retrospective: done
 
   epic-4: backlog
   4-1-write-the-style-guide: backlog
@@ -139,7 +139,7 @@ action_items:
       retrograde-station-month.toml's expected.stations shape) before story 3.2 needs
       it to pass"
     owner: "story-3.2"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"
   - id: "epic-1-retro-item-5-commit-the-aspect-transit-event-derivati"
     epic: 1
@@ -169,7 +169,7 @@ action_items:
       independently of the correction transaction, or stash the resolved place across
       the two requests instead of re-resolving)"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-2-retro-item-9-make-tests-test_http_client_correction-p"
     epic: 2
@@ -177,7 +177,7 @@ action_items:
       per simulated request (matching production's get_session) instead of one shared,
       never-closed session across the warn/confirm pair"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-2-retro-item-10-add-at-least-one-http-level-test-that-wi"
     epic: 2
@@ -248,3 +248,35 @@ action_items:
     owner: "Francesco"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
+  - id: "epic-3-retro-item-19-extract-the-four-duplicated-_bisect-_bui"
+    epic: 3
+    action: "Extract the four duplicated _bisect/_build_grid/_BISECTION_ITERATIONS
+      implementations (aspects.py:212,260; stations.py:183,201; ingresses.py:210,248;
+      lunations.py:185,229) into one shared helper module"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
+  - id: "epic-3-retro-item-20-give-report_run_poll-html-get-report-run"
+    epic: 3
+    action: "Give report_run_poll.html / GET /report-runs/{id} a way to signal a stuck
+      or permanently-failing run instead of polling silently forever at its last stage"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
+  - id: "epic-3-retro-item-21-re-verify-against-a-live-astro-com-sessi"
+    epic: 3
+    action: "Re-verify against a live Astro.com session, before Epic 4 builds report
+      generation on this Payload: epic-2-retro-item-15's two fixtures plus story 3.1's
+      (mercury/mars/jupiter transit_positions) and 3.2's (Mercury station bracket)
+      self-corrected fixtures"
+    owner: "Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
+  - id: "epic-3-retro-item-22-record-that-story-3-9-s-payload-view-and"
+    epic: 3
+    action: "Record that Story 3.9's Payload view (and the runner driver / poll view
+      generally) has not been manually checked in a browser -- no reachable Postgres
+      in this environment"
+    owner: "Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
