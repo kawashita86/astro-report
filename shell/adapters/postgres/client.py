@@ -24,6 +24,7 @@ from core.ephemeris.identity import EphemerisIdentity
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.computation import ComputationConfig
 from core.types.place import ResolvedPlace
+from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 
 __all__ = [
@@ -40,7 +41,9 @@ __all__ = [
 #: ``tests/test_client_store.py``'s cascade-invariant test read from this
 #: constant -- a table added here without joining the delete function below,
 #: or vice versa, is exactly the drift that invariant test exists to catch.
-_CLIENT_CASCADE_TABLES: frozenset[str] = frozenset({"natal_chart", "report_run"})
+_CLIENT_CASCADE_TABLES: frozenset[str] = frozenset(
+    {"natal_chart", "report_run", "report_payload"}
+)
 
 
 class Client(SQLModel, table=True):
@@ -263,10 +266,15 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     ``ReportRun`` joined the cascade in Story 3.5).
 
     Every ``StoredNatalChart`` row for ``client`` -- current and superseded --
-    and every ``ReportRun`` row for ``client`` are deleted first, then the
-    ``Client`` row itself: children before parent, matching how no foreign key
-    in this codebase declares ``ondelete`` at the schema level, so the cascade
-    is explicit application code, not the database's job.
+    every ``ReportPayload`` row and every ``ReportRun`` row for ``client`` are
+    deleted first, then the ``Client`` row itself: children before parent,
+    matching how no foreign key in this codebase declares ``ondelete`` at the
+    schema level, so the cascade is explicit application code, not the
+    database's job. ``ReportPayload`` rows are deleted before ``ReportRun``
+    rows specifically -- ``ReportPayload.report_run_id`` is itself a foreign
+    key to ``report_run.id`` (Story 3.8), so a ``ReportRun`` row still
+    referenced by a ``ReportPayload`` row would violate that constraint if
+    deleted first.
     :data:`_CLIENT_CASCADE_TABLES` is the single source of truth for which
     tables that first step must cover; the cascade-invariant test in
     ``tests/test_client_store.py`` asserts it stays equal to every table in
@@ -283,6 +291,12 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     ).all()
     for chart in charts:
         session.delete(chart)
+
+    payloads = session.exec(
+        select(ReportPayload).where(ReportPayload.client_id == client.id)
+    ).all()
+    for stored_payload in payloads:
+        session.delete(stored_payload)
 
     runs = session.exec(select(ReportRun).where(ReportRun.client_id == client.id)).all()
     for run in runs:

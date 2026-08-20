@@ -12,13 +12,14 @@ either role continues the run" -- the browser's own poll cadence is the
 drain, matching the architecture note "no queue infrastructure needed." See
 ``shell/http/routes/report_runs.py``.
 
-**Why only `natal_ready`/`transits_ready` get real stage functions.**
-BUILD-ORDER.md: "the runner introduced once two real stages exist." Payload
-assembly is Story 3.6's job (``core/payload/`` does not exist yet);
-registering a stage before its implementation exists would mean stubbing a
+**Why only three of the six stages get real stage functions (so far).**
+BUILD-ORDER.md: "the runner introduced once two real stages exist."
+`natal_ready`/`transits_ready` arrived in Story 3.5; `payload_ready` in
+Story 3.8, once ``core/payload/`` (Stories 3.6-3.8) existed to call.
+Registering a stage before its implementation exists would mean stubbing a
 lie. `_STAGE_SEQUENCE` names all six stages for display/ordering;
-`_STAGE_FUNCTIONS` only the two real ones -- `drive()` stops the moment it
-reaches a name with no registered function.
+`_STAGE_FUNCTIONS` only the ones actually implemented -- `drive()` stops the
+moment it reaches a name with no registered function.
 
 **Why no live external call demonstrates the backoff.** Both registered
 stages read local state (the already-persisted chart, the local ephemeris)
@@ -48,15 +49,22 @@ from typing import Any
 
 from sqlmodel import Session
 
+from core.domains.profiles import assemble_domain_profiles
+from core.domains.rulers import resolve_house_rulers
 from core.ephemeris.identity import EphemerisIdentity
+from core.payload.assemble import assemble_payload
+from core.payload.day_lists import project_day_lists
+from core.payload.freeze import freeze_payload
 from core.transits.aspects import find_transit_aspects
 from core.transits.ingresses import find_ingresses
 from core.transits.lunations import find_lunations
 from core.transits.stations import find_stations
 from core.types.chart import NatalChart
 from core.types.computation import ComputationConfig
-from core.types.transits import StandingRetrograde
+from core.types.sections import SectionsConfig
+from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
 from shell.adapters.postgres.client import Client
+from shell.adapters.postgres.report_payload import store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.runner.backoff import with_backoff
 from shell.runner.month import client_month_interval_utc
@@ -81,7 +89,9 @@ _STAGE_SEQUENCE: tuple[str, ...] = (
 #: same context, whether or not it needs all of it, so the registry stays a
 #: plain ``{name: function}`` mapping rather than growing per-stage plumbing
 #: in ``drive()`` itself as more stages register.
-StageFn = Callable[[Session, ReportRun, NatalChart, ComputationConfig, EphemerisIdentity], None]
+StageFn = Callable[
+    [Session, ReportRun, NatalChart, ComputationConfig, EphemerisIdentity, SectionsConfig], None
+]
 
 
 def _run_natal_ready(
@@ -90,6 +100,7 @@ def _run_natal_ready(
     natal_chart: NatalChart,
     config: ComputationConfig,
     ephemeris_identity: EphemerisIdentity,
+    sections_config: SectionsConfig,
 ) -> None:
     """``natal_ready``: resolve ``run.month`` against ``run.client_id``'s
     local calendar into ``[month_start_utc, month_end_utc)``.
@@ -113,6 +124,7 @@ def _run_transits_ready(
     natal_chart: NatalChart,
     config: ComputationConfig,
     ephemeris_identity: EphemerisIdentity,
+    sections_config: SectionsConfig,
 ) -> None:
     """``transits_ready``: call the four Story 3.1-3.4 scan functions across
     ``[run.month_start_utc, run.month_end_utc)`` -- read back from the row,
@@ -144,14 +156,6 @@ def _run_transits_ready(
         for lunation in find_lunations(natal_chart, month_start_utc, month_end_utc)
     )
     run.transit_events = events
-
-
-#: Only the two stages this story implements -- Story 3.6+ registers the
-#: rest, unchanged (see the module's Design Notes).
-_STAGE_FUNCTIONS: dict[str, StageFn] = {
-    "natal_ready": _run_natal_ready,
-    "transits_ready": _run_transits_ready,
-}
 
 
 def _stage_index(stage: str | None) -> int:
@@ -194,6 +198,136 @@ def _serialize_event(kind: str, event: Any) -> dict[str, Any]:
     return {"kind": kind, **fields}
 
 
+def _parse_datetime(value: str | None) -> datetime | None:
+    return None if value is None else datetime.fromisoformat(value)
+
+
+def _deserialize_transit_events(
+    events: list[dict[str, Any]],
+) -> tuple[
+    tuple[TransitAspectEvent, ...],
+    tuple[Station | StandingRetrograde, ...],
+    tuple[Ingress, ...],
+    tuple[Lunation, ...],
+]:
+    """The reverse of ``_serialize_event``: split ``run.transit_events`` back
+    into the four tuples ``core/payload/assemble.py::assemble_payload()``
+    takes -- ``stations`` mixed ``Station | StandingRetrograde``, matching
+    ``find_stations()``'s own return shape (``_run_transits_ready``'s
+    ``isinstance`` split, done here in reverse only at the dataclass-choice
+    step, never re-splitting the two kinds apart into separate tuples).
+    """
+    aspects: list[TransitAspectEvent] = []
+    stations: list[Station | StandingRetrograde] = []
+    ingresses: list[Ingress] = []
+    lunations: list[Lunation] = []
+
+    for event in events:
+        kind = event["kind"]
+        fields = {key: value for key, value in event.items() if key != "kind"}
+        if kind == "aspect":
+            aspects.append(
+                TransitAspectEvent(
+                    transiting_body=fields["transiting_body"],
+                    natal_point=fields["natal_point"],
+                    aspect=fields["aspect"],
+                    perfected_at=_parse_datetime(fields["perfected_at"]),
+                    never_perfected=fields["never_perfected"],
+                    orb_entry_at=_parse_datetime(fields["orb_entry_at"]),
+                    orb_exit_at=_parse_datetime(fields["orb_exit_at"]),
+                )
+            )
+        elif kind == "station":
+            stations.append(
+                Station(
+                    body=fields["body"],
+                    direction=fields["direction"],
+                    station_at=_parse_datetime(fields["station_at"]),
+                    longitude=Decimal(fields["longitude"]),
+                )
+            )
+        elif kind == "standing_retrograde":
+            stations.append(
+                StandingRetrograde(
+                    body=fields["body"],
+                    retrograde_start_utc=_parse_datetime(fields["retrograde_start_utc"]),
+                    retrograde_end_utc=_parse_datetime(fields["retrograde_end_utc"]),
+                )
+            )
+        elif kind == "ingress":
+            ingresses.append(
+                Ingress(
+                    body=fields["body"],
+                    house_departed=fields["house_departed"],
+                    house_entered=fields["house_entered"],
+                    crossed_at=_parse_datetime(fields["crossed_at"]),
+                )
+            )
+        elif kind == "lunation":
+            lunations.append(
+                Lunation(
+                    kind=fields["lunation_kind"],
+                    occurred_at=_parse_datetime(fields["occurred_at"]),
+                    longitude=Decimal(fields["longitude"]),
+                    natal_house=fields["natal_house"],
+                )
+            )
+        else:
+            raise ValueError(f"unrecognized transit event kind: {kind!r}")
+
+    return tuple(aspects), tuple(stations), tuple(ingresses), tuple(lunations)
+
+
+def _run_payload_ready(
+    session: Session,
+    run: ReportRun,
+    natal_chart: NatalChart,
+    config: ComputationConfig,
+    ephemeris_identity: EphemerisIdentity,
+    sections_config: SectionsConfig,
+) -> None:
+    """``payload_ready``: assemble this month's ``Payload`` (Story 3.6),
+    project its two day lists (Story 3.7), freeze both into canonical JSON
+    (Story 3.8) and persist a ``ReportPayload`` row for ``run``.
+
+    ``run.transit_events`` is read back and split by
+    ``_deserialize_transit_events`` -- never recomputed, mirroring how
+    ``_run_natal_ready``'s month interval is read back rather than
+    recomputed once ``transits_ready`` has already run. ``DomainProfiles``
+    are recomputed fresh from ``natal_chart``/``config`` instead: cheap and
+    pure, with no stored column to read back from (see Story 3.8's Design
+    Notes).
+    """
+    assert run.transit_events is not None, (
+        f"ReportRun {run.id} reached payload_ready without transit events."
+    )
+
+    aspects, stations, ingresses, lunations = _deserialize_transit_events(run.transit_events)
+    rulers = resolve_house_rulers(natal_chart, config)
+    profiles = assemble_domain_profiles(natal_chart, rulers)
+    payload = assemble_payload(
+        natal_chart, profiles, aspects, stations, ingresses, lunations, config, sections_config
+    )
+    day_lists = project_day_lists(payload, natal_chart, config)
+    frozen = freeze_payload(
+        payload,
+        day_lists,
+        config=config,
+        sections_config=sections_config,
+        ephemeris_identity=ephemeris_identity,
+    )
+    store_report_payload(session, run=run, frozen=frozen)
+
+
+#: Only the stages implemented so far -- Story 3.9+ registers the rest,
+#: unchanged (see the module's Design Notes).
+_STAGE_FUNCTIONS: dict[str, StageFn] = {
+    "natal_ready": _run_natal_ready,
+    "transits_ready": _run_transits_ready,
+    "payload_ready": _run_payload_ready,
+}
+
+
 def drive(
     session: Session,
     run: ReportRun,
@@ -201,6 +335,7 @@ def drive(
     natal_chart: NatalChart,
     config: ComputationConfig,
     ephemeris_identity: EphemerisIdentity,
+    sections_config: SectionsConfig,
 ) -> ReportRun:
     """Advance ``run`` through every stage in ``_STAGE_SEQUENCE`` that has a
     registered function in ``_STAGE_FUNCTIONS`` and that ``run.stage`` has
@@ -210,7 +345,7 @@ def drive(
     at or before ``run.stage`` in ``_STAGE_SEQUENCE`` is never called again,
     so re-driving a completed run is a no-op regardless of what
     ``natal_chart``/``config`` are passed. Stops cleanly the moment it
-    reaches a stage name with no registered function (Story 3.6+ registers
+    reaches a stage name with no registered function (Story 3.9+ registers
     the rest) -- and stops just as cleanly, without raising, if a stage's
     ``with_backoff`` call exhausts every attempt, leaving ``run.stage``
     unchanged for the next ``drive()`` call to retry. Either way ``run`` is
@@ -233,7 +368,7 @@ def drive(
         try:
             with_backoff(
                 lambda stage_fn=stage_fn: stage_fn(
-                    session, run, natal_chart, config, ephemeris_identity
+                    session, run, natal_chart, config, ephemeris_identity, sections_config
                 )
             )
         except Exception:

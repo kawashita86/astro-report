@@ -34,6 +34,7 @@ from sqlmodel import Session
 
 from core.ephemeris.identity import EphemerisIdentity, verify_ephemeris_identity
 from core.types.computation import ComputationConfig
+from core.types.sections import SectionsConfig
 from shell import config
 from shell.computation import load_computation_config
 from shell.config import Environment, Settings
@@ -45,8 +46,16 @@ from shell.http.auth import (
     sign_session,
     verify_password,
 )
+from shell.sections import load_sections_config
 
-__all__ = ["app", "computation_config", "create_app", "ephemeris_identity", "get_session"]
+__all__ = [
+    "app",
+    "computation_config",
+    "create_app",
+    "ephemeris_identity",
+    "get_session",
+    "sections_config",
+]
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -99,6 +108,7 @@ def create_app(settings: Settings) -> FastAPI:
     application.state.settings = settings
     application.state.engine = create_engine(settings.sqlalchemy_url)
     application.state.computation_config = computation_config
+    application.state.sections_config = sections_config
     application.state.ephemeris_identity = ephemeris_identity
     application.add_middleware(AuthMiddleware)
     application.include_router(clients_router)
@@ -184,6 +194,12 @@ ephemeris_identity: EphemerisIdentity = verify_ephemeris_identity()
 #: The one home for every astronomical tuning value (AD-18), loaded once at
 #: import time. Story 2.3's ``/clients`` route is the first consumer.
 computation_config: ComputationConfig = load_computation_config()
+
+#: The declarative Section-to-Payload mapping (AD-13), loaded once at import
+#: time exactly like ``computation_config``. Story 3.8's ``payload_ready``
+#: stage (``shell/runner/driver.py``) is the first consumer, via
+#: ``shell/http/routes/report_runs.py``'s ``_drive_run``.
+sections_config: SectionsConfig = load_sections_config()
 
 #: The instance the ASGI server imports (``shell.http.app:app``).
 app = create_app(config.settings)

@@ -114,7 +114,7 @@ def fake_drive(monkeypatch: pytest.MonkeyPatch):
     """
     import shell.http.routes.report_runs as report_runs_module
 
-    def _fake_drive(session, run, *, natal_chart, config, ephemeris_identity):
+    def _fake_drive(session, run, *, natal_chart, config, ephemeris_identity, sections_config):
         if run.stage is None:
             run.month_start_utc = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
             run.month_end_utc = datetime(2026, 2, 1, 6, 0, 0, tzinfo=UTC)

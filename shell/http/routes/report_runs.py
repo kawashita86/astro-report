@@ -69,6 +69,7 @@ def _drive_run(request: Request, session: Session, run: ReportRun, client: Clien
         natal_chart=natal_chart,
         config=request.app.state.computation_config,
         ephemeris_identity=request.app.state.ephemeris_identity,
+        sections_config=request.app.state.sections_config,
     )
 
 
