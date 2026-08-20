@@ -297,3 +297,35 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-9-read-the-facts-behind-a-month-entry-by-entry.md`
   summary: `GET /report-runs/{run_id}/payload` sets no `Cache-Control`/no-store header, so a Client's natal placements and transit data could be retained in browser/proxy disk cache despite the route being session-authenticated.
   evidence: Surfaced by blind-hunter review of this story's diff. Not specific to this route -- every authenticated view in `shell/http/` (chart wheel, client edit, the poll view itself) has the identical gap; none of them sets cache-control headers today. Worth a single fix applied uniformly (e.g. middleware-level `Cache-Control: no-store` on every authenticated response) rather than a one-off in this story's route.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
+  summary: The Style Guide gives no register guidance for how prose should acknowledge month-to-month continuity or change (still-active/tightened/resolved/new).
+  evidence: `epic-4-context.md` treats the ReportTheme comparison as central to avoiding repetition ("nothing significant changed" is computed, not judged), and Story 4.7 owns "write this month as a continuation, not a reprint" — but FR-30's minimum content list for the Style Guide never mentions continuity, so this was correctly out of this story's frozen scope. Sections 1 and 8 are natural homes for such guidance once Story 4.4/4.7 exist to inform it.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
+  summary: The Style Guide never describes the Generator's actual output contract — a per-sentence cited structure where each sentence carries the Payload entry IDs it rests on, and an uncited sentence is a Gate violation.
+  evidence: `epic-4-context.md`'s Technical Decisions fix this structure and note it is "enforced in Epic 5." §4 of the guide discusses traceability only as a general prose obligation. This is Story 4.5's prompt-engineering concern (translating the guide's register rules into the structured contract), not this story's register-content scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
+  summary: The Style Guide never references the PRD's own claim-density counter-metric (SM-C1) or gives any numeric per-Section target for claim/date anchoring.
+  evidence: SM-C1 measures "Astronomical Claims per Report, and the share of Sections anchored to a date" as the PRD's chosen counter to the vagueness failure mode §3 spends most of its space warning against, but FR-30's minimum content list for the guide is qualitative only — adding a numeric target is a product-metrics decision beyond this story's frozen scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
+  summary: No per-Section length or sentence/paragraph-count budget is specified anywhere in the guide.
+  evidence: The Report presumably feeds a fixed UI/PDF layout, but FR-30's minimum content list doesn't require a length budget and none of the planning artifacts specify one yet — worth resolving once Story 4.5/4.6's rendering shape is concrete.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
+  summary: The Style Guide gives no guidance for the sparse- or empty-Payload case (a month with few or no entries in a given Section's domain).
+  evidence: Not part of FR-30's minimum content list; this is closer to a Story 4.5 prompt-engineering concern (how the Generator behaves given thin input) than a register-content question, but it's a real gap a prompt author will hit.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
+  summary: The Style Guide gives no guidance on cross-Section consistency (e.g. Section 1's overview restating Sections 2–5's specific claims, or a transit's caption repeated verbatim between a prose Section and a day-list entry).
+  evidence: Not part of FR-30's minimum content list. Worth a pass once Story 4.5 generation exists and real output can be inspected for this failure mode.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
+  summary: The `version: 1` marker in `data/style-guide.seed.md` is a bare, undelimited prose line, unlike sibling `data/computation.toml`/`data/sections.toml`'s `#`-comment-header-plus-`version = N` TOML convention with a loader-computed content hash for drift detection.
+  evidence: The spec only required a marker "Story 4.2's seeding logic can read" (satisfied — it's plainly greppable), not a specific structured format. Story 4.2 should settle the exact parsing convention (and whether a content hash is needed) when it builds the seeding loader.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-write-the-style-guide.md`
+  summary: The Style Guide gives no fixed Italian nomenclature for recurring astrological terms (house names, aspect names, "casa" vs. "domicilio," etc.), leaving terminology free to vary between Reports.
+  evidence: §4 requires every claim to name "a planet, transit, or house" but nothing pins the Italian vocabulary for those terms consistently. Not part of FR-30's minimum content list; worth a glossary pass once real generated output surfaces actual inconsistencies.
