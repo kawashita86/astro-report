@@ -147,6 +147,14 @@ def test_an_offline_upgrade_runs_env_py_and_emits_the_chain() -> None:
     assert "CREATE TABLE client" in completed.stdout
     assert "CREATE TABLE natal_chart" in completed.stdout
     assert "CREATE INDEX ix_natal_chart_client_id" in completed.stdout
+    # 0007_style_guide: seeds version 1 from data/style-guide.seed.md inside
+    # the same upgrade() -- no adapter-level test exercises this migration's
+    # own INSERT (those tests build their schema via SQLModel.create_all()
+    # instead), so this is the only check that the seed actually lands.
+    assert "CREATE TABLE style_guide" in completed.stdout
+    assert "CREATE UNIQUE INDEX ix_style_guide_version" in completed.stdout
+    assert "INSERT INTO style_guide" in completed.stdout
+    assert "## Purpose and how to read this guide" in completed.stdout
 
 
 def test_a_percent_encoded_password_does_not_abort_the_migration() -> None:

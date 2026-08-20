@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Style Guide — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>Style Guide</h1>
+      {% if error %}
+      <p role="alert">{{ error }}</p>
+      {% endif %}
+
+      {% if current %}
+      <section>
+        <h2>Current (version {{ current.version }})</h2>
+        <p><a href="/style-guide/{{ current.version }}">View</a></p>
+        <p><a href="/style-guide/edit">Edit</a></p>
+      </section>
+
+      <section>
+        <h2>History</h2>
+        <ul>
+          {% for entry in history %}
+          <li>
+            <a href="/style-guide/{{ entry.version }}">version {{ entry.version }}</a>
+            -- {{ entry.created_at }}
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>
