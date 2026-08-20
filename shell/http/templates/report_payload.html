@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Report payload — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>Report payload</h1>
+
+      {% macro render_value(value) -%}
+        {%- if value is mapping -%}
+          <dl>
+            {%- for key, item in value.items() -%}
+              {%- if key != "id" -%}
+                <div><dt>{{ key }}</dt><dd>{{ render_value(item) }}</dd></div>
+              {%- endif -%}
+            {%- endfor -%}
+          </dl>
+        {%- elif value is sequence and value is not string -%}
+          <ul>
+            {%- for item in value -%}
+              <li>{{ render_value(item) }}</li>
+            {%- endfor -%}
+          </ul>
+        {%- else -%}
+          {{- value if value is not none else "" -}}
+        {%- endif -%}
+      {%- endmacro %}
+
+      {% for section_name, section in payload.sections.items() %}
+      <section>
+        <h2>{{ section_name }}</h2>
+
+        {% if section.profile is not none %}
+        <h3>profile</h3>
+        {{ render_value(section.profile) }}
+        {% endif %}
+
+        {% for field_name, entries in section.items() %}
+        {% if field_name != "profile" and entries %}
+        <h3>{{ field_name }}</h3>
+        <ul>
+          {% for entry in entries %}
+          <li>{{ render_value(entry) }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% endfor %}
+      </section>
+      {% endfor %}
+
+      {% for list_name, entries in payload.day_lists.items() %}
+      {% if entries %}
+      <section>
+        <h2>{{ list_name }}</h2>
+        <ul>
+          {% for entry in entries %}
+          <li>{{ render_value(entry) }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+      {% endfor %}
+    </main>
+  </body>
+</html>

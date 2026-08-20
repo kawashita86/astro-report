@@ -31,13 +31,19 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
+from core.payload.freeze import freeze_payload
+from core.types.day_lists import DayLists
+from core.types.payload import Payload, SectionPayload
 from core.types.place import ResolvedPlace
+from core.types.transits import Station, TransitAspectEvent
 from shell.adapters.postgres.client import Client, create_client_with_chart
+from shell.adapters.postgres.report_payload import store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
 from shell.config import Environment, Settings
 from shell.http.app import create_app, get_session
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
+from shell.sections import load_sections_config
 
 AUTH_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$hQD4AS+0CkX36kCpbKWmRg$"
@@ -55,6 +61,7 @@ LOCAL = Settings(
 
 _EPHEMERIS_IDENTITY = verify_ephemeris_identity()
 _COMPUTATION_CONFIG = load_computation_config()
+_SECTIONS_CONFIG = load_sections_config()
 
 # Fort Worth, TX, 2026-01-01 00:00 America/Chicago (UTC-6) -- the same
 # known-good input tests/test_client_store.py/tests/test_http_clients.py use.
@@ -152,6 +159,59 @@ def _create_client_with_real_chart(db_session: Session, *, name: str = "Ada Love
 
 def _report_runs(db_session: Session) -> list[ReportRun]:
     return list(db_session.exec(select(ReportRun)))
+
+
+def _empty_section() -> SectionPayload:
+    return SectionPayload(
+        profile=None, aspects=(), stations=(), standing_retrogrades=(), ingresses=(), lunations=()
+    )
+
+
+def _a_frozen_payload_with_one_aspect() -> dict:
+    """One `amore` Aspect with a known, easy-to-check UTC window, plus one
+    entry in each day-list -- enough to prove the route localizes an instant
+    and renders every one of the eight groupings that actually carry data,
+    without needing a full realistic computation. Every other Section/
+    per-field grouping (e.g. `amore`'s own `stations`) stays empty, so the
+    same fixture also proves an empty grouping's heading is not rendered."""
+    event = TransitAspectEvent(
+        transiting_body="mars",
+        natal_point="venus",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 10, 15, 0, 0, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 8, 12, 0, 0, tzinfo=UTC),
+        orb_exit_at=datetime(2026, 1, 12, 12, 0, 0, tzinfo=UTC),
+    )
+    station = Station(
+        body="mars",
+        direction="retrograde",
+        station_at=datetime(2026, 1, 15, 9, 0, 0, tzinfo=UTC),
+        longitude=Decimal("10.0"),
+    )
+    amore_section = SectionPayload(
+        profile=None,
+        aspects=(event,),
+        stations=(),
+        standing_retrogrades=(),
+        ingresses=(),
+        lunations=(),
+    )
+    payload = Payload(
+        energia_generale=_empty_section(),
+        amore=amore_section,
+        lavoro=_empty_section(),
+        denaro=_empty_section(),
+        benessere=_empty_section(),
+        consiglio_finale=_empty_section(),
+    )
+    return freeze_payload(
+        payload,
+        DayLists(giorni_favorevoli=(event,), giorni_di_attenzione=(station,)),
+        config=_COMPUTATION_CONFIG,
+        sections_config=_SECTIONS_CONFIG,
+        ephemeris_identity=_EPHEMERIS_IDENTITY,
+    )
 
 
 # --- Authentication -------------------------------------------------------------
@@ -296,3 +356,126 @@ def test_starting_a_run_for_a_client_with_no_stored_chart_is_404(
     )
 
     assert response.status_code == 404
+
+
+# --- Story 3.9: GET /report-runs/{run_id}/payload ---------------------------------
+
+
+def test_getting_the_payload_without_a_session_is_401(client: TestClient) -> None:
+    response = client.get("/report-runs/01a01abf-0000-7000-8000-000000000000/payload")
+
+    assert response.status_code == 401
+
+
+def test_getting_the_payload_for_an_unknown_run_is_404(authenticated_client: TestClient) -> None:
+    """Matrix row: "Unknown run_id" -- no matching ReportRun -> 404."""
+    response = authenticated_client.get(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/payload"
+    )
+
+    assert response.status_code == 404
+
+
+def test_getting_the_payload_for_a_run_with_no_stored_payload_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "No ReportPayload for run_id" -- run hasn't reached
+    ``payload_ready`` -> 404."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/payload")
+
+    assert response.status_code == 404
+
+
+def test_getting_the_payload_shows_all_eight_groupings_localized_to_the_clients_zone(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/payload")
+
+    assert response.status_code == 200
+    for name in (
+        "energia_generale",
+        "amore",
+        "lavoro",
+        "denaro",
+        "benessere",
+        "consiglio_finale",
+        "giorni_favorevoli",
+        "giorni_di_attenzione",
+    ):
+        assert name in response.text
+    # ada's client.iana_zone is America/Chicago (UTC-6 in January):
+    # 2026-01-08 12:00 UTC (orb_entry_at) -> 06:00 local.
+    assert "2026-01-08 06:00:00 CST" in response.text
+    # `id` is omitted from a rendered event entry.
+    event_id = frozen["sections"]["amore"]["aspects"][0]["id"]
+    assert event_id not in response.text
+
+
+def test_getting_the_payload_hides_empty_groupings(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """`_a_frozen_payload_with_one_aspect()` only populates `amore.aspects`
+    plus both day-lists -- every other per-field grouping (`amore.stations`
+    included) stays an empty tuple and must not render a heading for it, so
+    the page does not dominate the reader with empty categories most months
+    will have plenty of."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+    store_report_payload(db_session, run=run, frozen=_a_frozen_payload_with_one_aspect())
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/payload")
+
+    assert response.status_code == 200
+    assert "<h3>aspects</h3>" in response.text
+    for empty_field_heading in (
+        "<h3>stations</h3>",
+        "<h3>standing_retrogrades</h3>",
+        "<h3>ingresses</h3>",
+        "<h3>lunations</h3>",
+        "<h3>profile</h3>",
+    ):
+        assert empty_field_heading not in response.text
+
+
+def test_the_poll_view_links_to_the_payload_once_it_is_ready(
+    authenticated_client: TestClient, db_session: Session, fake_drive
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/payload"' in response.text
+
+
+def test_the_poll_view_has_no_payload_link_before_payload_ready(
+    authenticated_client: TestClient, db_session: Session, fake_drive
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    start_response = authenticated_client.post(
+        f"/clients/{ada.id}/report-runs", data={"month": "2026-01"}, follow_redirects=False
+    )
+    location = start_response.headers["location"]
+
+    response = authenticated_client.get(location)
+
+    assert "View Payload" not in response.text

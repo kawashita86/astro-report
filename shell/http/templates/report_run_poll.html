@@ -19,6 +19,9 @@
         hx-swap="outerHTML"
       >
         <p>Stage: {{ run.stage or "starting" }}</p>
+        {% if run.stage == "payload_ready" %}
+        <p><a href="/report-runs/{{ run.id }}/payload">View Payload</a></p>
+        {% endif %}
       </div>
 {% if not request.headers.get("hx-request") %}
     </main>

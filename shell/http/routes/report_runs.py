@@ -28,8 +28,10 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from shell.adapters.postgres.client import Client, StoredNatalChart, deserialize_natal_chart
+from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.http.app import get_session
+from shell.http.payload_view import localize_payload
 from shell.runner.driver import drive
 
 __all__ = ["router"]
@@ -112,3 +114,30 @@ def poll_report_run(
     _drive_run(request, session, run, client)
 
     return _templates.TemplateResponse(request, "report_run_poll.html", {"run": run})
+
+
+@router.get("/report-runs/{run_id}/payload", include_in_schema=False)
+def view_report_payload(
+    run_id: UUID, request: Request, session: Session = Depends(get_session)
+) -> Response:
+    """Read the frozen Payload behind ``run_id``'s Report, entry by entry
+    (Story 3.9, PRD FR-15).
+
+    404 covers both "no such ``ReportRun``" and "that run hasn't reached
+    ``payload_ready`` yet" -- both collapse to the same query finding no
+    ``ReportPayload`` row for ``run_id``, so no separate ``ReportRun`` lookup
+    is needed first.
+    """
+    stored = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run_id)
+    ).first()
+    if stored is None:
+        raise HTTPException(status_code=404)
+
+    client = session.get(Client, stored.client_id)
+    if client is None:
+        raise RuntimeError(f"ReportPayload {stored.id} references a missing Client.")
+
+    localized = localize_payload(stored.payload, iana_zone=client.iana_zone)
+
+    return _templates.TemplateResponse(request, "report_payload.html", {"payload": localized})

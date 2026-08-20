@@ -65,7 +65,7 @@ development_status:
   3-6-assemble-the-report-payload-each-section-needs: review
   3-7-project-the-two-day-lists-by-code-so-a-day-cannot-be-misfile: review
   3-8-freeze-the-payload-so-any-report-can-be-reproduced-years-lat: review
-  3-9-read-the-facts-behind-a-month-entry-by-entry: backlog
+  3-9-read-the-facts-behind-a-month-entry-by-entry: review
   epic-3-retrospective: optional
 
   epic-4: backlog
