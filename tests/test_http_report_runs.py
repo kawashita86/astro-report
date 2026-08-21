@@ -33,16 +33,20 @@ from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.payload.freeze import freeze_payload
 from core.types.day_lists import DayLists
+from core.types.generation import GeneratedDraft, Sentence
 from core.types.payload import Payload, SectionPayload
 from core.types.place import ResolvedPlace
 from core.types.transits import Station, TransitAspectEvent
+from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.postgres.client import Client, create_client_with_chart
+from shell.adapters.postgres.report_draft import store_report_draft
 from shell.adapters.postgres.report_payload import store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
 from shell.config import Environment, Settings
 from shell.http.app import create_app, get_session
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
+from shell.http.routes.report_runs import get_generator
 from shell.sections import load_sections_config
 
 AUTH_PASSWORD_HASH = (
@@ -107,7 +111,7 @@ def authenticated_client(client: TestClient) -> TestClient:
 
 
 @pytest.fixture
-def fake_drive(monkeypatch: pytest.MonkeyPatch):
+def fake_drive(app_instance: FastAPI, monkeypatch: pytest.MonkeyPatch):
     """Stand in for a real ``drive()`` call, mirroring
     ``tests/test_http_clients.py``'s own real-vs-fake boundary
     (``fake_chart_computation``): Starlette's ``TestClient`` runs the ASGI app
@@ -120,10 +124,18 @@ def fake_drive(monkeypatch: pytest.MonkeyPatch):
     ``tests/test_runner_driver.py``'s job; these HTTP tests only need to
     prove the routes call ``drive()``, persist whatever it returns, and
     render/redirect correctly around it.
+
+    ``get_generator`` is also overridden with a fake, never a real
+    ``GeminiGenerator`` -- mirrors ``tests/test_http_clients.py``'s own
+    ``get_geocoder`` override: ``_fake_drive`` never actually calls the
+    ``generator`` it receives, so nothing here needs a working one, only
+    something structurally accepted where a ``Generator`` is expected.
     """
     import shell.http.routes.report_runs as report_runs_module
 
-    def _fake_drive(session, run, *, natal_chart, config, ephemeris_identity, sections_config):
+    def _fake_drive(
+        session, run, *, natal_chart, config, ephemeris_identity, sections_config, generator
+    ):
         if run.stage is None:
             run.month_start_utc = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
             run.month_end_utc = datetime(2026, 2, 1, 6, 0, 0, tzinfo=UTC)
@@ -138,6 +150,7 @@ def fake_drive(monkeypatch: pytest.MonkeyPatch):
         return run
 
     monkeypatch.setattr(report_runs_module, "drive", _fake_drive)
+    app_instance.dependency_overrides[get_generator] = lambda: object()
     return _fake_drive
 
 
@@ -481,3 +494,140 @@ def test_the_poll_view_has_no_payload_link_before_payload_ready(
     response = authenticated_client.get(location)
 
     assert "View Payload" not in response.text
+
+
+# --- Story 4.6: GET /report-runs/{run_id}/draft ------------------------------------
+
+
+def _a_generated_draft_for(frozen: dict) -> GeneratedDraft:
+    """A ``GeneratedDraft`` citing ``frozen``'s own ``giorni_favorevoli``
+    entry -- ``frozen`` comes from ``_a_frozen_payload_with_one_aspect()``,
+    so the entry id is real and content-hashed, not made up."""
+    fav_entry_id = frozen["day_lists"]["giorni_favorevoli"][0]["id"]
+    return GeneratedDraft(
+        energia_generale=(Sentence(text="Un mese equilibrato.", entry_ids=()),),
+        amore=(Sentence(text="Venere sostiene i legami.", entry_ids=(fav_entry_id,)),),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(Sentence(text="Ottimo per gli incontri.", entry_ids=(fav_entry_id,)),),
+        giorni_di_attenzione=(),
+        consiglio_finale=(Sentence(text="Respira.", entry_ids=()),),
+    )
+
+
+def test_getting_the_draft_without_a_session_is_401(client: TestClient) -> None:
+    response = client.get("/report-runs/01a01abf-0000-7000-8000-000000000000/draft")
+
+    assert response.status_code == 401
+
+
+def test_getting_the_draft_for_an_unknown_run_is_404(authenticated_client: TestClient) -> None:
+    response = authenticated_client.get(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/draft"
+    )
+
+    assert response.status_code == 404
+
+
+def test_getting_the_draft_for_a_run_with_no_stored_draft_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row (mirrors ``view_report_payload``'s own): the run exists but
+    hasn't reached ``draft_ready`` yet -> 404."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 404
+
+
+def test_getting_the_draft_renders_prose_and_list_sections_localized_to_the_clients_zone(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "Un mese equilibrato." in response.text
+    assert "Venere sostiene i legami." in response.text
+    assert "Ottimo per gli incontri." in response.text
+    # ada's client.iana_zone is America/Chicago (UTC-6 in January):
+    # 2026-01-10 15:00 UTC (perfected_at) -> 09:00 local.
+    assert "2026-01-10 09:00:00 CST" in response.text
+
+
+def test_the_poll_view_links_to_the_draft_once_it_is_ready(
+    authenticated_client: TestClient, db_session: Session, fake_drive
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/draft"' in response.text
+
+
+def test_the_poll_view_has_no_draft_link_before_draft_ready(
+    authenticated_client: TestClient, db_session: Session, fake_drive
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert "View Draft" not in response.text
+
+
+class _StubAppState:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+
+class _StubApp:
+    def __init__(self, settings: Settings) -> None:
+        self.state = _StubAppState(settings)
+
+
+class _StubRequest:
+    """The one attribute path ``get_generator`` reads off a real ``Request``
+    (``request.app.state.settings``) -- a real ``Request`` cannot be built
+    without an ASGI scope, and this dependency needs nothing else from one."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.app = _StubApp(settings)
+
+
+def test_get_generator_builds_a_real_gemini_generator_from_the_apps_configured_key() -> None:
+    """``fake_drive`` (used by every other test here) overrides ``get_generator``
+    with a fake, so nothing else in this module exercises the real dependency
+    itself -- this proves ``get_generator`` wires ``request.app.state.settings
+    .gemini_api_key`` into a real ``GeminiGenerator``, mirroring how
+    ``get_geocoder`` is exercised directly in ``tests/test_http_clients.py``.
+    """
+    generator = get_generator(_StubRequest(LOCAL))  # type: ignore[arg-type]
+
+    assert isinstance(generator, GeminiGenerator)

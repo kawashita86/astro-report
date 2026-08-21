@@ -337,3 +337,23 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-3-derive-a-reporttheme-from-a-payload.md`
   summary: `report_theme` has no composite index for "latest theme for a Client," and there's no documented plan for how Story 4.4 will fetch "this run's theme" and "the prior run's theme" for the same Client.
   evidence: Only single-column indexes exist (`client_id`, unique `report_run_id`) — fine for this story's write pattern, but Story 4.4's diffing needs exactly two comparable rows per Client and should settle whether that goes through `ReportRun` lookups first or a direct `report_theme` query before deciding if an index is actually needed.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-render-cited-sentences-into-prose-i-could-read-aloud.md`
+  summary: The `draft_ready` stage's live Generator call runs synchronously inside the request/response cycle (`drive()` walks every registered stage in one call), with no request-level timeout — a slow or hanging Gemini call hangs the HTTP request itself, not just the poll cadence the driver's own design notes assumed.
+  evidence: Blind Hunter review of this story's diff. `shell/runner/driver.py`'s own docstring already flags `draft_ready` as "the first stage with a live external call" and defers rate-ceiling sizing to Story 4.8, but a request-level timeout on the Gemini call is a distinct concern Story 4.8's own scope (10 RPM backoff sizing) doesn't obviously cover and should be confirmed in scope there or raised separately.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-render-cited-sentences-into-prose-i-could-read-aloud.md`
+  summary: No test proves `with_backoff` actually retries a failing Generator call specifically, and nothing distinguishes a retryable failure (rate limiting) from a permanent one (bad API key, safety-filter rejection) — a permanent failure would retry uselessly instead of failing fast.
+  evidence: Blind Hunter review. `draft_ready` reuses the generic `with_backoff` wrapper untested against a real `GenerationError`; Story 4.8 (rate-limit backoff) is the natural place to add both the retryable/permanent distinction and a `draft_ready`-specific retry test.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-render-cited-sentences-into-prose-i-could-read-aloud.md`
+  summary: No failure state is surfaced anywhere when a stage's `with_backoff` retries are exhausted — `ReportRun` has no error field, and `report_run_poll.html` has no failure branch, so an exhausted run just looks like it's perpetually "processing."
+  evidence: Blind Hunter review. Pre-existing gap in `ReportRun`/the poll template since Story 3.5 (applies to every stage, not just `draft_ready`), surfaced now because `draft_ready` is the first stage likely to fail for a reason Francesco can't fix by waiting (a bad Gemini key, a persistent safety-filter rejection).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-render-cited-sentences-into-prose-i-could-read-aloud.md`
+  summary: `report_draft.html` shows no identifying context (Client name, month) and no navigation back to the poll page, Client, or Payload view — a bookmarked or shared draft URL gives no way to tell whose report it is.
+  evidence: Blind Hunter review. Mirrors `report_payload.html`'s identical, pre-existing omission (Story 3.9) rather than a regression specific to this story — worth a single shared fix (e.g. a small header partial) across both report-run sub-views rather than a one-off patch to just the new one.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-render-cited-sentences-into-prose-i-could-read-aloud.md`
+  summary: The "View Draft"/"View Payload" links on the poll page only appear on an exact `run.stage` match (`== "draft_ready"` / `== "payload_ready"`), so once later stages (`gate_passed`, `exported`) are registered, a fully-completed run will silently lose both links even though the draft and payload are still reachable at their URLs.
+  evidence: Blind Hunter review. `report_run_poll.html`'s new "View Draft" link mirrors the pre-existing "View Payload" link's own exact-match pattern (Story 3.9) rather than introducing a new one — both need a shared "stage has reached or passed X" check once `gate_passed`/`exported` land, not a one-off fix to either link alone.

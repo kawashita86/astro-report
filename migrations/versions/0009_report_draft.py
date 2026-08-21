@@ -1,0 +1,69 @@
+"""report_draft: the immutable, persisted form of one report_run's Generator
+output (Story 4.6).
+
+Written exactly once per ``report_run``, by ``store_report_draft()``, never
+updated -- ``shell/adapters/postgres/report_draft.py``'s ``before_update``
+listener enforces that at the ORM layer, not this migration. The unique
+index on ``report_run_id`` enforces "exactly one ReportDraft per ReportRun"
+at the schema layer instead. Joins the FR-29 Client-deletion cascade
+(``shell/adapters/postgres/client.py``'s ``_CLIENT_CASCADE_TABLES``).
+
+Revision ID: 0009_report_draft
+Revises: 0008_report_theme
+Create Date: 2026-08-21
+
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy.dialects import postgresql
+
+revision: str = "0009_report_draft"
+down_revision: str | None = "0008_report_theme"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "report_draft",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "client_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("client.id"),
+            nullable=False,
+        ),
+        sa.Column(
+            "report_run_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("report_run.id"),
+            nullable=False,
+        ),
+        sa.Column("style_guide_version", sa.Integer(), nullable=False),
+        sa.Column("sections_config_version", sa.Integer(), nullable=False),
+        sa.Column("draft", sa.JSON(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_report_draft_client_id", "report_draft", ["client_id"])
+    # unique=True: "exactly one ReportDraft per ReportRun" (this story's
+    # Boundaries) enforced at the schema level, not merely by
+    # store_report_draft() only ever being called once per ReportRun.
+    op.create_index(
+        "ix_report_draft_report_run_id",
+        "report_draft",
+        ["report_run_id"],
+        unique=True,
+    )
+
+
+def downgrade() -> None:
+    """Migrations are forward-only; a mistake is corrected by a new migration."""
+    raise RuntimeError(
+        f"Migration {revision} is forward-only and cannot be downgraded. "
+        "Correct a mistake with a new forward migration."
+    )

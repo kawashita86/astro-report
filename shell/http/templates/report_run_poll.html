@@ -22,6 +22,9 @@
         {% if run.stage == "payload_ready" %}
         <p><a href="/report-runs/{{ run.id }}/payload">View Payload</a></p>
         {% endif %}
+        {% if run.stage == "draft_ready" %}
+        <p><a href="/report-runs/{{ run.id }}/draft">View Draft</a></p>
+        {% endif %}
       </div>
 {% if not request.headers.get("hx-request") %}
     </main>

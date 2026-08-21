@@ -1,20 +1,27 @@
 """``shell/runner/driver.py::drive()`` -- Story 3.5's own I/O & Edge-Case
 Matrix rows for advancing a ``ReportRun``, extended by Story 3.8's own row
-for ``payload_ready`` and ``_deserialize_transit_events``'s round trip.
+for ``payload_ready``, Story 4.6's own row for ``draft_ready``, and
+``_deserialize_transit_events``'s round trip.
 
 An in-memory SQLite engine stands in for Postgres, mirroring
 ``tests/test_client_store.py``; the Natal Chart, ``ComputationConfig``,
 ``SectionsConfig`` and ``EphemerisIdentity`` are all real (the same
-known-good Fort Worth fixture ``tests/test_client_store.py`` uses), since the
-three registered stages (``natal_ready``, ``transits_ready``,
+known-good Fort Worth fixture ``tests/test_client_store.py`` uses), since
+three of the four registered stages (``natal_ready``, ``transits_ready``,
 ``payload_ready``) call real ``core/`` code -- only the *failure* scenarios
 below inject a fake stage function, mirroring the story's own Design Notes
-("no live external call demonstrates the backoff").
+("no live external call demonstrates the backoff"). ``draft_ready`` is the
+one stage with a genuine external call (the Generator port), so every test
+here drives it through ``_FakeGenerator`` rather than a real Gemini call --
+``tests/test_report_draft_store.py`` covers the persisted row's own shape,
+and the Gemini adapter has its own test module.
 
-Three real stages are now registered (Story 3.8 added ``payload_ready``), so
-a fresh, fully-successful ``drive()`` call advances to ``payload_ready`` --
-the first name in ``_STAGE_SEQUENCE`` with no registered function is now
-``draft_ready``.
+Four real stages are now registered (Story 4.6 added ``draft_ready``), so a
+fresh, fully-successful ``drive()`` call advances to ``draft_ready`` -- the
+first name in ``_STAGE_SEQUENCE`` with no registered function is now
+``gate_passed``. ``_create_client_and_chart`` seeds a Style Guide version
+alongside the Client/Natal Chart so every full-drive test below reaches
+``draft_ready`` without each test seeding one itself.
 """
 
 from __future__ import annotations
@@ -29,13 +36,19 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import shell.runner.driver as driver_module
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
+from core.types.generation import GeneratedDraft, Sentence
+from core.types.memory import ReportTheme, ThemeAspect, ThemeLunation
 from core.types.place import ResolvedPlace
 from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
 from shell.adapters.postgres.client import create_client_with_chart, deserialize_natal_chart
+from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.postgres.report_theme import StoredReportTheme
+from shell.adapters.postgres.report_theme import _json_safe as _theme_json_safe
+from shell.adapters.postgres.style_guide import create_style_guide_version
 from shell.computation import load_computation_config
+from shell.ports.generator import Generator, StyleGuideVersion
 from shell.runner.driver import _STAGE_FUNCTIONS, _deserialize_transit_events, drive
 from shell.sections import load_sections_config
 
@@ -54,6 +67,11 @@ _RESOLVED_PLACE = ResolvedPlace(
     utc_offset=timedelta(hours=-6),
 )
 _BIRTH_INSTANT_UTC = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
+
+#: The Style Guide content ``_create_client_and_chart`` seeds (version 1) for
+#: every test in this module -- so a full, fresh ``_drive()`` call reaches
+#: ``draft_ready`` without each test seeding its own.
+_STYLE_GUIDE_CONTENT = "Scrivi con calore, citando sempre il Payload."
 
 
 @pytest.fixture
@@ -85,11 +103,49 @@ def _create_client_and_chart(session: Session):
         computation_config=_COMPUTATION_CONFIG,
         ephemeris_identity=_EPHEMERIS_IDENTITY,
     )
+    # Seeded alongside the Client/Natal Chart (Story 4.6) so `draft_ready`
+    # -- now a registered stage -- has a Style Guide to read, and every
+    # full-drive test below reaches it without seeding one itself.
+    create_style_guide_version(session, _STYLE_GUIDE_CONTENT)
     session.commit()
     return client, natal_chart
 
 
-def _drive(session: Session, run: ReportRun, natal_chart):
+def _a_generated_draft() -> GeneratedDraft:
+    """A minimal, valid ``GeneratedDraft`` (Story 4.5) -- ``_run_draft_ready``
+    persists whatever the ``Generator`` returns verbatim, so its own content
+    is arbitrary here; only ``_FakeGenerator``'s recorded call arguments and
+    ``ReportDraft.draft``'s round trip matter to these tests."""
+    return GeneratedDraft(
+        energia_generale=(Sentence(text="Un mese di energia stabile.", entry_ids=("abc123",)),),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+
+class _FakeGenerator:
+    """A ``Generator`` (``shell/ports/generator.py``) test double: records
+    every call it receives (``payload``, ``style_guide``, ``theme_previous``,
+    ``theme_current``) and returns a fixed ``GeneratedDraft`` -- proves
+    ``_run_draft_ready``'s own orchestration without a real Gemini call,
+    mirroring this story's own Design Notes ("no live external call
+    demonstrates the backoff")."""
+
+    def __init__(self, draft: GeneratedDraft | None = None) -> None:
+        self._draft = draft if draft is not None else _a_generated_draft()
+        self.calls: list[tuple[dict, StyleGuideVersion, object, object]] = []
+
+    def generate(self, payload, style_guide, theme_previous, theme_current):
+        self.calls.append((payload, style_guide, theme_previous, theme_current))
+        return self._draft
+
+
+def _drive(session: Session, run: ReportRun, natal_chart, generator: Generator | None = None):
     return drive(
         session,
         run,
@@ -97,13 +153,14 @@ def _drive(session: Session, run: ReportRun, natal_chart):
         config=_COMPUTATION_CONFIG,
         ephemeris_identity=_EPHEMERIS_IDENTITY,
         sections_config=_SECTIONS_CONFIG,
+        generator=generator if generator is not None else _FakeGenerator(),
     )
 
 
-# --- Fresh run, all three registered stages succeed ----------------------------
+# --- Fresh run, all four registered stages succeed -----------------------------
 
 
-def test_fresh_run_advances_through_all_three_registered_stages(session: Session) -> None:
+def test_fresh_run_advances_through_all_four_registered_stages(session: Session) -> None:
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
@@ -111,7 +168,7 @@ def test_fresh_run_advances_through_all_three_registered_stages(session: Session
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "payload_ready"
+    assert result.stage == "draft_ready"
     assert result.month_start_utc == datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
     assert result.month_end_utc == datetime(2026, 2, 1, 6, 0, 0, tzinfo=UTC)
     assert isinstance(result.transit_events, list)
@@ -156,7 +213,7 @@ def test_a_completed_run_is_persisted_to_the_database(session: Session) -> None:
 
     stored = session.get(ReportRun, run.id)
     assert stored is not None
-    assert stored.stage == "payload_ready"
+    assert stored.stage == "draft_ready"
     assert stored.transit_events is not None
 
 
@@ -186,7 +243,7 @@ def test_payload_ready_advances_and_persists_a_report_payload_row(session: Sessi
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "payload_ready"
+    assert result.stage == "draft_ready"
     stored_payloads = session.exec(
         select(ReportPayload).where(ReportPayload.report_run_id == run.id)
     ).all()
@@ -219,7 +276,7 @@ def test_payload_ready_also_derives_and_persists_a_report_theme_row(session: Ses
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "payload_ready"
+    assert result.stage == "draft_ready"
     stored_themes = session.exec(
         select(StoredReportTheme).where(StoredReportTheme.report_run_id == run.id)
     ).all()
@@ -261,7 +318,7 @@ def test_re_drive_after_natal_ready_alone_runs_transits_ready_next_without_recom
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "payload_ready"
+    assert result.stage == "draft_ready"
     assert result.month_start_utc == recorded_start
     assert result.month_end_utc == recorded_end
     assert result.transit_events is not None
@@ -279,7 +336,7 @@ def test_re_drive_after_full_completion_is_a_noop(
     session.commit()
 
     _drive(session, run, natal_chart)
-    assert run.stage == "payload_ready", "fixture did not complete -- test is vacuous"
+    assert run.stage == "draft_ready", "fixture did not complete -- test is vacuous"
     events_before = run.transit_events
     updated_at_before = run.updated_at
 
@@ -289,11 +346,12 @@ def test_re_drive_after_full_completion_is_a_noop(
     monkeypatch.setitem(_STAGE_FUNCTIONS, "natal_ready", _raise_if_called)
     monkeypatch.setitem(_STAGE_FUNCTIONS, "transits_ready", _raise_if_called)
     monkeypatch.setitem(_STAGE_FUNCTIONS, "payload_ready", _raise_if_called)
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "draft_ready", _raise_if_called)
 
     result = _drive(session, run, natal_chart)
 
     assert result is run
-    assert result.stage == "payload_ready"
+    assert result.stage == "draft_ready"
     assert result.transit_events == events_before
     assert result.updated_at == updated_at_before
 
@@ -308,6 +366,12 @@ def test_re_drive_after_full_completion_is_a_noop(
         select(StoredReportTheme).where(StoredReportTheme.report_run_id == run.id)
     ).all()
     assert len(stored_themes) == 1
+
+    # Nor a second ReportDraft row (Story 4.6).
+    stored_drafts = session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).all()
+    assert len(stored_drafts) == 1
 
 
 # --- A transiently failing stage still advances normally via with_backoff -----------
@@ -341,7 +405,7 @@ def test_a_stage_that_fails_once_then_succeeds_still_advances_run_stage_within_o
     result = _drive(session, run, natal_chart)
 
     assert len(calls) == 2, "the stage function must have been retried, not just called once"
-    assert result.stage == "payload_ready"
+    assert result.stage == "draft_ready"
     assert result.month_start_utc is not None
     assert result.transit_events is not None
 
@@ -431,7 +495,7 @@ def test_process_killed_between_stages_resumes_reading_the_row_back(
 
         result = _drive(second_session, reloaded_run, natal_chart)
 
-        assert result.stage == "payload_ready"
+        assert result.stage == "draft_ready"
         assert result.month_start_utc == recorded_start, "month bounds must not be recomputed"
         assert result.month_end_utc == recorded_end
         assert result.transit_events is not None
@@ -448,9 +512,9 @@ def test_drive_stops_cleanly_once_it_reaches_an_unregistered_stage(session: Sess
 
     result = _drive(session, run, natal_chart)
 
-    # draft_ready has no registered function -- drive() must stop there
-    # without raising, having already completed payload_ready (Story 3.8).
-    assert result.stage == "payload_ready"
+    # gate_passed has no registered function -- drive() must stop there
+    # without raising, having already completed draft_ready (Story 4.6).
+    assert result.stage == "draft_ready"
 
 
 # --- deserialize_natal_chart interop --------------------------------------------------
@@ -476,7 +540,7 @@ def test_drive_works_against_a_deserialized_natal_chart(session: Session) -> Non
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "payload_ready"
+    assert result.stage == "draft_ready"
     assert result.transit_events
 
 
@@ -540,3 +604,124 @@ def test_deserialize_transit_events_round_trips_all_five_event_kinds() -> None:
     assert deserialized_stations == (station, standing_retrograde)
     assert deserialized_ingresses == (ingress,)
     assert deserialized_lunations == (lunation_new, lunation_full)
+
+
+# --- _deserialize_theme round trip --------------------------------------------------
+
+
+def test_deserialize_theme_round_trips_a_report_theme() -> None:
+    """The reverse of ``StoredReportTheme.theme``'s own JSON encoding
+    (``shell/adapters/postgres/report_theme.py``'s ``_json_safe``): every
+    field of a ``ReportTheme`` -- including a ``None`` ``orb_exit_at`` -- must
+    reconstruct equal to what was serialized, mirroring
+    ``test_deserialize_transit_events_round_trips_all_five_event_kinds``'s
+    own round-trip shape."""
+    t0 = datetime(2026, 1, 5, 12, 0, 0, tzinfo=UTC)
+    t1 = datetime(2026, 1, 10, 6, 30, 0, tzinfo=UTC)
+
+    theme = ReportTheme(
+        dominant_aspects=(
+            ThemeAspect(
+                transiting_body="saturn",
+                natal_point="sun",
+                aspect="square",
+                perfected_at=t0,
+                never_perfected=False,
+                orb_entry_at=t0,
+                orb_exit_at=None,
+            ),
+        ),
+        lunations=(ThemeLunation(kind="new_moon", natal_house=3),),
+        standing_retrogrades=(
+            StandingRetrograde(body="jupiter", retrograde_start_utc=t0, retrograde_end_utc=t1),
+        ),
+    )
+
+    serialized = _theme_json_safe(theme)
+    deserialized = driver_module._deserialize_theme(serialized)
+
+    assert deserialized == theme
+
+
+def test_deserialize_theme_round_trips_an_empty_theme() -> None:
+    theme = ReportTheme(dominant_aspects=(), lunations=(), standing_retrogrades=())
+
+    deserialized = driver_module._deserialize_theme(_theme_json_safe(theme))
+
+    assert deserialized == theme
+
+
+# --- Story 4.6's own row: draft_ready calls the Generator and persists a ReportDraft ---
+
+
+def test_draft_ready_calls_the_generator_with_the_persisted_payload_style_guide_and_theme(
+    session: Session,
+) -> None:
+    """Acceptance Criteria/Boundaries: ``_run_draft_ready`` reads
+    ``payload``/``theme_current`` back from ``ReportPayload``/
+    ``StoredReportTheme`` -- never recomputes them -- calls the Generator
+    with the Style Guide currently in force, and passes
+    ``theme_previous=None`` unconditionally (Story 4.7 wires continuity)."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator()
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready"
+    assert len(generator.calls) == 1, "the Generator must be called exactly once"
+    called_payload, called_style_guide, theme_previous, theme_current = generator.calls[0]
+
+    stored_payload = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
+    ).one()
+    assert called_payload == stored_payload.payload
+
+    assert called_style_guide == StyleGuideVersion(version=1, content=_STYLE_GUIDE_CONTENT)
+    assert theme_previous is None, "theme_previous must stay None unconditionally (Story 4.7)"
+    assert isinstance(theme_current, ReportTheme)
+
+
+def test_draft_ready_persists_the_generated_draft_verbatim_with_its_versions(
+    session: Session,
+) -> None:
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    draft = GeneratedDraft(
+        energia_generale=(Sentence(text="Un mese intenso.", entry_ids=("id-1", "id-2")),),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(Sentence(text="Respira.", entry_ids=()),),
+    )
+    generator = _FakeGenerator(draft)
+
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready"
+    stored_payload = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
+    ).one()
+    stored_drafts = session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).all()
+    assert len(stored_drafts) == 1
+    stored_draft = stored_drafts[0]
+    assert stored_draft.client_id == client.id
+    assert stored_draft.style_guide_version == 1
+    assert stored_draft.sections_config_version == stored_payload.sections_config_version
+    # entry_ids intact: rendering to prose happens only in shell/http/, never
+    # baked into what draft_ready persists (this story's Boundaries).
+    assert stored_draft.draft["energia_generale"] == [
+        {"text": "Un mese intenso.", "entry_ids": ["id-1", "id-2"]}
+    ]
+    assert stored_draft.draft["consiglio_finale"] == [{"text": "Respira.", "entry_ids": []}]
+    assert stored_draft.draft["amore"] == []
