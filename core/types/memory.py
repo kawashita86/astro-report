@@ -17,7 +17,14 @@ from datetime import datetime
 
 from core.types.transits import StandingRetrograde
 
-__all__ = ["ReportTheme", "ThemeAspect", "ThemeLunation"]
+__all__ = [
+    "AspectChange",
+    "ReportTheme",
+    "RetrogradeChange",
+    "ThemeAspect",
+    "ThemeDiff",
+    "ThemeLunation",
+]
 
 
 @dataclass(frozen=True)
@@ -75,3 +82,54 @@ class ReportTheme:
     dominant_aspects: tuple[ThemeAspect, ...]
     lunations: tuple[ThemeLunation, ...]
     standing_retrogrades: tuple[StandingRetrograde, ...]
+
+
+@dataclass(frozen=True)
+class AspectChange:
+    """One ``ThemeAspect``'s classification between two consecutive months'
+    ``ReportTheme``s (Story 4.4, AD-14): ``"new"``, ``"still_active"``,
+    ``"tightened"`` or ``"resolved"``, computed by
+    ``core/memory/diff.py::diff_themes()`` rather than judged by a model.
+    """
+
+    aspect: ThemeAspect
+    status: str
+
+
+@dataclass(frozen=True)
+class RetrogradeChange:
+    """One ``StandingRetrograde``'s classification between two consecutive
+    months' ``ReportTheme``s (Story 4.4, AD-14): ``"new"``,
+    ``"still_active"`` or ``"resolved"`` -- no ``"tightened"`` state, since a
+    StandingRetrograde carries no tightness signal to newly-perfect.
+    """
+
+    retrograde: StandingRetrograde
+    status: str
+
+
+@dataclass(frozen=True)
+class ThemeDiff:
+    """What changed between two consecutive months' ``ReportTheme``s (Story
+    4.4, AD-14): every ``dominant_aspects``/``standing_retrogrades`` element
+    across both, classified into exactly one status, plus a computed
+    ``nothing_significant_changed`` flag -- what makes "nothing significant
+    has changed" a computed fact rather than a model's guess.
+
+    ``ReportTheme.lunations`` is not diffed -- every current-month Lunation
+    is new by construction (it occurs within that specific month, never
+    carried over), so classifying it would always yield ``"new"`` with no
+    informational value.
+
+    ``aspect_changes``/``retrograde_changes`` are ordered: matched-and-new
+    entries in ``current``'s own order, followed by resolved-only entries
+    (absent from ``current``) in ``previous``'s own order -- a guaranteed
+    part of the contract, not an incidental detail of the implementation.
+
+    Produced by ``core/memory/diff.py::diff_themes()``, pure and model-free
+    like ``ReportTheme`` itself.
+    """
+
+    aspect_changes: tuple[AspectChange, ...]
+    retrograde_changes: tuple[RetrogradeChange, ...]
+    nothing_significant_changed: bool
