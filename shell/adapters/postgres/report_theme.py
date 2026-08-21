@@ -21,13 +21,13 @@ from uuid import UUID
 
 from sqlalchemy import JSON, Column, event
 from sqlalchemy.orm import Mapper
-from sqlmodel import Field, Session, SQLModel
+from sqlmodel import Field, Session, SQLModel, select
 from uuid6 import uuid7
 
 from core.types.memory import ReportTheme
 from shell.adapters.postgres.report_run import ReportRun, _UTCDateTime
 
-__all__ = ["StoredReportTheme", "store_report_theme"]
+__all__ = ["StoredReportTheme", "most_recent_prior_report_theme", "store_report_theme"]
 
 
 class StoredReportTheme(SQLModel, table=True):
@@ -97,6 +97,31 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [_json_safe(item) for item in value]
     return value
+
+
+def most_recent_prior_report_theme(
+    session: Session, client_id: UUID, *, before_month: str
+) -> StoredReportTheme | None:
+    """The most recent ``StoredReportTheme`` for ``client_id`` whose
+    ``ReportRun.month`` is strictly less than ``before_month`` (Story 4.7,
+    AD-14) -- "most recent", not "the immediately preceding calendar month":
+    a skipped month must not reset a genuinely still-active slow transit
+    back to "first Report" behavior (see this story's Design Notes).
+
+    Ordered by ``ReportRun.month`` (string comparison, correct because the
+    format is always zero-padded ``"YYYY-MM"``), not by row-creation order --
+    multiple ``ReportRun``s can be persisted out of creation order (this
+    story's own I/O & Edge-Case Matrix). Returns ``None`` when no such row
+    exists (the Client's first Report, or no prior run ever reached
+    ``payload_ready``).
+    """
+    return session.exec(
+        select(StoredReportTheme)
+        .join(ReportRun, StoredReportTheme.report_run_id == ReportRun.id)
+        .where(ReportRun.client_id == client_id, ReportRun.month < before_month)
+        .order_by(ReportRun.month.desc())
+        .limit(1)
+    ).first()
 
 
 def store_report_theme(

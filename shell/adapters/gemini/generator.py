@@ -18,18 +18,16 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import fields as dataclass_fields
-from dataclasses import is_dataclass
-from datetime import datetime
-from decimal import Decimal
 from typing import Any, Protocol
 
 from google import genai
 from google.genai import types
 
 from core.errors import GenerationError
+from core.memory.diff import diff_themes
 from core.payload.freeze import canonical_json_bytes
 from core.types.generation import GeneratedDraft, Sentence
-from core.types.memory import ReportTheme
+from core.types.memory import AspectChange, ReportTheme, RetrogradeChange, ThemeAspect, ThemeDiff
 from shell.ports.generator import StyleGuideVersion
 
 __all__ = ["GeminiGenerator"]
@@ -171,28 +169,142 @@ class GeminiGenerator:
         return draft
 
 
-def _json_safe(value: Any) -> Any:
-    """``Decimal`` -> ``str``, ``datetime`` -> ISO 8601, a frozen dataclass ->
-    its fields recursively converted the same way, a tuple/list -> a list of
-    converted items -- everything else passes through unchanged.
+#: Rendered per matched/unmatched ``AspectChange.status`` (Story 4.7, Design
+#: Notes) -- ``"new"`` is deliberately absent: a fresh Aspect is never
+#: mentioned as continuity, it is simply this month's material (the Payload
+#: itself already carries it).
+_ASPECT_STATUS_TEMPLATES: dict[str, str] = {
+    "still_active": (
+        "{transiting_body} {aspect} {natal_point}: transito ancora attivo dal "
+        "mese precedente -- trattalo come una continuazione, mai come una novità."
+    ),
+    "tightened": (
+        "{transiting_body} {aspect} {natal_point}: si è stretto rispetto al mese "
+        "precedente (prima non ancora perfezionato, ora sì) -- descrivilo come un "
+        "avvicinamento, non come un evento improvviso."
+    ),
+    "resolved": (
+        "{transiting_body} {aspect} {natal_point}: si è risolto rispetto al mese "
+        "precedente (l'orbita si è chiusa) -- trattalo come un capitolo che si "
+        "conclude, non reintrodurlo come una novità."
+    ),
+}
 
-    A small serializer of this adapter's own, like
-    ``shell/adapters/postgres/report_theme.py``'s own private ``_json_safe``
-    (not imported -- each adapter owns a small one rather than sharing one),
-    needed only to turn a ``ReportTheme`` into the prompt's embedded JSON.
+#: Rendered per ``RetrogradeChange.status`` -- no ``"tightened"`` entry, since
+#: a ``StandingRetrograde`` carries no tightness signal to newly-perfect
+#: (``core/types/memory.py``'s own docstring).
+_RETROGRADE_STATUS_TEMPLATES: dict[str, str] = {
+    "still_active": (
+        "Stazione retrograda di {body}: ancora in corso dal mese precedente -- "
+        "trattala come una continuazione, mai come una novità."
+    ),
+    "resolved": (
+        "Stazione retrograda di {body}: conclusa rispetto al mese precedente -- "
+        "trattala come un capitolo che si chiude, non reintrodurla come una novità."
+    ),
+}
+
+#: Appended only to a ``"resolved"`` line whose element's identity is not
+#: present in ``theme_current`` at all (review loop 1, Design Notes:
+#: "Resolved-and-entirely-absent-from-current") -- ``derive_theme()``'s own
+#: "no top-N truncation" contract means such an element genuinely does not
+#: appear anywhere in this month's Payload either, so the model must never be
+#: invited to cite an ``entry_id`` for that specific claim.
+_UNCITED_SUFFIX = (
+    " (non presente nel Payload di questo mese: se lo menzioni, non citare un "
+    "id per questa affermazione)."
+)
+
+_CONTINUITY_HEADER = "Continuità rispetto al mese precedente (fatti calcolati, non da indovinare):"
+
+_FIRST_REPORT_STATEMENT = (
+    "Questo è il primo Report per questo Cliente: non fare alcun riferimento a "
+    "mesi precedenti."
+)
+
+_NOTHING_SIGNIFICANT_CHANGED_STATEMENT = (
+    "Nulla di significativo è cambiato rispetto al mese precedente: dillo "
+    "esplicitamente nel Report, invece di inventare un cambiamento."
+)
+
+
+def _aspect_identity(aspect: ThemeAspect) -> tuple[str, str, str]:
+    return (aspect.transiting_body, aspect.natal_point, aspect.aspect)
+
+
+def _render_aspect_change(
+    change: AspectChange, current_identities: frozenset[tuple[str, str, str]]
+) -> str | None:
+    template = _ASPECT_STATUS_TEMPLATES.get(change.status)
+    if template is None:  # "new" -- never rendered as continuity
+        return None
+    line = template.format(
+        transiting_body=change.aspect.transiting_body,
+        aspect=change.aspect.aspect,
+        natal_point=change.aspect.natal_point,
+    )
+    if change.status == "resolved" and _aspect_identity(change.aspect) not in current_identities:
+        line += _UNCITED_SUFFIX
+    return line
+
+
+def _render_retrograde_change(
+    change: RetrogradeChange, current_bodies: frozenset[str]
+) -> str | None:
+    template = _RETROGRADE_STATUS_TEMPLATES.get(change.status)
+    if template is None:  # "new" -- never rendered as continuity
+        return None
+    line = template.format(body=change.retrograde.body)
+    if change.status == "resolved" and change.retrograde.body not in current_bodies:
+        line += _UNCITED_SUFFIX
+    return line
+
+
+def _render_continuity(
+    theme_previous: ReportTheme | None,
+    theme_current: ReportTheme,
+    theme_diff: ThemeDiff | None,
+) -> str:
+    """Turn ``diff_themes(theme_previous, theme_current)``'s result into the
+    prompt's continuity section (Story 4.7).
+
+    Exactly three possible outputs (Design Notes): the first-Report
+    statement (``theme_previous is None``); the header plus at least one
+    line (a rendered Aspect/Retrograde change, the explicit
+    ``nothing_significant_changed`` statement, or both); or ``""`` when there
+    is nothing true to render at all -- every changed element this month is
+    ``"new"`` and nothing_significant_changed is ``False``, so the header
+    would otherwise dangle over an empty list.
     """
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if is_dataclass(value) and not isinstance(value, type):
-        return {
-            field.name: _json_safe(getattr(value, field.name))
-            for field in dataclass_fields(value)
-        }
-    if isinstance(value, (tuple, list)):
-        return [_json_safe(item) for item in value]
-    return value
+    if theme_previous is None:
+        return _FIRST_REPORT_STATEMENT
+    assert theme_diff is not None, "diff_themes() only returns None when previous is None"
+
+    current_aspect_identities = frozenset(
+        _aspect_identity(aspect) for aspect in theme_current.dominant_aspects
+    )
+    current_retrograde_bodies = frozenset(
+        retrograde.body for retrograde in theme_current.standing_retrogrades
+    )
+
+    lines = [
+        rendered
+        for change in theme_diff.aspect_changes
+        if (rendered := _render_aspect_change(change, current_aspect_identities)) is not None
+    ]
+    lines += [
+        rendered
+        for change in theme_diff.retrograde_changes
+        if (rendered := _render_retrograde_change(change, current_retrograde_bodies)) is not None
+    ]
+
+    if theme_diff.nothing_significant_changed:
+        lines.append(_NOTHING_SIGNIFICANT_CHANGED_STATEMENT)
+
+    if not lines:
+        return ""
+
+    return _CONTINUITY_HEADER + "\n" + "\n".join(f"- {line}" for line in lines)
 
 
 def _build_system_instruction(style_guide: StyleGuideVersion) -> str:
@@ -211,13 +323,10 @@ def _build_prompt(
     theme_current: ReportTheme,
 ) -> str:
     payload_json = canonical_json_bytes(payload).decode()
-    theme_current_json = canonical_json_bytes(_json_safe(theme_current)).decode()
-    theme_previous_json = (
-        "null"
-        if theme_previous is None
-        else canonical_json_bytes(_json_safe(theme_previous)).decode()
-    )
     sections_list = "\n".join(f"- {name}" for name in _SECTION_FIELD_NAMES)
+    theme_diff = diff_themes(theme_previous, theme_current)
+    continuity = _render_continuity(theme_previous, theme_current, theme_diff)
+    continuity_block = f"\n\n{continuity}" if continuity else ""
 
     return (
         "Genera il Report mensile come struttura citata, non come prosa libera.\n\n"
@@ -230,16 +339,9 @@ def _build_prompt(
         "valido).\n\n"
         'Le Sezioni "giorni_favorevoli" e "giorni_di_attenzione" non devono MAI '
         "contenere una data (né un giorno del mese con un nome di mese, né una "
-        "data in formato ISO): le date sono già proiettate a monte dal codice.\n\n"
-        'Se "theme_previous" è null, questo è il primo Report per questo Cliente: '
-        "non fare alcun riferimento a mesi precedenti. Altrimenti, tratta un "
-        'transito ancora attivo in "theme_previous" come una continuazione '
-        "(spostato, si è stretto, si è risolto), mai come una novità; se nulla di "
-        "significativo è cambiato, dillo esplicitamente invece di inventare un "
-        "cambiamento.\n\n"
-        f"--- PAYLOAD (JSON) ---\n{payload_json}\n\n"
-        f"--- THEME_PREVIOUS (JSON, null se primo Report) ---\n{theme_previous_json}\n\n"
-        f"--- THEME_CURRENT (JSON) ---\n{theme_current_json}\n"
+        "data in formato ISO): le date sono già proiettate a monte dal codice."
+        f"{continuity_block}\n\n"
+        f"--- PAYLOAD (JSON) ---\n{payload_json}\n"
     )
 
 

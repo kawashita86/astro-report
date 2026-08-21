@@ -21,7 +21,14 @@ from core.types.generation import GeneratedDraft
 from core.types.memory import ReportTheme, ThemeAspect
 from core.types.payload import Payload, SectionPayload
 from core.types.transits import StandingRetrograde, TransitAspectEvent
-from shell.adapters.gemini.generator import _MODEL, _RESPONSE_SCHEMA, GeminiGenerator
+from shell.adapters.gemini.generator import (
+    _CONTINUITY_HEADER,
+    _FIRST_REPORT_STATEMENT,
+    _MODEL,
+    _NOTHING_SIGNIFICANT_CHANGED_STATEMENT,
+    _RESPONSE_SCHEMA,
+    GeminiGenerator,
+)
 from shell.computation import load_computation_config
 from shell.ports.generator import StyleGuideVersion
 from shell.sections import load_sections_config
@@ -43,6 +50,47 @@ _ANOTHER_KNOWN_ID = "aspect-known-2"
 _STYLE_GUIDE = StyleGuideVersion(version=3, content="Scrivi con calore, mai in modo fatalista.")
 
 _EMPTY_THEME = ReportTheme(dominant_aspects=(), lunations=(), standing_retrogrades=())
+
+_T0 = datetime(2026, 1, 5, 12, 0, 0, tzinfo=UTC)
+_T1 = datetime(2026, 1, 10, 6, 0, 0, tzinfo=UTC)
+_T2 = datetime(2026, 1, 15, 18, 0, 0, tzinfo=UTC)
+
+
+def _theme_aspect(
+    *,
+    transiting_body: str = "saturn",
+    natal_point: str = "sun",
+    aspect: str = "square",
+    perfected_at: datetime | None = _T1,
+    never_perfected: bool = False,
+    orb_entry_at: datetime = _T0,
+    orb_exit_at: datetime | None = None,
+) -> ThemeAspect:
+    """Mirrors ``tests/test_diff_themes.py``'s own ``_theme_aspect()``
+    builder -- same fixture conventions (Story 4.7 Code Map)."""
+    return ThemeAspect(
+        transiting_body=transiting_body,
+        natal_point=natal_point,
+        aspect=aspect,
+        perfected_at=perfected_at,
+        never_perfected=never_perfected,
+        orb_entry_at=orb_entry_at,
+        orb_exit_at=orb_exit_at,
+    )
+
+
+def _retrograde(
+    *, body: str = "saturn", start: datetime = _T0, end: datetime = _T2
+) -> StandingRetrograde:
+    return StandingRetrograde(body=body, retrograde_start_utc=start, retrograde_end_utc=end)
+
+
+def _theme(
+    *,
+    aspects: tuple[ThemeAspect, ...] = (),
+    retrogrades: tuple[StandingRetrograde, ...] = (),
+) -> ReportTheme:
+    return ReportTheme(dominant_aspects=aspects, lunations=(), standing_retrogrades=retrogrades)
 
 
 def _payload_with_ids(*entry_ids: str) -> dict[str, Any]:
@@ -125,14 +173,16 @@ def test_happy_path_returns_a_populated_draft_with_all_eight_fields() -> None:
     assert len(client.calls) == 1
 
 
-def test_a_populated_theme_with_real_dataclass_and_datetime_fields_serializes() -> None:
-    """Every other test in this file uses ``_EMPTY_THEME`` (all-empty
-    tuples), which never exercises the adapter's own ``_json_safe``
-    dataclass/datetime conversion branches -- needed for a real
-    ``ThemeAspect``/``StandingRetrograde``'s ``perfected_at``/``orb_entry_at``/
-    ``orb_exit_at``/``retrograde_start_utc``/``retrograde_end_utc`` fields.
-    A populated theme as both ``theme_previous`` and ``theme_current`` must
-    still serialize into the prompt without raising."""
+def test_a_populated_theme_with_real_dataclass_and_datetime_fields_renders_without_raising() -> (
+    None
+):
+    """Every other continuity test in this file uses ``_theme_aspect()``'s
+    thin builder. This one exercises the same code path
+    (``diff_themes()`` then ``_render_continuity()``) against real
+    ``ThemeAspect``/``StandingRetrograde`` instances with every field
+    populated -- proving raw datetime fields never need to leak into the
+    prompt at all (Story 4.7: the raw JSON dump is removed, not merely
+    reformatted)."""
     payload = _payload_with_ids(_KNOWN_ID)
     theme = ReportTheme(
         dominant_aspects=(
@@ -143,7 +193,7 @@ def test_a_populated_theme_with_real_dataclass_and_datetime_fields_serializes() 
                 perfected_at=datetime(2026, 1, 10, 12, 0, tzinfo=UTC),
                 never_perfected=False,
                 orb_entry_at=datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
-                orb_exit_at=datetime(2026, 1, 20, 0, 0, tzinfo=UTC),
+                orb_exit_at=None,
             ),
         ),
         lunations=(),
@@ -162,10 +212,10 @@ def test_a_populated_theme_with_real_dataclass_and_datetime_fields_serializes() 
 
     assert isinstance(draft, GeneratedDraft)
     prompt = client.calls[0]["prompt"]
-    assert "2026-01-10T12:00:00+00:00" in prompt  # ThemeAspect.perfected_at
-    assert "2026-01-31T23:59:00+00:00" in prompt  # StandingRetrograde.retrograde_end_utc
     assert "saturn" in prompt
     assert "mercury" in prompt
+    assert "2026-01-10T12:00:00+00:00" not in prompt  # ThemeAspect.perfected_at
+    assert "2026-01-31T23:59:00+00:00" not in prompt  # StandingRetrograde.retrograde_end_utc
 
 
 def test_system_instruction_carries_the_style_guide_and_response_schema_matches() -> None:
@@ -199,6 +249,9 @@ def test_generated_draft_is_never_a_string_keyed_dict() -> None:
 
 
 def test_first_report_omits_prior_month_material_and_still_returns_a_draft() -> None:
+    """Story 4.7: ``theme_previous=None`` renders the explicit first-Report
+    statement, never the raw JSON dump this story removes, and never the
+    continuity header (there is nothing prior to be continuous with)."""
     payload = _payload_with_ids(_KNOWN_ID)
     client = _FakeGeminiClient(response=_draft_response())
     generator = GeminiGenerator(api_key="unused", client=client)
@@ -207,7 +260,155 @@ def test_first_report_omits_prior_month_material_and_still_returns_a_draft() -> 
 
     assert isinstance(draft, GeneratedDraft)
     prompt = client.calls[0]["prompt"]
-    assert "THEME_PREVIOUS (JSON, null se primo Report) ---\nnull" in prompt
+    assert _FIRST_REPORT_STATEMENT in prompt
+    assert _CONTINUITY_HEADER not in prompt
+    assert "THEME_PREVIOUS" not in prompt
+    assert "THEME_CURRENT" not in prompt
+
+
+# --- Story 4.7: continuity rendering from diff_themes() ----------------------
+
+
+def test_still_active_aspect_is_rendered_as_a_continuation_never_a_novelty() -> None:
+    aspect = _theme_aspect(orb_exit_at=None)
+    theme_previous = _theme(aspects=(aspect,))
+    theme_current = _theme(aspects=(aspect,))
+    payload = _payload_with_ids(_KNOWN_ID)
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+
+    prompt = client.calls[0]["prompt"]
+    assert _CONTINUITY_HEADER in prompt
+    assert "saturn" in prompt and "square" in prompt and "sun" in prompt
+    assert "continuazione" in prompt
+    assert "novità" in prompt
+
+
+def test_tightened_aspect_is_rendered_as_an_approach_not_a_sudden_event() -> None:
+    theme_previous = _theme(
+        aspects=(_theme_aspect(perfected_at=None, never_perfected=True, orb_exit_at=None),)
+    )
+    theme_current = _theme(
+        aspects=(_theme_aspect(perfected_at=_T1, never_perfected=False, orb_exit_at=None),)
+    )
+    payload = _payload_with_ids(_KNOWN_ID)
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+
+    prompt = client.calls[0]["prompt"]
+    assert _CONTINUITY_HEADER in prompt
+    assert "si è stretto" in prompt
+
+
+def test_resolved_aspect_still_present_in_current_is_not_marked_uncitable() -> None:
+    """A "resolved" Aspect whose element separated this month (``orb_exit_at``
+    newly set) but whose identity is still present in ``theme_current`` is
+    grounded -- it must not carry the "no id" caveat."""
+    theme_previous = _theme(aspects=(_theme_aspect(orb_exit_at=None),))
+    resolved_current = _theme_aspect(orb_exit_at=_T2)
+    theme_current = _theme(aspects=(resolved_current,))
+    payload = _payload_with_ids(_KNOWN_ID)
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+
+    prompt = client.calls[0]["prompt"]
+    assert "si è risolto" in prompt
+    assert "non presente nel Payload di questo mese" not in prompt
+
+
+def test_resolved_aspect_absent_from_current_instructs_no_citation() -> None:
+    """Review loop 1 finding: an element entirely absent from
+    ``theme_current`` (``derive_theme()``'s "no top-N truncation" contract
+    means it genuinely is not anywhere in this month's Payload) must be
+    instructed, if mentioned at all, without a citation for that claim."""
+    theme_previous = _theme(aspects=(_theme_aspect(),))
+    theme_current = _theme(aspects=())
+    payload = _payload_with_ids(_KNOWN_ID)
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+
+    prompt = client.calls[0]["prompt"]
+    assert "si è risolto" in prompt
+    assert "non presente nel Payload di questo mese: se lo menzioni, non citare un id" in prompt
+
+
+def test_combined_signals_a_tightened_aspect_and_a_resolved_retrograde_together() -> None:
+    """Story 4.7 Tasks: more than one simultaneous continuity signal must
+    render correctly together in one call."""
+    tightened_previous_aspect = _theme_aspect(
+        transiting_body="mars", perfected_at=None, never_perfected=True, orb_exit_at=None
+    )
+    tightened_current_aspect = _theme_aspect(
+        transiting_body="mars", perfected_at=_T1, never_perfected=False, orb_exit_at=None
+    )
+    resolved_retrograde = _retrograde(body="jupiter")
+    theme_previous = _theme(
+        aspects=(tightened_previous_aspect,), retrogrades=(resolved_retrograde,)
+    )
+    theme_current = _theme(aspects=(tightened_current_aspect,), retrogrades=())
+    payload = _payload_with_ids(_KNOWN_ID)
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+
+    prompt = client.calls[0]["prompt"]
+    assert "mars" in prompt and "si è stretto" in prompt
+    assert "jupiter" in prompt and "conclusa" in prompt
+    assert "non presente nel Payload di questo mese" in prompt
+
+
+def test_nothing_significant_changed_instructs_saying_so_plainly() -> None:
+    aspect = _theme_aspect(perfected_at=_T0, orb_exit_at=None)
+    theme_previous = _theme(aspects=(aspect,))
+    theme_current = _theme(aspects=(aspect,))
+    payload = _payload_with_ids(_KNOWN_ID)
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+
+    prompt = client.calls[0]["prompt"]
+    assert _NOTHING_SIGNIFICANT_CHANGED_STATEMENT in prompt
+
+
+def test_nothing_significant_changed_statement_is_absent_when_something_did_change() -> None:
+    theme_previous = _theme(aspects=(_theme_aspect(orb_exit_at=None),))
+    theme_current = _theme(aspects=(_theme_aspect(orb_exit_at=_T2),))
+    payload = _payload_with_ids(_KNOWN_ID)
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+
+    prompt = client.calls[0]["prompt"]
+    assert _NOTHING_SIGNIFICANT_CHANGED_STATEMENT not in prompt
+
+
+def test_all_new_elements_omit_the_continuity_header_entirely() -> None:
+    """Review loop 1 finding (dangling header): when every element this
+    month is ``"new"``, there is nothing to render beneath the header and
+    ``nothing_significant_changed`` is ``False`` -- the header must be
+    omitted entirely, not left dangling over an empty list."""
+    theme_previous = _theme(aspects=())
+    theme_current = _theme(aspects=(_theme_aspect(),))
+    payload = _payload_with_ids(_KNOWN_ID)
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+
+    prompt = client.calls[0]["prompt"]
+    assert _CONTINUITY_HEADER not in prompt
+    assert _NOTHING_SIGNIFICANT_CHANGED_STATEMENT not in prompt
 
 
 # --- Matrix row: model cites an unknown entry id -----------------------------

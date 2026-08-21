@@ -661,7 +661,8 @@ def test_draft_ready_calls_the_generator_with_the_persisted_payload_style_guide_
     ``payload``/``theme_current`` back from ``ReportPayload``/
     ``StoredReportTheme`` -- never recomputes them -- calls the Generator
     with the Style Guide currently in force, and passes
-    ``theme_previous=None`` unconditionally (Story 4.7 wires continuity)."""
+    ``theme_previous=None`` for a Client's first Report (Story 4.7: no prior
+    ``ReportRun`` for this Client has reached ``payload_ready``)."""
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
@@ -680,8 +681,68 @@ def test_draft_ready_calls_the_generator_with_the_persisted_payload_style_guide_
     assert called_payload == stored_payload.payload
 
     assert called_style_guide == StyleGuideVersion(version=1, content=_STYLE_GUIDE_CONTENT)
-    assert theme_previous is None, "theme_previous must stay None unconditionally (Story 4.7)"
+    assert theme_previous is None, "no prior ReportRun exists for this Client -- first Report"
     assert isinstance(theme_current, ReportTheme)
+
+
+def test_draft_ready_passes_the_most_recent_prior_report_theme_for_a_returning_client(
+    session: Session,
+) -> None:
+    """Story 4.7 Acceptance Criteria: given a Client with at least one prior
+    month, ``theme_previous`` is that month's already-persisted
+    ``ReportTheme``, deserialized via ``_deserialize_theme`` -- never
+    ``None``, never recomputed."""
+    client, natal_chart = _create_client_and_chart(session)
+    first_run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(first_run)
+    session.commit()
+    _drive(session, first_run, natal_chart)
+    assert first_run.stage == "draft_ready", "fixture did not complete -- test is vacuous"
+
+    first_stored_theme = session.exec(
+        select(StoredReportTheme).where(StoredReportTheme.report_run_id == first_run.id)
+    ).one()
+    expected_theme_previous = driver_module._deserialize_theme(first_stored_theme.theme)
+
+    second_run = ReportRun(client_id=client.id, month="2026-02")
+    session.add(second_run)
+    session.commit()
+    generator = _FakeGenerator()
+    result = _drive(session, second_run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready"
+    assert len(generator.calls) == 1
+    _, _, theme_previous, _ = generator.calls[0]
+    assert theme_previous == expected_theme_previous
+
+
+def test_draft_ready_still_finds_the_prior_theme_when_a_month_was_skipped(
+    session: Session,
+) -> None:
+    """Story 4.7 I/O Matrix: the most recent prior ``ReportRun`` (``"2026-01"``)
+    is still fetched as ``theme_previous`` for ``"2026-03"`` even though
+    ``"2026-02"`` was skipped -- "most recent", not "calendar-adjacent"."""
+    client, natal_chart = _create_client_and_chart(session)
+    first_run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(first_run)
+    session.commit()
+    _drive(session, first_run, natal_chart)
+    assert first_run.stage == "draft_ready", "fixture did not complete -- test is vacuous"
+
+    first_stored_theme = session.exec(
+        select(StoredReportTheme).where(StoredReportTheme.report_run_id == first_run.id)
+    ).one()
+    expected_theme_previous = driver_module._deserialize_theme(first_stored_theme.theme)
+
+    third_run = ReportRun(client_id=client.id, month="2026-03")
+    session.add(third_run)
+    session.commit()
+    generator = _FakeGenerator()
+    result = _drive(session, third_run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready"
+    _, _, theme_previous, _ = generator.calls[0]
+    assert theme_previous == expected_theme_previous
 
 
 def test_draft_ready_persists_the_generated_draft_verbatim_with_its_versions(

@@ -74,7 +74,11 @@ from shell.adapters.postgres.client import Client
 from shell.adapters.postgres.report_draft import store_report_draft
 from shell.adapters.postgres.report_payload import ReportPayload, store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
-from shell.adapters.postgres.report_theme import StoredReportTheme, store_report_theme
+from shell.adapters.postgres.report_theme import (
+    StoredReportTheme,
+    most_recent_prior_report_theme,
+    store_report_theme,
+)
 from shell.adapters.postgres.style_guide import current_style_guide
 from shell.ports.generator import Generator, StyleGuideVersion
 from shell.runner.backoff import with_backoff
@@ -407,15 +411,16 @@ def _run_draft_ready(
 ) -> None:
     """``draft_ready``: call the ``Generator`` port (Story 4.5, AD-3) with
     this run's already-persisted ``Payload``, the Style Guide currently in
-    force and this month's already-persisted ``ReportTheme`` as
-    ``theme_current`` -- ``theme_previous`` stays ``None`` unconditionally
-    (Story 4.7 wires continuity; see this story's Design Notes) -- and
+    force, this month's already-persisted ``ReportTheme`` as
+    ``theme_current`` and this Client's most recent prior month's
+    ``ReportTheme`` (if any) as ``theme_previous`` (Story 4.7) -- then
     persist the returned ``GeneratedDraft`` verbatim.
 
-    ``payload``/``theme_current`` are read back from ``ReportPayload``/
-    ``StoredReportTheme``, never recomputed -- mirrors every other stage
-    function's own "read back, never recomputed" pattern (this story's
-    Boundaries).
+    ``payload``/``theme_current``/``theme_previous`` are all read back --
+    from ``ReportPayload``/``StoredReportTheme``/
+    ``most_recent_prior_report_theme()`` respectively -- never recomputed,
+    mirroring every other stage function's own "read back, never recomputed"
+    pattern (this story's Boundaries).
     """
     stored_payload = session.exec(
         select(ReportPayload).where(ReportPayload.report_run_id == run.id)
@@ -426,10 +431,16 @@ def _run_draft_ready(
     style_guide = current_style_guide(session)
 
     theme_current = _deserialize_theme(stored_theme.theme)
+    stored_prior_theme = most_recent_prior_report_theme(
+        session, run.client_id, before_month=run.month
+    )
+    theme_previous = (
+        None if stored_prior_theme is None else _deserialize_theme(stored_prior_theme.theme)
+    )
     draft = generator.generate(
         stored_payload.payload,
         StyleGuideVersion(version=style_guide.version, content=style_guide.content),
-        None,
+        theme_previous,
         theme_current,
     )
     store_report_draft(

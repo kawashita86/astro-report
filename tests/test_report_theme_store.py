@@ -26,7 +26,11 @@ from shell.adapters.postgres.client import (
     delete_client_and_derived,
 )
 from shell.adapters.postgres.report_run import ReportRun
-from shell.adapters.postgres.report_theme import StoredReportTheme, store_report_theme
+from shell.adapters.postgres.report_theme import (
+    StoredReportTheme,
+    most_recent_prior_report_theme,
+    store_report_theme,
+)
 from shell.computation import load_computation_config
 
 _EPHEMERIS_IDENTITY = verify_ephemeris_identity()
@@ -96,8 +100,8 @@ def _create_client(session: Session, *, name: str = "Ada Lovelace") -> Client:
     )
 
 
-def _create_run(session: Session, client: Client) -> ReportRun:
-    run = ReportRun(client_id=client.id, month="2026-01")
+def _create_run(session: Session, client: Client, *, month: str = "2026-01") -> ReportRun:
+    run = ReportRun(client_id=client.id, month=month)
     session.add(run)
     session.commit()
     return run
@@ -234,6 +238,143 @@ def test_two_report_runs_for_one_client_each_get_their_own_report_theme_row(
         select(StoredReportTheme).where(StoredReportTheme.client_id == client.id)
     ).all()
     assert {stored.report_run_id for stored in stored_themes} == {first_run.id, second_run.id}
+
+
+
+# --- most_recent_prior_report_theme (Story 4.7) -------------------------------
+
+
+def _theme_tagged(natal_house: int) -> ReportTheme:
+    """A minimal ``ReportTheme`` distinguishable from another only by its
+    Lunation's ``natal_house`` -- lets a test assert *which* row's theme was
+    returned without depending on the full shape ``_a_theme()`` builds."""
+    return ReportTheme(
+        dominant_aspects=(),
+        lunations=(ThemeLunation(kind="new_moon", natal_house=natal_house),),
+        standing_retrogrades=(),
+    )
+
+
+def test_most_recent_prior_report_theme_finds_the_immediately_preceding_month(
+    session: Session,
+) -> None:
+    client = _create_client(session)
+    run_jan = _create_run(session, client, month="2026-01")
+    store_report_theme(session, run=run_jan, theme=_theme_tagged(1))
+    session.commit()
+
+    found = most_recent_prior_report_theme(session, client.id, before_month="2026-02")
+
+    assert found is not None
+    assert found.report_run_id == run_jan.id
+    assert found.theme["lunations"] == [{"kind": "new_moon", "natal_house": 1}]
+
+
+def test_most_recent_prior_report_theme_survives_a_skipped_month(session: Session) -> None:
+    """A genuinely still-active slow transit must not be reset to "first
+    Report" behavior just because a month was skipped (Story 4.7 Design
+    Notes): the most recent prior run ("2026-01") is still found even when
+    the immediately preceding month ("2026-02") was never driven."""
+    client = _create_client(session)
+    run_jan = _create_run(session, client, month="2026-01")
+    store_report_theme(session, run=run_jan, theme=_theme_tagged(1))
+    session.commit()
+
+    found = most_recent_prior_report_theme(session, client.id, before_month="2026-03")
+
+    assert found is not None
+    assert found.report_run_id == run_jan.id
+
+
+def test_most_recent_prior_report_theme_is_none_for_a_clients_first_report(
+    session: Session,
+) -> None:
+    client = _create_client(session)
+
+    found = most_recent_prior_report_theme(session, client.id, before_month="2026-01")
+
+    assert found is None
+
+
+def test_most_recent_prior_report_theme_is_none_when_no_prior_run_reached_payload_ready(
+    session: Session,
+) -> None:
+    """A ``ReportRun`` can exist for a Client without ever reaching
+    ``payload_ready`` (so no ``StoredReportTheme`` row was ever written for
+    it) -- that run must not be mistaken for prior continuity."""
+    client = _create_client(session)
+    _create_run(session, client, month="2026-01")  # no StoredReportTheme for this run
+
+    found = most_recent_prior_report_theme(session, client.id, before_month="2026-02")
+
+    assert found is None
+
+
+def test_most_recent_prior_report_theme_never_leaks_across_clients(session: Session) -> None:
+    """The ``ReportRun.client_id == client_id`` filter must exclude a
+    different Client's ``StoredReportTheme`` rows entirely -- Client B has a
+    row for a month earlier than what's queried for Client A, but that row
+    must never be returned for Client A."""
+    client_a = _create_client(session, name="Ada Lovelace")
+    client_b = _create_client(session, name="Grace Hopper")
+    run_b = _create_run(session, client_b, month="2025-06")
+    store_report_theme(session, run=run_b, theme=_theme_tagged(6))
+    session.commit()
+
+    found = most_recent_prior_report_theme(session, client_a.id, before_month="2026-01")
+
+    assert found is None
+
+
+def test_most_recent_prior_report_theme_orders_by_report_run_month_not_creation_order(
+    session: Session,
+) -> None:
+    """Multiple prior ``ReportRun``s can be persisted out of creation order
+    (Story 4.7 I/O Matrix): "2026-01" and "2026-03" are both persisted before
+    "2026-02" is requested, and the query must still pick "2026-01" as the
+    most recent prior run relative to "2026-02" -- ordering by
+    ``ReportRun.month``, not by row-creation order."""
+    client = _create_client(session)
+    run_mar = _create_run(session, client, month="2026-03")
+    store_report_theme(session, run=run_mar, theme=_theme_tagged(3))
+    run_jan = _create_run(session, client, month="2026-01")
+    store_report_theme(session, run=run_jan, theme=_theme_tagged(1))
+    session.commit()
+
+    found = most_recent_prior_report_theme(session, client.id, before_month="2026-02")
+
+    assert found is not None
+    assert found.report_run_id == run_jan.id
+
+
+def test_most_recent_prior_report_theme_holds_across_a_year_boundary(session: Session) -> None:
+    """Zero-padded ``"YYYY-MM"`` string comparison must hold across a year
+    rollover: ``"2025-12"`` sorts before ``"2026-01"``."""
+    client = _create_client(session)
+    run_dec = _create_run(session, client, month="2025-12")
+    store_report_theme(session, run=run_dec, theme=_theme_tagged(12))
+    session.commit()
+
+    found = most_recent_prior_report_theme(session, client.id, before_month="2026-01")
+
+    assert found is not None
+    assert found.report_run_id == run_dec.id
+
+
+def test_most_recent_prior_report_theme_picks_the_later_of_two_prior_runs(
+    session: Session,
+) -> None:
+    client = _create_client(session)
+    run_jan = _create_run(session, client, month="2026-01")
+    store_report_theme(session, run=run_jan, theme=_theme_tagged(1))
+    run_feb = _create_run(session, client, month="2026-02")
+    store_report_theme(session, run=run_feb, theme=_theme_tagged(2))
+    session.commit()
+
+    found = most_recent_prior_report_theme(session, client.id, before_month="2026-03")
+
+    assert found is not None
+    assert found.report_run_id == run_feb.id
 
 
 # --- FR-29 cascade ---------------------------------------------------------------
