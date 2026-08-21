@@ -34,6 +34,8 @@ _IMPORTABLE_ENVIRONMENT = {
     "PORT": "8000",
     "AUTH_PASSWORD_HASH": _TEST_AUTH_PASSWORD_HASH,
     "SESSION_SECRET_KEY": "test-session-secret-key-at-least-32-chars-long",
+    "GEMINI_API_KEY": "test-gemini-api-key",
+    "GEMINI_DATA_TERMS_VERIFIED_AT": "2026-01-15",
 }
 
 os.environ.update(_IMPORTABLE_ENVIRONMENT)

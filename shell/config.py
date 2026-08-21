@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from urllib.parse import urlsplit
 
@@ -83,13 +84,17 @@ class Settings:
     port: int
     auth_password_hash: str
     session_secret_key: str
+    gemini_api_key: str
+    gemini_data_terms_verified_at: str
 
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(environment={self.environment!r}, "
             f"database_url={self.redacted_database_url!r}, port={self.port!r}, "
             f"auth_password_hash={self.redacted_auth_password_hash!r}, "
-            f"session_secret_key={self.redacted_session_secret_key!r})"
+            f"session_secret_key={self.redacted_session_secret_key!r}, "
+            f"gemini_api_key={self.redacted_gemini_api_key!r}, "
+            f"gemini_data_terms_verified_at={self.gemini_data_terms_verified_at!r})"
         )
 
     @property
@@ -114,6 +119,14 @@ class Settings:
     def redacted_session_secret_key(self) -> str:
         """Always a fixed placeholder: unlike the Argon2 hash, no part of this
         value -- not even a prefix -- is safe to reveal."""
+        return "<redacted>"
+
+    @property
+    def redacted_gemini_api_key(self) -> str:
+        """Always a fixed placeholder, mirroring :attr:`redacted_session_secret_key`:
+        a Gemini API key carries no non-secret prefix worth preserving the
+        way ``redacted_auth_password_hash`` preserves the Argon2 algorithm
+        and cost parameters -- every character of it is the secret."""
         return "<redacted>"
 
     @property
@@ -256,6 +269,40 @@ def _read_session_secret_key(
     return raw, None
 
 
+def _read_gemini_api_key(environ: Mapping[str, str]) -> tuple[str | None, str | None]:
+    return _read_required(
+        environ,
+        "GEMINI_API_KEY",
+        "Set it to a Gemini API key for the configured Generator adapter.",
+    )
+
+
+def _read_gemini_data_terms_verified_at(
+    environ: Mapping[str, str],
+) -> tuple[str | None, str | None]:
+    """A non-blank ISO date recording when Gemini's data terms were verified
+    (NFR-17) -- required, like every other Setting, so the process refuses to
+    start rather than ever sending real Client data before that check has
+    been made and recorded."""
+    raw, error = _read_required(
+        environ,
+        "GEMINI_DATA_TERMS_VERIFIED_AT",
+        "Set it to the ISO date (YYYY-MM-DD) the Gemini data terms were "
+        "verified, e.g. 2026-01-15.",
+    )
+    if error is not None:
+        return None, error
+    assert raw is not None
+    try:
+        date.fromisoformat(raw)
+    except ValueError:
+        return None, (
+            f"GEMINI_DATA_TERMS_VERIFIED_AT is invalid: {raw!r} is not an "
+            "ISO date (YYYY-MM-DD)."
+        )
+    return raw, None
+
+
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """Validate ``environ`` into a frozen :class:`Settings`.
 
@@ -272,6 +319,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     port, port_error = _read_port(source)
     auth_password_hash, auth_password_hash_error = _read_auth_password_hash(source)
     session_secret_key, session_secret_key_error = _read_session_secret_key(source)
+    gemini_api_key, gemini_api_key_error = _read_gemini_api_key(source)
+    gemini_data_terms_verified_at, gemini_data_terms_verified_at_error = (
+        _read_gemini_data_terms_verified_at(source)
+    )
 
     problems = [
         problem
@@ -281,6 +332,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             port_error,
             auth_password_hash_error,
             session_secret_key_error,
+            gemini_api_key_error,
+            gemini_data_terms_verified_at_error,
         )
         if problem is not None
     ]
@@ -296,6 +349,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         and port is not None
         and auth_password_hash is not None
         and session_secret_key is not None
+        and gemini_api_key is not None
+        and gemini_data_terms_verified_at is not None
     )
     return Settings(
         environment=environment,
@@ -303,6 +358,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         port=port,
         auth_password_hash=auth_password_hash,
         session_secret_key=session_secret_key,
+        gemini_api_key=gemini_api_key,
+        gemini_data_terms_verified_at=gemini_data_terms_verified_at,
     )
 
 

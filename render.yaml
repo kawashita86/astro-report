@@ -41,3 +41,15 @@ services:
       #   uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
       - key: SESSION_SECRET_KEY
         sync: false
+      # Set manually to the Gemini API key for the configured Generator
+      # adapter (Story 4.5, AD-9). `sync: false` for the same reason.
+      - key: GEMINI_API_KEY
+        sync: false
+      # Set manually to the ISO date (YYYY-MM-DD) Gemini's data terms were
+      # verified (NFR-17) -- recorded, not just checked once, because the
+      # zero-cost guarantee is jurisdiction-contingent. `sync: false` is not
+      # needed for secrecy here, but keeps every required Setting in this
+      # block consistent -- this is still a manual, deliberate value, never
+      # a default.
+      - key: GEMINI_DATA_TERMS_VERIFIED_AT
+        sync: false

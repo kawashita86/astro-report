@@ -31,6 +31,8 @@ VALID_ENVIRONMENT = {
     "PORT": "8000",
     "AUTH_PASSWORD_HASH": VALID_AUTH_PASSWORD_HASH,
     "SESSION_SECRET_KEY": "test-session-secret-key-at-least-32-chars-long",
+    "GEMINI_API_KEY": "test-gemini-api-key",
+    "GEMINI_DATA_TERMS_VERIFIED_AT": "2026-01-15",
 }
 
 
@@ -53,6 +55,11 @@ def test_valid_environment_builds_settings() -> None:
     assert settings.port == 8000
     assert settings.auth_password_hash == VALID_AUTH_PASSWORD_HASH
     assert settings.session_secret_key == VALID_ENVIRONMENT["SESSION_SECRET_KEY"]
+    assert settings.gemini_api_key == VALID_ENVIRONMENT["GEMINI_API_KEY"]
+    assert (
+        settings.gemini_data_terms_verified_at
+        == VALID_ENVIRONMENT["GEMINI_DATA_TERMS_VERIFIED_AT"]
+    )
 
 
 def test_production_is_a_permitted_environment() -> None:
@@ -215,6 +222,36 @@ def test_a_session_secret_key_of_exactly_32_chars_is_accepted() -> None:
     assert settings.session_secret_key == "x" * 32
 
 
+# --- Matrix row: GEMINI_DATA_TERMS_VERIFIED_AT must be a non-blank ISO date ---
+
+
+@pytest.mark.parametrize(
+    "malformed", ["not-a-date", "2026-13-40", "15/01/2026", "2026-01-15T00:00:00"]
+)
+def test_a_malformed_gemini_data_terms_verified_at_aborts(malformed: str) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_with(GEMINI_DATA_TERMS_VERIFIED_AT=malformed))
+
+    message = str(raised.value)
+    assert "GEMINI_DATA_TERMS_VERIFIED_AT" in message
+    assert "ISO date" in message
+
+
+def test_a_well_formed_gemini_data_terms_verified_at_is_accepted() -> None:
+    settings = load_settings(VALID_ENVIRONMENT)
+
+    assert settings.gemini_data_terms_verified_at == "2026-01-15"
+
+
+def test_gemini_api_key_is_required() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_without("GEMINI_API_KEY"))
+
+    message = str(raised.value)
+    assert "GEMINI_API_KEY" in message
+    assert "required" in message
+
+
 # --- Matrix row: unrecognized enum --------------------------------------------
 
 
@@ -310,6 +347,19 @@ def test_repr_does_not_leak_the_session_secret_key() -> None:
     settings = load_settings(VALID_ENVIRONMENT)
 
     assert VALID_ENVIRONMENT["SESSION_SECRET_KEY"] not in repr(settings)
+
+
+def test_repr_does_not_leak_the_gemini_api_key() -> None:
+    settings = load_settings(VALID_ENVIRONMENT)
+
+    assert VALID_ENVIRONMENT["GEMINI_API_KEY"] not in repr(settings)
+
+
+def test_repr_still_identifies_when_the_gemini_data_terms_were_verified() -> None:
+    """The verification date is not a secret and is useful in a log line."""
+    rendered = repr(load_settings(VALID_ENVIRONMENT))
+
+    assert "2026-01-15" in rendered
 
 
 def test_redacted_auth_password_hash_falls_back_on_a_hash_with_no_dollar_fields() -> None:

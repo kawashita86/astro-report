@@ -121,6 +121,8 @@ def run_offline_upgrade(database_url: str) -> subprocess.CompletedProcess[str]:
                 "5qiPb5sRKvlOqu1vvnP861fs5dcBQgq8OJvSlHPL3Mo"
             ),
             "SESSION_SECRET_KEY": "test-session-secret-key-at-least-32-chars-long",
+            "GEMINI_API_KEY": "test-gemini-api-key",
+            "GEMINI_DATA_TERMS_VERIFIED_AT": "2026-01-15",
         },
         capture_output=True,
         text=True,

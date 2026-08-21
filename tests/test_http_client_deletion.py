@@ -49,6 +49,8 @@ LOCAL = Settings(
     port=8000,
     auth_password_hash=AUTH_PASSWORD_HASH,
     session_secret_key=SESSION_SECRET_KEY,
+    gemini_api_key="test-gemini-api-key",
+    gemini_data_terms_verified_at="2026-01-15",
 )
 
 # Fort Worth, TX -- mirrors tests/test_http_client_correction.py's own fixture.

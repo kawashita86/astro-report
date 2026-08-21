@@ -333,6 +333,8 @@ def test_importing_the_app_with_a_missing_computation_config_exits_non_zero(
                     "5qiPb5sRKvlOqu1vvnP861fs5dcBQgq8OJvSlHPL3Mo"
                 ),
                 "SESSION_SECRET_KEY": "test-session-secret-key-at-least-32-chars-long",
+                "GEMINI_API_KEY": "test-gemini-api-key",
+                "GEMINI_DATA_TERMS_VERIFIED_AT": "2026-01-15",
             },
             capture_output=True,
             text=True,

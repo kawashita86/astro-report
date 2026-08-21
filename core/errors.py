@@ -7,6 +7,8 @@ from typing import Literal
 __all__ = [
     "ComputationConfigError",
     "EphemerisIntegrityError",
+    "GenerationError",
+    "GenerationStep",
     "PlaceResolutionError",
     "PlaceResolutionStep",
     "SectionsConfigError",
@@ -16,6 +18,17 @@ __all__ = [
 #: string would let a later call site introduce an inconsistent label (e.g.
 #: "geocode" vs "geocoding") that error handling or tests key off of.
 PlaceResolutionStep = Literal["geocoding", "timezone_resolution", "cache"]
+
+#: The closed set of steps a ``Generator`` call can fail at (Story 4.5) -- a
+#: free-form string would let a later call site introduce an inconsistent
+#: label that error handling or tests key off of. ``"request"`` is the
+#: Gemini call itself raising or timing out; ``"parsing"`` is a response that
+#: is not the expected JSON structure; ``"citation_validation"`` is a
+#: returned ``entry_id`` absent from the ``Payload``; ``"date_token_validation"``
+#: is a date-shaped token inside ``giorni_favorevoli``/``giorni_di_attenzione``,
+#: where dates are code-projected upstream (Story 3.7) and the model must
+#: never write one.
+GenerationStep = Literal["request", "parsing", "citation_validation", "date_token_validation"]
 
 
 class EphemerisIntegrityError(RuntimeError):
@@ -84,3 +97,24 @@ class PlaceResolutionError(RuntimeError):
     def __init__(self, step: PlaceResolutionStep, message: str) -> None:
         self.step = step
         super().__init__(f"Refusing to resolve birthplace ({step}): {message}")
+
+
+class GenerationError(RuntimeError):
+    """A ``Generator`` call (Story 4.5, AD-3) could not be trusted enough to
+    return a ``GeneratedDraft``.
+
+    There is no partial or best-guess draft to fall back to -- an unknown
+    cited ``entry_id`` or a date-shaped token in ``giorni_favorevoli``/
+    ``giorni_di_attenzione`` means the model's response cannot be trusted,
+    so nothing is returned rather than something unverifiable. Raised from
+    :mod:`shell.adapters.gemini.generator`, naming which step failed --
+    the request itself, parsing the response, citation validation, or
+    date-token validation -- rather than letting a raw SDK or JSON exception
+    escape untyped. Date-token validation is a best-effort regex heuristic
+    (Design Notes), not a completeness guarantee -- Francesco's own review
+    before export is the final backstop, same as register and non-fatalism.
+    """
+
+    def __init__(self, step: GenerationStep, message: str) -> None:
+        self.step = step
+        super().__init__(f"Refusing to return a generated draft ({step}): {message}")
