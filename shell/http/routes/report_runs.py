@@ -28,10 +28,12 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from shell.adapters.gemini.generator import GeminiGenerator
+from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, StoredNatalChart, deserialize_natal_chart
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
+from shell.config import Environment
 from shell.http.app import get_session
 from shell.http.draft_view import (
     LIST_SECTION_NAMES,
@@ -77,7 +79,15 @@ def get_generator(request: Request) -> Generator:
     constructing a real ``genai.Client`` for every one of the many HTTP
     tests that build the app but never touch report runs (this story's
     Design Notes).
+
+    Under ``Environment.LOCAL`` this returns ``RecordedResponseGenerator``
+    instead of a real ``GeminiGenerator`` (Story 4.9) -- mirrors the
+    ``settings.environment is Environment.LOCAL`` idiom ``shell/http/app.py``
+    already uses twice, so ``docker compose up`` against a local Postgres
+    never spends real Gemini quota. Production behavior is unchanged.
     """
+    if request.app.state.settings.environment is Environment.LOCAL:
+        return RecordedResponseGenerator()
     return GeminiGenerator(request.app.state.settings.gemini_api_key)
 
 

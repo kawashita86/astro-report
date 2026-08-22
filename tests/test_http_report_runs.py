@@ -38,6 +38,7 @@ from core.types.payload import Payload, SectionPayload
 from core.types.place import ResolvedPlace
 from core.types.transits import Station, TransitAspectEvent
 from shell.adapters.gemini.generator import GeminiGenerator
+from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, create_client_with_chart
 from shell.adapters.postgres.report_draft import store_report_draft
 from shell.adapters.postgres.report_payload import store_report_payload
@@ -57,6 +58,16 @@ SESSION_SECRET_KEY = "test-session-secret-key-at-least-32-chars-long"
 
 LOCAL = Settings(
     environment=Environment.LOCAL,
+    database_url="postgresql://astro:astro@localhost:5432/astro_report",
+    port=8000,
+    auth_password_hash=AUTH_PASSWORD_HASH,
+    session_secret_key=SESSION_SECRET_KEY,
+    gemini_api_key="test-gemini-api-key",
+    gemini_data_terms_verified_at="2026-01-15",
+)
+
+PRODUCTION = Settings(
+    environment=Environment.PRODUCTION,
     database_url="postgresql://astro:astro@localhost:5432/astro_report",
     port=8000,
     auth_password_hash=AUTH_PASSWORD_HASH,
@@ -625,12 +636,23 @@ def test_get_generator_builds_a_real_gemini_generator_from_the_apps_configured_k
     """``fake_drive`` (used by every other test here) overrides ``get_generator``
     with a fake, so nothing else in this module exercises the real dependency
     itself -- this proves ``get_generator`` wires ``request.app.state.settings
-    .gemini_api_key`` into a real ``GeminiGenerator``, mirroring how
-    ``get_geocoder`` is exercised directly in ``tests/test_http_clients.py``.
+    .gemini_api_key`` into a real ``GeminiGenerator`` under ``Environment
+    .PRODUCTION``, mirroring how ``get_geocoder`` is exercised directly in
+    ``tests/test_http_clients.py`` (Story 4.9: ``LOCAL`` now returns
+    ``RecordedResponseGenerator`` instead, see the test below).
     """
-    generator = get_generator(_StubRequest(LOCAL))  # type: ignore[arg-type]
+    generator = get_generator(_StubRequest(PRODUCTION))  # type: ignore[arg-type]
 
     assert isinstance(generator, GeminiGenerator)
+
+
+def test_get_generator_returns_the_recorded_response_generator_under_local() -> None:
+    """Story 4.9: local development runs generation against recorded
+    responses, not the live provider, so ``docker compose up`` never spends
+    real Gemini quota."""
+    generator = get_generator(_StubRequest(LOCAL))  # type: ignore[arg-type]
+
+    assert isinstance(generator, RecordedResponseGenerator)
 
 
 # --- Story 4.8: a terminally failed run ---------------------------------------------
