@@ -96,6 +96,22 @@ def test_max_attempts_of_one_never_sleeps() -> None:
     assert sleeps == []
 
 
+def test_base_delay_seconds_overrides_the_module_default_schedule() -> None:
+    """Story 4.8: a call site with a real rate-limited call (``draft_ready``)
+    passes its own ``base_delay_seconds`` -- the schedule must use it, not
+    the module's own small default, while the retry algorithm itself (bounded
+    exponential, no jitter) is unchanged."""
+
+    def fn() -> None:
+        raise _AlwaysFails("permanent")
+
+    sleeps: list[float] = []
+    with pytest.raises(_AlwaysFails):
+        with_backoff(fn, max_attempts=3, base_delay_seconds=6.0, sleep=_fake_sleep(sleeps))
+
+    assert sleeps == [6.0, 12.0]
+
+
 def test_no_explicit_sleep_still_retries_and_succeeds() -> None:
     """No `sleep=` override -- exercises the real default (`time.sleep`)
     end-to-end. The configured base delay is small enough (0.1s, doubling)

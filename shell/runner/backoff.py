@@ -29,16 +29,25 @@ def with_backoff[T](
     fn: Callable[[], T],
     *,
     max_attempts: int = 3,
+    base_delay_seconds: float = _BASE_DELAY_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
 ) -> T:
     """Call ``fn()``, retrying on any exception up to ``max_attempts`` times
-    total, waiting ``_BASE_DELAY_SECONDS * 2 ** attempt`` between attempts.
+    total, waiting ``base_delay_seconds * 2 ** attempt`` between attempts.
 
     Re-raises the final attempt's exception once every attempt is exhausted
     -- this function never swallows a persistent failure. The caller
     (``shell/runner/driver.py::drive()``) decides what "still failing" means
     for a ``ReportRun``: leaving ``run.stage`` at its last successful value
     rather than marking the run failed.
+
+    ``base_delay_seconds`` defaults to the module's small, generic schedule
+    (``_BASE_DELAY_SECONDS``) -- right for every stage whose call is local
+    and not rate-limited. A call site with a real rate-limited network call
+    (``draft_ready``, Story 4.8) passes its own, larger value so consecutive
+    attempts stay within the provider's ceiling; ``with_backoff``'s retry
+    algorithm itself (catch-all exception, exponential doubling, no jitter)
+    is unchanged either way (AD-10: one shared retry primitive).
 
     ``sleep`` is injectable so a test can prove the retry count and delay
     schedule without actually waiting; it defaults to the real ``time.sleep``.
@@ -52,7 +61,7 @@ def with_backoff[T](
             # choosing which exception type deserves a retry.
             last_error = error
             if attempt < max_attempts - 1:
-                sleep(_BASE_DELAY_SECONDS * (2**attempt))
+                sleep(base_delay_seconds * (2**attempt))
 
     assert last_error is not None
     raise last_error

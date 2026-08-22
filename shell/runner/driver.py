@@ -100,6 +100,28 @@ _STAGE_SEQUENCE: tuple[str, ...] = (
     "exported",
 )
 
+#: Per-stage overrides for `with_backoff`'s keyword arguments, keyed by
+#: stage name -- only a stage with a real rate-limited network call needs
+#: one (Story 4.8). `draft_ready` is the only such stage today (the module's
+#: own Design Notes): 3 attempts, 6-second base delay, doubling to a second
+#: retry at 12s -- three Gemini attempts inside one `drive()` call span
+#: 0s/6s/18s, comfortably inside the provider's 10 requests-per-minute
+#: ceiling even if a poll lands right after a prior `drive()` call's own
+#: attempts. A stage absent from this mapping keeps `with_backoff`'s plain
+#: defaults (today's fast, generic schedule) -- this story does not change
+#: any other stage's behavior.
+_STAGE_BACKOFF_OVERRIDES: dict[str, dict[str, object]] = {
+    "draft_ready": {"max_attempts": 3, "base_delay_seconds": 6.0},
+}
+
+#: Consecutive `with_backoff` exhaustions on a run's current stage, across
+#: separate `drive()` calls, before that run is marked terminally failed
+#: (Story 4.8). Each `drive()` call already spends up to 3 Gemini attempts
+#: (~18s) when stuck at `draft_ready`; 5 such exhausted `drive()` calls is
+#: ~15 real attempts -- a genuinely exhausted run, not a blip (the module's
+#: own Design Notes).
+_MAX_STAGE_FAILURES = 5
+
 #: A stage function's uniform signature: every registered stage receives the
 #: same context, whether or not it needs all of it, so the registry stays a
 #: plain ``{name: function}`` mapping rather than growing per-stage plumbing
@@ -486,15 +508,33 @@ def drive(
     so re-driving a completed run is a no-op regardless of what
     ``natal_chart``/``config`` are passed. Stops cleanly the moment it
     reaches a stage name with no registered function (Story 3.9+ registers
-    the rest) -- and stops just as cleanly, without raising, if a stage's
-    ``with_backoff`` call exhausts every attempt, leaving ``run.stage``
-    unchanged for the next ``drive()`` call to retry. Either way ``run`` is
-    returned exactly as far as it got.
+    the rest). A stage's ``with_backoff`` call uses that stage's own
+    override from :data:`_STAGE_BACKOFF_OVERRIDES` when one exists (Story
+    4.8) -- ``draft_ready``'s Gemini attempts stay within the provider's
+    10 requests-per-minute ceiling -- and the plain defaults otherwise.
+
+    A successful stage advance resets ``run.stage_failure_count`` to 0.
+    When a stage's ``with_backoff`` call exhausts every attempt,
+    ``run.stage`` is left unchanged (as before) but
+    ``run.stage_failure_count`` is incremented; once it reaches
+    :data:`_MAX_STAGE_FAILURES` *consecutive* exhaustions, ``run`` is marked
+    terminally failed (``failed_at``/``failure_reason`` set) instead of
+    being retried forever -- a persistent rate limit or error now reaches a
+    terminal state Francesco is shown, rather than an indefinite,
+    ever-hammering silent stall. Either way ``run`` is returned exactly as
+    far as it got.
+
+    A run already marked ``failed_at`` short-circuits immediately: no stage
+    function runs, no ``with_backoff`` call is made, ``run`` is returned
+    unchanged.
 
     Called from both the start route and the poll route
     (``shell/http/routes/report_runs.py``): a stalled or interrupted run
     resumes on whichever request -- start or poll -- calls this next.
     """
+    if run.failed_at is not None:
+        return run
+
     completed_index = _stage_index(run.stage)
 
     for index, stage_name in enumerate(_STAGE_SEQUENCE):
@@ -504,6 +544,8 @@ def drive(
         stage_fn = _STAGE_FUNCTIONS.get(stage_name)
         if stage_fn is None:
             break
+
+        backoff_kwargs = _STAGE_BACKOFF_OVERRIDES.get(stage_name, {})
 
         try:
             with_backoff(
@@ -515,13 +557,32 @@ def drive(
                     ephemeris_identity,
                     sections_config,
                     generator,
-                )
+                ),
+                **backoff_kwargs,
             )
-        except Exception:
+        except Exception as error:
             _logger.exception("report run stage failed, left un-advanced: %s", run.id)
+            run.stage_failure_count += 1
+            run.updated_at = datetime.now(UTC)
+            if run.stage_failure_count >= _MAX_STAGE_FAILURES:
+                run.failed_at = run.updated_at
+                run.failure_reason = (
+                    f"stage {stage_name!r} failed {run.stage_failure_count} consecutive "
+                    f"times: {error}"
+                )
+                _logger.error(
+                    "report run marked terminally failed at %s after %s consecutive "
+                    "failures: %s",
+                    stage_name,
+                    run.stage_failure_count,
+                    run.id,
+                )
+            session.add(run)
+            session.commit()
             break
 
         run.stage = stage_name
+        run.stage_failure_count = 0
         run.updated_at = datetime.now(UTC)
         session.add(run)
         session.commit()

@@ -14,11 +14,17 @@
 {% endif %}
       <div
         id="run-status"
+        {% if not run.failed_at %}
         hx-get="/report-runs/{{ run.id }}"
         hx-trigger="every 2s"
         hx-swap="outerHTML"
+        {% endif %}
       >
+        {% if run.failed_at %}
+        <p>Failed: {{ run.failure_reason }}</p>
+        {% else %}
         <p>Stage: {{ run.stage or "starting" }}</p>
+        {% endif %}
         {% if run.stage == "payload_ready" %}
         <p><a href="/report-runs/{{ run.id }}/payload">View Payload</a></p>
         {% endif %}

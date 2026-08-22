@@ -786,3 +786,159 @@ def test_draft_ready_persists_the_generated_draft_verbatim_with_its_versions(
     ]
     assert stored_draft.draft["consiglio_finale"] == [{"text": "Respira.", "entry_ids": []}]
     assert stored_draft.draft["amore"] == []
+
+
+# --- Story 4.8: persistent draft_ready failure marks the run terminally failed --
+
+
+class _AlwaysFailingGenerator:
+    """A ``Generator`` (``shell/ports/generator.py``) test double whose
+    ``generate()`` always raises -- proves Story 4.8's persistent-failure
+    path (a rate limit that never clears) without a real Gemini call."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, payload, style_guide, theme_previous, theme_current):
+        self.calls += 1
+        raise RuntimeError("simulated persistent rate limit")
+
+
+def test_draft_ready_failing_five_consecutive_drive_calls_marks_the_run_terminally_failed(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """I/O & Edge-Case Matrix: "Persistent draft_ready failure across many
+    polls" -- the Gemini call always raises; drive() is called 5 times; the
+    5th call sets failed_at/failure_reason and the run never advances past
+    payload_ready.
+
+    ``draft_ready``'s real override (``base_delay_seconds=6.0``,
+    ``tests/test_runner_backoff.py`` proves that schedule itself) is swapped
+    for a zero-delay one here, so this behavioral test -- 5 consecutive
+    ``drive()`` calls -- doesn't spend the real ~18s/call ``with_backoff``
+    would otherwise sleep; ``max_attempts`` (the thing this test's failure
+    count depends on) is left unchanged.
+    """
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "draft_ready",
+        {"max_attempts": 3, "base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _AlwaysFailingGenerator()
+    for _ in range(4):
+        _drive(session, run, natal_chart, generator=generator)
+        assert run.stage == "payload_ready"
+        assert run.failed_at is None
+
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "payload_ready"
+    assert result.stage_failure_count == 5
+    assert result.failed_at is not None
+    assert result.failure_reason is not None
+    assert "draft_ready" in result.failure_reason
+
+
+def test_a_failed_run_is_a_noop_on_drive(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """I/O & Edge-Case Matrix: "Polling a failed run" -- once
+    ``run.failed_at`` is set, ``drive()`` does nothing further: no stage
+    function runs, nothing about the run changes. A zero-delay draft_ready
+    override keeps the fixture's 5 failing drive() calls fast, mirroring
+    the previous test's own reasoning."""
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "draft_ready",
+        {"max_attempts": 3, "base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _AlwaysFailingGenerator()
+    for _ in range(5):
+        _drive(session, run, natal_chart, generator=generator)
+    assert run.failed_at is not None, "fixture did not fail the run -- test is vacuous"
+    failed_at_before = run.failed_at
+    failure_reason_before = run.failure_reason
+    calls_before = generator.calls
+
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result is run
+    assert result.failed_at == failed_at_before
+    assert result.failure_reason == failure_reason_before
+    assert result.stage == "payload_ready"
+    assert generator.calls == calls_before, "the Generator must not be called on a failed run"
+
+
+def test_draft_ready_failing_then_succeeding_resets_the_failure_counter(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """I/O & Edge-Case Matrix: "Transient draft_ready failure, then success"
+    -- a fail-once-then-succeed Generator still advances the run to
+    draft_ready within one drive() call (with_backoff's own retry), and
+    ``stage_failure_count`` resets to 0. A zero-delay draft_ready override
+    avoids the one real 6s sleep this fixture would otherwise wait through."""
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "draft_ready",
+        {"max_attempts": 3, "base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    calls: list[int] = []
+    real_draft = _a_generated_draft()
+
+    class _FailsOnceThenSucceeds:
+        def generate(self, payload, style_guide, theme_previous, theme_current):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("simulated transient failure")
+            return real_draft
+
+    result = _drive(session, run, natal_chart, generator=_FailsOnceThenSucceeds())
+
+    assert len(calls) == 2, "the Generator must have been retried by with_backoff"
+    assert result.stage == "draft_ready"
+    assert result.stage_failure_count == 0
+    assert result.failed_at is None
+
+
+def test_a_stage_other_than_draft_ready_failing_persistently_also_reaches_terminal_failure(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """I/O & Edge-Case Matrix: "A stage other than draft_ready fails
+    persistently" -- e.g. natal_ready always raises -- is still bounded by
+    the existing default with_backoff schedule and _MAX_STAGE_FAILURES;
+    eventually reaches failed_at too."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    def _always_fail(*args, **kwargs):
+        raise RuntimeError("simulated permanent failure")
+
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "natal_ready", _always_fail)
+
+    for _ in range(4):
+        _drive(session, run, natal_chart)
+        assert run.failed_at is None
+
+    result = _drive(session, run, natal_chart)
+
+    assert result.stage is None
+    assert result.stage_failure_count == 5
+    assert result.failed_at is not None
+    assert "natal_ready" in result.failure_reason

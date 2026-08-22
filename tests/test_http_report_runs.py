@@ -631,3 +631,54 @@ def test_get_generator_builds_a_real_gemini_generator_from_the_apps_configured_k
     generator = get_generator(_StubRequest(LOCAL))  # type: ignore[arg-type]
 
     assert isinstance(generator, GeminiGenerator)
+
+
+# --- Story 4.8: a terminally failed run ---------------------------------------------
+
+
+def _a_failed_run(client_id) -> ReportRun:
+    """A ``ReportRun`` already marked terminally failed at ``draft_ready``
+    (Story 4.8) -- ``drive()`` short-circuits on ``failed_at`` before ever
+    touching the Generator, so no ``fake_drive``/real Gemini call is needed
+    for either test below."""
+    return ReportRun(
+        client_id=client_id,
+        month="2026-01",
+        stage="payload_ready",
+        failed_at=datetime(2026, 1, 20, 12, 0, 0, tzinfo=UTC),
+        failure_reason="stage 'draft_ready' failed 5 consecutive times: simulated rate limit",
+    )
+
+
+def test_a_failed_runs_poll_fragment_shows_the_reason_with_no_hx_trigger(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """I/O & Edge-Case Matrix: "Polling a failed run" -- the poll fragment
+    shows the reason, without ``hx-trigger``, so Francesco sees why without
+    the page polling forever."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_failed_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert "simulated rate limit" in response.text
+    assert "hx-trigger" not in response.text
+
+
+def test_the_draft_view_for_a_failed_run_still_404s(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """I/O & Edge-Case Matrix: "Draft view for a failed run" -- no
+    ``ReportDraft`` row exists for a failed run (no partial, exportable
+    Report), so ``GET /report-runs/{id}/draft`` still 404s."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_failed_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 404

@@ -4,10 +4,14 @@ computation through AD-10's six named stages (Story 3.5).
 A row is created once, then advanced forward-only by
 ``shell/runner/driver.py::drive()`` -- never re-created, never rewound.
 Persisting each stage's output before the next begins (rather than holding
-run state only in memory) means a spin-down, redeploy or future rate-limit
-stall (the Generator, Story 4.8) never loses a whole run: the next call to
-``drive()``, from either the start route or the poll route, resumes exactly
-where the row left off.
+run state only in memory) means a spin-down or redeploy never loses a whole
+run: the next call to ``drive()``, from either the start route or the poll
+route, resumes exactly where the row left off. A persistent rate-limit
+stall on the Generator (``draft_ready``) is handled the same way, plus its
+own bounded failure counter (``stage_failure_count``/``failed_at``/
+``failure_reason``, Story 4.8): once too many consecutive attempts exhaust
+``with_backoff``, the run is marked terminally failed instead of being
+retried by every future poll forever.
 """
 
 from __future__ import annotations
@@ -65,6 +69,12 @@ class ReportRun(SQLModel, table=True):
     since the four scan functions return different dataclasses -- see
     ``shell/runner/driver.py``'s Design Notes for why this is one column
     rather than four new tables.
+
+    ``stage_failure_count``/``failed_at``/``failure_reason`` (Story 4.8)
+    track consecutive ``with_backoff`` exhaustions on the current stage
+    across separate ``drive()`` calls, and the terminal-failure state that
+    accumulating enough of them produces -- see each field's own comment
+    below for its exact semantics.
     """
 
     __tablename__ = "report_run"
@@ -86,6 +96,19 @@ class ReportRun(SQLModel, table=True):
     transit_events: list[dict[str, Any]] | None = Field(
         default=None, sa_column=Column(JSON, nullable=True)
     )
+    # Consecutive `with_backoff` exhaustions on the current stage (Story
+    # 4.8) -- reset to 0 by a successful stage advance, incremented on each
+    # exhaustion, compared against `_MAX_STAGE_FAILURES`
+    # (`shell/runner/driver.py`) to decide when a run is terminally failed
+    # rather than retried forever.
+    stage_failure_count: int = Field(default=0)
+    # `NULL` until a run is marked terminally failed; a timestamp then marks
+    # it permanently, mirroring `StoredNatalChart.superseded_at`'s own
+    # nullable-timestamp pattern for "this row's normal life is over."
+    failed_at: datetime | None = Field(default=None, sa_column=Column(_UTCDateTime, nullable=True))
+    # Set alongside `failed_at`, never independently -- the reason shown to
+    # Francesco in the poll fragment.
+    failure_reason: str | None = Field(default=None)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(_UTCDateTime, nullable=False),
