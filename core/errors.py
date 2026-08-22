@@ -7,6 +7,7 @@ from typing import Literal
 __all__ = [
     "ComputationConfigError",
     "EphemerisIntegrityError",
+    "GateVocabularyError",
     "GenerationError",
     "GenerationStep",
     "PlaceResolutionError",
@@ -77,6 +78,23 @@ class SectionsConfigError(RuntimeError):
 
     Raised only at load time, from :mod:`shell.sections` -- mirrors how
     ``ComputationConfigError`` already aborts startup.
+    """
+
+
+class GateVocabularyError(RuntimeError):
+    """``core/gate/vocabulary.it.json`` -- the versioned closed Italian
+    vocabulary that decides what counts as a Claim (Story 5.1, AD-8) --
+    cannot be trusted.
+
+    Raised when the file is missing, its JSON is malformed, one of the six
+    required category keys is absent, or a value it holds is the wrong shape
+    (a non-string list entry, or ``version`` not an integer). There is no
+    partial or best-guess ``GateVocabulary`` to proceed with: the process
+    refuses to start rather than classify Claims against a vocabulary it
+    cannot verify.
+
+    Raised only at load time, from :mod:`shell.gate` -- mirrors how
+    ``SectionsConfigError`` already aborts startup.
     """
 
 

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "planets": [
+    "sole",
+    "luna",
+    "mercurio",
+    "venere",
+    "marte",
+    "giove",
+    "saturno",
+    "urano",
+    "nettuno",
+    "plutone"
+  ],
+  "signs": [
+    "ariete",
+    "toro",
+    "gemelli",
+    "cancro",
+    "leone",
+    "vergine",
+    "bilancia",
+    "scorpione",
+    "sagittario",
+    "capricorno",
+    "acquario",
+    "pesci"
+  ],
+  "casa_ordinals": [
+    "prima",
+    "seconda",
+    "terza",
+    "quarta",
+    "quinta",
+    "sesta",
+    "settima",
+    "ottava",
+    "nona",
+    "decima",
+    "undicesima",
+    "dodicesima"
+  ],
+  "day_of_month_pattern": "\\b([1-9]|[12][0-9]|3[01])\\b",
+  "retrogrado": "retrogrado",
+  "stazionario": "stazionario"
+}
