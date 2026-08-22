@@ -1,0 +1,659 @@
+"""``core/gate/run.py::run_gate()`` -- one test per row of Story 5.2's I/O &
+Edge-Case Matrix, plus the properties those rows imply: purity/determinism
+and the check-order the Boundaries fix.
+
+Payload fixtures go through the real ``freeze_payload()`` (Code Map's
+explicit precedent) rather than a hand-rolled stand-in shape, mirroring
+``tests/test_payload_freeze.py``/``tests/test_gemini_generator.py``'s own
+``test_citation_validation_finds_ids_in_a_real_freeze_payload_shaped_payload``.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+
+from core.ephemeris.identity import verify_ephemeris_identity
+from core.gate.run import _DATE_TOKEN_PATTERN as _GATE_DATE_TOKEN_PATTERN
+from core.gate.run import _index_entries, run_gate
+from core.payload.freeze import freeze_payload
+from core.types.day_lists import DayLists
+from core.types.gate import GateResult, GateViolation
+from core.types.generation import GeneratedDraft, Sentence
+from core.types.payload import Payload, SectionPayload
+from core.types.transits import Ingress, Lunation, Station, TransitAspectEvent
+from shell.adapters.gemini.generator import _DATE_TOKEN_PATTERN as _GENERATOR_DATE_TOKEN_PATTERN
+from shell.computation import load_computation_config
+from shell.gate import DEFAULT_VOCABULARY_PATH, load_gate_vocabulary
+from shell.sections import load_sections_config
+
+_CONFIG = load_computation_config()
+_SECTIONS_CONFIG = load_sections_config()
+_EPHEMERIS_IDENTITY = verify_ephemeris_identity()
+_VOCABULARY = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+
+_SECTION_NAMES: tuple[str, ...] = (
+    "energia_generale",
+    "amore",
+    "lavoro",
+    "denaro",
+    "benessere",
+    "giorni_favorevoli",
+    "giorni_di_attenzione",
+    "consiglio_finale",
+)
+
+
+def _empty_section() -> SectionPayload:
+    return SectionPayload(
+        profile=None, aspects=(), stations=(), standing_retrogrades=(), ingresses=(), lunations=()
+    )
+
+
+def _freeze(
+    *,
+    aspects: tuple[TransitAspectEvent, ...] = (),
+    stations: tuple[Station, ...] = (),
+    ingresses: tuple[Ingress, ...] = (),
+    lunations: tuple[Lunation, ...] = (),
+) -> dict[str, Any]:
+    """One populated ``SectionPayload`` (parked under ``energia_generale`` --
+    ``run_gate()`` looks entries up by id everywhere in ``payload``, never by
+    which Section they sit under) holding whichever event kinds a test
+    needs, frozen through the real ``freeze_payload()``."""
+    populated = SectionPayload(
+        profile=None,
+        aspects=aspects,
+        stations=stations,
+        standing_retrogrades=(),
+        ingresses=ingresses,
+        lunations=lunations,
+    )
+    payload = Payload(
+        energia_generale=populated,
+        amore=_empty_section(),
+        lavoro=_empty_section(),
+        denaro=_empty_section(),
+        benessere=_empty_section(),
+        consiglio_finale=_empty_section(),
+    )
+    return freeze_payload(
+        payload,
+        DayLists(giorni_favorevoli=(), giorni_di_attenzione=()),
+        config=_CONFIG,
+        sections_config=_SECTIONS_CONFIG,
+        ephemeris_identity=_EPHEMERIS_IDENTITY,
+    )
+
+
+def _find_id(entries: list[dict[str, Any]], **match: Any) -> str:
+    for entry in entries:
+        if all(entry.get(key) == value for key, value in match.items()):
+            entry_id = entry["id"]
+            assert isinstance(entry_id, str)
+            return entry_id
+    raise AssertionError(f"no entry in {entries!r} matches {match!r}")
+
+
+def _draft(**sentences: tuple[Sentence, ...]) -> GeneratedDraft:
+    fields = {name: sentences.get(name, ()) for name in _SECTION_NAMES}
+    return GeneratedDraft(**fields)
+
+
+def _kinds(result: GateResult) -> list[str]:
+    return [violation.kind for violation in result.violations]
+
+
+# --- Matrix row: invented body -------------------------------------------------
+
+
+def test_a_claimed_planet_absent_from_its_cited_entries_facts_is_invented() -> None:
+    """The cited entry is a Lunation -- a kind that never exposes a body/sign
+    fact (Design Notes category table) -- so zero of the Claim's cited
+    entries assert anything in that category at all."""
+    lunation = Lunation(
+        kind="new_moon",
+        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
+        longitude=Decimal("10.0"),
+        natal_house=7,
+    )
+    frozen = _freeze(lunations=(lunation,))
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+
+    draft = _draft(
+        energia_generale=(
+            Sentence(text="Saturno domina il transito.", entry_ids=(lunation_id,)),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["invented_fact"]
+    assert result.violations[0].section == "energia_generale"
+    assert result.violations[0].entry_ids == (lunation_id,)
+
+
+# --- Matrix row: wrong date -----------------------------------------------------
+
+
+def test_a_claimed_day_not_matching_the_cited_aspects_perfected_at_day_is_contradicted() -> None:
+    aspect = TransitAspectEvent(
+        transiting_body="venus",
+        natal_point="sun",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 5, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+
+    draft = _draft(
+        amore=(Sentence(text="Il 20 porta una svolta.", entry_ids=(aspect_id,)),)
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["contradicted_fact"]
+    assert result.violations[0].section == "amore"
+
+
+# --- Matrix row: wrong house -----------------------------------------------------
+
+
+def test_a_claimed_house_not_matching_the_cited_lunations_natal_house_is_contradicted() -> None:
+    lunation = Lunation(
+        kind="full_moon",
+        occurred_at=datetime(2026, 1, 12, tzinfo=UTC),
+        longitude=Decimal("100.0"),
+        natal_house=7,
+    )
+    frozen = _freeze(lunations=(lunation,))
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+
+    draft = _draft(
+        amore=(
+            Sentence(
+                text="Una svolta importante nella tua quinta casa.", entry_ids=(lunation_id,)
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["contradicted_fact"]
+
+
+def test_golden_example_wrong_house_from_the_design_notes() -> None:
+    """Design Notes' literal example. ``"luna"`` is itself a planet token
+    (the Moon), and the cited entry is a Lunation -- a kind that never
+    exposes a body/sign fact -- so this sentence also fails ``invented_fact``
+    for the body/sign category; the spec's example illustrates the house
+    violation specifically, not exclusivity."""
+    lunation = Lunation(
+        kind="full_moon",
+        occurred_at=datetime(2026, 1, 12, tzinfo=UTC),
+        longitude=Decimal("100.0"),
+        natal_house=7,
+    )
+    frozen = _freeze(lunations=(lunation,))
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+
+    draft = _draft(
+        amore=(
+            Sentence(
+                text="La luna piena illumina la tua quinta casa.", entry_ids=(lunation_id,)
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    house_violations = [v for v in result.violations if v.kind == "contradicted_fact"]
+    assert len(house_violations) == 1
+    assert house_violations[0].section == "amore"
+    assert house_violations[0].entry_ids == (lunation_id,)
+
+
+# --- Regression: partial match within one multi-value category (code-review #1) ---
+
+
+def test_a_second_unmatched_house_in_the_same_sentence_still_fails() -> None:
+    """A Claim naming two houses in one sentence, where the cited entry
+    grounds only one of them, must still fail on the ungrounded one --
+    ``isdisjoint()`` alone would pass this because *some* asserted value
+    (5) matches, silently letting the invented 7 through."""
+    lunation = Lunation(
+        kind="full_moon",
+        occurred_at=datetime(2026, 1, 12, tzinfo=UTC),
+        longitude=Decimal("100.0"),
+        natal_house=5,
+    )
+    frozen = _freeze(lunations=(lunation,))
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+
+    draft = _draft(
+        amore=(
+            Sentence(
+                text="La quinta casa e la settima casa si attivano insieme.",
+                entry_ids=(lunation_id,),
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["contradicted_fact"]
+    detail = result.violations[0].detail
+    assert "7" in detail
+    assert detail == "claims house 7, but the cited entries assert 5."
+
+
+# --- Matrix row: invented body, sign variant --------------------------------------
+
+
+def test_a_claimed_sign_is_always_invented_given_todays_payload_shape() -> None:
+    """No entry kind this story checks ever exposes a sign value (Design
+    Notes category table; only body names like ``"mars"`` appear in
+    ``transiting_body``/``natal_point``/``body``) -- cited against a
+    Lunation (itself body/sign-silent), a sign-only Claim is always
+    ``invented_fact``."""
+    lunation = Lunation(
+        kind="new_moon",
+        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
+        longitude=Decimal("10.0"),
+        natal_house=7,
+    )
+    frozen = _freeze(lunations=(lunation,))
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+
+    draft = _draft(
+        energia_generale=(
+            Sentence(text="Il Leone domina il tuo mese.", entry_ids=(lunation_id,)),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["invented_fact"]
+
+
+# --- Matrix row: false retrograde -------------------------------------------------
+
+
+def test_a_claimed_retrograde_contradicted_by_the_cited_stations_direction() -> None:
+    station = Station(
+        body="mercury",
+        direction="direct",
+        station_at=datetime(2026, 1, 8, tzinfo=UTC),
+        longitude=Decimal("50.0"),
+    )
+    frozen = _freeze(stations=(station,))
+    station_id = _find_id(frozen["sections"]["energia_generale"]["stations"], kind="station")
+
+    draft = _draft(
+        lavoro=(
+            Sentence(text="Mercurio è retrogrado questa settimana.", entry_ids=(station_id,)),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["contradicted_fact"]
+    assert result.violations[0].section == "lavoro"
+
+
+def test_a_claimed_retrograde_grounded_by_the_cited_stations_direction_has_no_violation() -> None:
+    """The "well-grounded Claim" matrix row's own fixture only exercises
+    body/house/date via an Ingress citation; this covers the retrograde
+    category's grounded path, which nothing else does."""
+    station = Station(
+        body="saturn",
+        direction="retrograde",
+        station_at=datetime(2026, 1, 8, tzinfo=UTC),
+        longitude=Decimal("50.0"),
+    )
+    frozen = _freeze(stations=(station,))
+    station_id = _find_id(frozen["sections"]["energia_generale"]["stations"], kind="station")
+
+    draft = _draft(
+        lavoro=(
+            Sentence(text="Saturno è retrogrado questa settimana.", entry_ids=(station_id,)),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+# --- Matrix row: empty citation ---------------------------------------------------
+
+
+def test_a_claim_with_no_cited_entries_is_an_empty_citation_violation() -> None:
+    draft = _draft(energia_generale=(Sentence(text="Marte porta energia.", entry_ids=()),))
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["empty_citation"]
+    assert result.violations[0].entry_ids == ()
+
+
+# --- Matrix row: date token in day list --------------------------------------------
+
+
+def test_a_date_token_in_giorni_favorevoli_fails_even_when_correctly_cited() -> None:
+    aspect = TransitAspectEvent(
+        transiting_body="jupiter",
+        natal_point="moon",
+        aspect="sextile",
+        perfected_at=datetime(2026, 1, 15, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 10, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+
+    draft = _draft(
+        giorni_favorevoli=(
+            Sentence(text="Il 15 gennaio porta chiarezza.", entry_ids=(aspect_id,)),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["date_token_in_day_list"]
+    assert result.violations[0].section == "giorni_favorevoli"
+
+
+def test_a_date_token_in_giorni_di_attenzione_fails_too() -> None:
+    draft = _draft(
+        giorni_di_attenzione=(
+            Sentence(text="Il 3 marzo richiede prudenza.", entry_ids=()),
+        )
+    )
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    kinds = _kinds(result)
+    assert "date_token_in_day_list" in kinds
+
+
+def test_an_uncited_date_token_sentence_fails_both_empty_citation_and_date_token() -> None:
+    """The date-token check is unconditional (AD-5), independent of citation
+    status -- a Section 6/7 sentence that is *both* an uncited Claim (day-
+    of-month numeral, no citation) *and* contains a date-shaped token fails
+    both checks, not just one."""
+    draft = _draft(
+        giorni_favorevoli=(
+            Sentence(text="Il 15 gennaio porta chiarezza.", entry_ids=()),
+        )
+    )
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["empty_citation", "date_token_in_day_list"]
+    assert all(violation.entry_ids == () for violation in result.violations)
+
+
+# --- Matrix row: well-grounded Claim -----------------------------------------------
+
+
+def test_a_claim_grounded_in_every_checkable_category_produces_no_violation() -> None:
+    ingress = Ingress(
+        body="mars",
+        house_departed=4,
+        house_entered=5,
+        crossed_at=datetime(2026, 1, 10, tzinfo=UTC),
+    )
+    frozen = _freeze(ingresses=(ingress,))
+    ingress_id = _find_id(frozen["sections"]["energia_generale"]["ingresses"], kind="ingress")
+
+    draft = _draft(
+        amore=(
+            Sentence(
+                text="Marte entra nella tua quinta casa il 10.", entry_ids=(ingress_id,)
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+# --- Matrix row: non-Claim sentence -------------------------------------------------
+
+
+def test_a_non_claim_sentence_with_no_citation_is_never_policed() -> None:
+    draft = _draft(amore=(Sentence(text="Il mese chiede pazienza.", entry_ids=()),))
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+# --- Matrix row: deliberately corrupted draft ---------------------------------------
+
+
+def test_a_draft_with_all_four_violation_classes_injected_fails_once_per_class() -> None:
+    lunation = Lunation(
+        kind="new_moon",
+        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
+        longitude=Decimal("10.0"),
+        natal_house=7,
+    )
+    wrong_date_aspect = TransitAspectEvent(
+        transiting_body="venus",
+        natal_point="sun",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 5, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    correctly_dated_aspect = TransitAspectEvent(
+        transiting_body="jupiter",
+        natal_point="moon",
+        aspect="sextile",
+        perfected_at=datetime(2026, 1, 15, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 10, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(
+        aspects=(wrong_date_aspect, correctly_dated_aspect), lunations=(lunation,)
+    )
+    frozen_aspects = frozen["sections"]["energia_generale"]["aspects"]
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+    wrong_date_id = _find_id(frozen_aspects, transiting_body="venus")
+    correctly_dated_id = _find_id(frozen_aspects, transiting_body="jupiter")
+
+    draft = _draft(
+        energia_generale=(
+            Sentence(text="Saturno domina il transito.", entry_ids=(lunation_id,)),
+        ),
+        amore=(Sentence(text="Il 20 porta una svolta.", entry_ids=(wrong_date_id,)),),
+        lavoro=(Sentence(text="Venere illumina il tuo lavoro.", entry_ids=()),),
+        giorni_favorevoli=(
+            Sentence(text="Il 15 gennaio porta chiarezza.", entry_ids=(correctly_dated_id,)),
+        ),
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert sorted(_kinds(result)) == sorted(
+        ["invented_fact", "contradicted_fact", "empty_citation", "date_token_in_day_list"]
+    )
+    assert len(result.violations) == 4
+
+
+# --- Matrix row: same inputs, run twice ---------------------------------------------
+
+
+def test_running_the_gate_twice_on_identical_inputs_is_byte_for_byte_identical() -> None:
+    ingress = Ingress(
+        body="mars",
+        house_departed=4,
+        house_entered=5,
+        crossed_at=datetime(2026, 1, 10, tzinfo=UTC),
+    )
+    frozen = _freeze(ingresses=(ingress,))
+    ingress_id = _find_id(frozen["sections"]["energia_generale"]["ingresses"], kind="ingress")
+    draft = _draft(
+        amore=(
+            Sentence(text="Marte entra nella tua quinta casa il 10.", entry_ids=(ingress_id,)),
+        ),
+        lavoro=(Sentence(text="Venere illumina il tuo lavoro.", entry_ids=()),),
+    )
+
+    first = run_gate(draft, frozen, _VOCABULARY)
+    second = run_gate(draft, frozen, _VOCABULARY)
+
+    assert first == second
+    assert first.violations == second.violations
+
+
+# --- GateResult shape ------------------------------------------------------------
+
+
+def test_gate_result_passed_is_true_iff_violations_is_empty() -> None:
+    passing = run_gate(_draft(), _freeze(), _VOCABULARY)
+    assert passing.passed is True
+    assert passing.violations == ()
+
+    failing = run_gate(
+        _draft(energia_generale=(Sentence(text="Marte porta energia.", entry_ids=()),)),
+        _freeze(),
+        _VOCABULARY,
+    )
+    assert failing.passed is False
+    assert failing.violations != ()
+
+
+def test_gate_result_carries_the_vocabulary_version_through() -> None:
+    result = run_gate(_draft(), _freeze(), _VOCABULARY)
+
+    assert result.vocabulary_version == _VOCABULARY.version
+
+
+def test_violations_are_gate_violation_instances() -> None:
+    result = run_gate(
+        _draft(energia_generale=(Sentence(text="Marte porta energia.", entry_ids=()),)),
+        _freeze(),
+        _VOCABULARY,
+    )
+
+    assert all(isinstance(violation, GateViolation) for violation in result.violations)
+
+
+# --- Check order within one sentence: body/sign, house, date, retrograde ----------
+
+
+def test_a_sentence_failing_all_four_categories_reports_them_in_the_fixed_order() -> None:
+    """``run_gate()``'s own docstring claims a fixed per-sentence check order
+    (body/sign, house, date, retrograde); nothing else exercises more than
+    one failing category in a single sentence."""
+    lunation = Lunation(
+        kind="full_moon",
+        occurred_at=datetime(2026, 1, 10, tzinfo=UTC),
+        longitude=Decimal("100.0"),
+        natal_house=3,
+    )
+    frozen = _freeze(lunations=(lunation,))
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+
+    draft = _draft(
+        amore=(
+            Sentence(
+                text="Marte è retrogrado nella tua settima casa il 25.",
+                entry_ids=(lunation_id,),
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == [
+        "invented_fact",  # body/sign: Lunation exposes neither
+        "contradicted_fact",  # house: cited natal_house=3, claimed 7
+        "contradicted_fact",  # date: cited day=10, claimed 25
+        "invented_fact",  # retrograde: Lunation exposes neither
+    ]
+    assert all(violation.section == "amore" for violation in result.violations)
+    assert all(violation.entry_ids == (lunation_id,) for violation in result.violations)
+
+
+# --- _index_entries(): an id recurring under two Sections' slices (code-review #7) --
+
+
+def test_index_entries_finds_an_id_that_recurs_under_two_sections() -> None:
+    """The same content-derived id can legitimately appear under more than
+    one Section's own slice (``core/payload/freeze.py``'s own docstring);
+    ``_index_entries()`` must resolve it regardless of where it was found."""
+    aspect = TransitAspectEvent(
+        transiting_body="mars",
+        natal_point="venus",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 5, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    populated = SectionPayload(
+        profile=None, aspects=(aspect,), stations=(), standing_retrogrades=(), ingresses=(),
+        lunations=(),
+    )
+    payload = Payload(
+        energia_generale=populated,
+        amore=populated,
+        lavoro=_empty_section(),
+        denaro=_empty_section(),
+        benessere=_empty_section(),
+        consiglio_finale=_empty_section(),
+    )
+    frozen = freeze_payload(
+        payload,
+        DayLists(giorni_favorevoli=(), giorni_di_attenzione=()),
+        config=_CONFIG,
+        sections_config=_SECTIONS_CONFIG,
+        ephemeris_identity=_EPHEMERIS_IDENTITY,
+    )
+    energia_id = frozen["sections"]["energia_generale"]["aspects"][0]["id"]
+    amore_id = frozen["sections"]["amore"]["aspects"][0]["id"]
+    assert energia_id == amore_id  # same content -> same content-derived id (AD-4)
+
+    index = _index_entries(frozen)
+
+    assert index[energia_id]["kind"] == "aspect"
+    assert index[energia_id]["transiting_body"] == "mars"
+
+
+# --- Local date-token pattern stays in lockstep with the generator's own copy -----
+
+
+def test_gate_date_token_pattern_matches_the_generators_hand_duplicated_copy() -> None:
+    """AD-1 forbids ``core/`` importing ``shell/``, so
+    ``shell/adapters/gemini/generator.py``'s ``_DATE_TOKEN_PATTERN`` is
+    hand-duplicated here rather than imported; this catches silent drift
+    between the two copies (code-review finding #9)."""
+    assert _GATE_DATE_TOKEN_PATTERN.pattern == _GENERATOR_DATE_TOKEN_PATTERN.pattern
+    assert _GATE_DATE_TOKEN_PATTERN.flags == _GENERATOR_DATE_TOKEN_PATTERN.flags
