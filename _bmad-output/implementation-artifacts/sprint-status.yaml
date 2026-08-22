@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-22-2026
+last_updated: 08-22-2026 11:14
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -69,16 +69,16 @@ development_status:
   epic-3-retrospective: done
 
   epic-4: in-progress
-  4-1-write-the-style-guide: review
-  4-2-edit-the-style-guide-without-a-deploy: review
-  4-3-derive-a-reporttheme-from-a-payload: review
-  4-4-compute-what-has-changed-since-last-month: review
-  4-5-generate-eight-sections-as-cited-structure: review
-  4-6-render-cited-sentences-into-prose-i-could-read-aloud: review
-  4-7-write-this-month-as-a-continuation-not-a-reprint: review
-  4-8-absorb-a-rate-limit-without-my-involvement: review
-  4-9-build-against-the-generator-without-spending-quota: review
-  epic-4-retrospective: optional
+  4-1-write-the-style-guide: done
+  4-2-edit-the-style-guide-without-a-deploy: done
+  4-3-derive-a-reporttheme-from-a-payload: done
+  4-4-compute-what-has-changed-since-last-month: done
+  4-5-generate-eight-sections-as-cited-structure: done
+  4-6-render-cited-sentences-into-prose-i-could-read-aloud: done
+  4-7-write-this-month-as-a-continuation-not-a-reprint: done
+  4-8-absorb-a-rate-limit-without-my-involvement: done
+  4-9-build-against-the-generator-without-spending-quota: done
+  epic-4-retrospective: done
 
   epic-5: backlog
   5-1-define-what-counts-as-a-claim-as-versioned-data: backlog
@@ -261,7 +261,7 @@ action_items:
     action: "Give report_run_poll.html / GET /report-runs/{id} a way to signal a stuck
       or permanently-failing run instead of polling silently forever at its last stage"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
   - id: "epic-3-retro-item-21-re-verify-against-a-live-astro-com-sessi"
     epic: 3
@@ -280,3 +280,123 @@ action_items:
     owner: "Francesco"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
+  - id: "epic-4-retro-item-23-guard-with_backoff-retried-two-write-sta"
+    epic: 4
+    action: "Guard with_backoff-retried two-write stage functions (shell/runner/driver.py::_run_payload_ready,
+      shell/runner/backoff.py::with_backoff) against a partial flush poisoning the
+      transaction, so a transient failure in the second write can't leave drive()'s
+      own failure-recording commit unable to run"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-24-extract-shell-adapters-gemini-generator"
+    epic: 4
+    action: "Extract shell/adapters/gemini/generator.py's private validation helpers
+      (_collect_known_entry_ids, _validate_citations, _validate_no_date_tokens, _DATE_TOKEN_SECTIONS,
+      _SECTION_FIELD_NAMES) into a provider-neutral module so RecordedResponseGenerator
+      (shell/adapters/local/generator.py) doesn't reach into the Gemini adapter's
+      namespace, and test_never_imports_google_genai verifies the boundary it names"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-25-reject-a-future-dated-gemini_data_terms_"
+    epic: 4
+    action: "Reject a future-dated GEMINI_DATA_TERMS_VERIFIED_AT in shell/config.py::_read_gemini_data_terms_verified_at"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-26-treat-a-concurrent-drive-call-s-integrit"
+    epic: 4
+    action: "Treat a concurrent drive() call's IntegrityError on ReportPayload.report_run_id's
+      unique constraint as another request already completing the stage, not a stage
+      failure, in drive()'s except block (shell/runner/driver.py)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-27-tighten-_date_token_pattern-shell-adapte"
+    epic: 4
+    action: "Tighten _DATE_TOKEN_PATTERN (shell/adapters/gemini/generator.py:70-75)
+      to catch dot-separated dates and abbreviated Italian months in Sections 6-7"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-28-add-a-created_at-tiebreak-to-most_recent"
+    epic: 4
+    action: "Add a created_at tiebreak to most_recent_prior_report_theme (shell/adapters/postgres/report_theme.py)
+      for same-month ReportRuns"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-29-add-a-test-exercising-recordedresponsege"
+    epic: 4
+    action: "Add a test exercising RecordedResponseGenerator.generate() against a
+      real freeze_payload()-produced payload, not only hand-built fixtures (tests/test_recorded_generator.py),
+      which also settles whether _section_subtree's None-value AttributeError path
+      is reachable"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-30-add-a-runtime-test-proving-recordedrespo"
+    epic: 4
+    action: "Add a runtime test proving RecordedResponseGenerator performs no network/filesystem
+      I/O (e.g. a socket-blocking fixture), not just the current import-time namespace
+      check"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-31-verify-the-exact-try-except-span-in-gemi"
+    epic: 4
+    action: "Verify the exact try/except span in GeminiGenerator.generate() actually
+      wraps prompt construction, not only the network call, so every failure mode
+      surfaces as a typed GenerationError"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-32-verify-whether-_entry_date-s-bare-valuee"
+    epic: 4
+    action: "Verify whether _entry_date's bare ValueError on an unrecognized or missing
+      day-list kind (shell/http/draft_view.py:105) is caught anywhere up through view_report_draft,
+      and add a guard if not"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-33-add-a-deterministic-tiebreak-to-derive_t"
+    epic: 4
+    action: "Add a deterministic tiebreak to derive_theme's dominant-aspect sort for
+      two aspects perfecting at the exact same instant (core/memory/derive.py::_aspect_tightness_key)"
+    owner: "whoever next touches core/memory/derive.py"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-34-add-a-draft_schema_version-column-to-rep"
+    epic: 4
+    action: "Add a draft_schema_version column to ReportDraft before GeneratedDraft's
+      shape next changes, matching style_guide_version/sections_config_version's existing
+      pattern"
+    owner: "whoever next changes GeneratedDraft's shape"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-35-budget-multi-round-adversarial-review-fo"
+    epic: 4
+    action: "Budget multi-round adversarial review for any story that matches state
+      across months or grounds prose in Payload entries, since citation-grounding
+      and cross-month state-matching edge cases were systematically under-specified
+      at first spec draft across stories 4.4 and 4.7"
+    owner: "spec-writing process"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-36-default-review-subagents-to-reading-diff"
+    epic: 4
+    action: "Default review subagents to reading diff files directly rather than having
+      a session hand-transcribe a diff into the reviewer's prompt, a demonstrated
+      failure mode in story 4.4's session"
+    owner: "review workflow"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-4-retro-item-37-measure-a-spec-s-token-count-with-an-act"
+    epic: 4
+    action: "Measure a spec's token count with an actual tokenizer (e.g. tiktoken)
+      rather than a word-count heuristic, if the spec's token cap is meant to be enforced
+      reliably"
+    owner: "spec tooling"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
