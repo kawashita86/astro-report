@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -27,6 +28,7 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
+from core.gate.run import run_gate
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, StoredNatalChart, deserialize_natal_chart
@@ -192,16 +194,32 @@ def view_report_draft(
     rendered into prose Sections 1-5/8 and dated-list Sections 6-7, in the
     draft's own fixed 1-8 order (Story 4.6, AD-6).
 
-    404 covers both "no such ``ReportRun``" and "that run hasn't reached
-    ``draft_ready`` yet" -- both collapse to the same query finding no
-    ``ReportDraft`` row for ``run_id``, mirroring ``view_report_payload``'s
-    own 404 collapse.
+    404s if ``run_id`` names no ``ReportRun`` at all, or if that run hasn't
+    reached ``draft_ready`` yet (no ``ReportDraft`` row) -- the latter also
+    covers a run that failed generically before any draft existed (Story
+    5.5's I/O & Edge-Case Matrix).
 
     Ordered by ``attempt`` descending (Story 5.4): more than one
     ``ReportDraft`` row can now exist for ``run_id`` once a run has
     regenerated at least once, and Francesco must always see the latest
     attempt, never an arbitrary one.
+
+    When ``run.failed_at`` is set (Story 5.4's regeneration bound exhausted,
+    the last ``ReportDraft`` still reachable), the Groundedness Gate is
+    recomputed on demand from that latest draft plus the run's stored
+    Payload (``run_gate()`` is pure, Story 5.2 AD-1, so this costs nothing
+    extra) against the currently loaded vocabulary -- this can differ from
+    what actually caused the failure if the vocabulary changes in between,
+    until Story 5.6 persists the vocabulary version per run -- and its
+    ``violations`` -- plus ``run`` itself, for ``failure_reason`` -- are
+    added to the template context so Francesco sees exactly what failed and
+    what it contradicts (Story 5.5). A passing run's context is left
+    byte-for-byte unchanged: no recomputation, no new context keys.
     """
+    run = session.get(ReportRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404)
+
     stored_draft = session.exec(
         select(ReportDraft)
         .where(ReportDraft.report_run_id == run_id)
@@ -223,12 +241,14 @@ def view_report_draft(
     draft = deserialize_generated_draft(stored_draft.draft)
     rendered = render_draft(draft, stored_payload.payload, iana_zone=client.iana_zone)
 
-    return _templates.TemplateResponse(
-        request,
-        "report_draft.html",
-        {
-            "draft": rendered,
-            "section_order": SECTION_ORDER,
-            "list_section_names": LIST_SECTION_NAMES,
-        },
-    )
+    context: dict[str, Any] = {
+        "draft": rendered,
+        "section_order": SECTION_ORDER,
+        "list_section_names": LIST_SECTION_NAMES,
+    }
+    if run.failed_at is not None:
+        gate_result = run_gate(draft, stored_payload.payload, request.app.state.gate_vocabulary)
+        context["violations"] = gate_result.violations
+        context["run"] = run
+
+    return _templates.TemplateResponse(request, "report_draft.html", context)

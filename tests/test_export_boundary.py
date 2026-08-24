@@ -24,6 +24,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.errors import ReportNotFoundError
+from core.types.generation import GeneratedDraft
 from core.types.place import ResolvedPlace
 from shell.adapters.postgres.client import (
     Client,
@@ -31,6 +32,7 @@ from shell.adapters.postgres.client import (
     delete_client_and_derived,
 )
 from shell.adapters.postgres.report import Report, store_report
+from shell.adapters.postgres.report_draft import store_report_draft
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
 from shell.export import export_report
@@ -123,6 +125,59 @@ def test_export_report_refuses_for_a_run_that_never_passed_the_gate(session: Ses
     Boundaries: "a Report row exists only on a pass")."""
     client = _create_client(session)
     run = _create_run(session, client)
+
+    with pytest.raises(ReportNotFoundError):
+        export_report(session, run.id)
+
+
+def _an_empty_generated_draft() -> GeneratedDraft:
+    return GeneratedDraft(
+        energia_generale=(),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+
+def test_export_report_refuses_story_5_4s_exact_bound_exhausted_run_shape(
+    session: Session,
+) -> None:
+    """Story 5.5, I/O & Edge-Case Matrix row 3: export refuses a
+    ``ReportRun`` shaped exactly like Story 5.4's regeneration-bound-
+    exhausted terminal state -- ``stage`` stays ``"draft_ready"`` (never
+    rewound back), ``failed_at``/``failure_reason`` are set, and the last
+    ``ReportDraft`` stays reachable (``shell/runner/driver.py``'s ``except
+    GateFailedError`` branch) -- yet critically no ``Report`` row exists,
+    since a ``Report`` is written only on a Gate pass (Story 5.3). This
+    closes AC3 against the real bound-exhaustion shape, not just the
+    generic "never reached gate_passed" case
+    ``test_export_report_refuses_for_a_run_that_never_passed_the_gate``
+    already covers."""
+    client = _create_client(session)
+    run = ReportRun(
+        client_id=client.id,
+        month="2026-01",
+        stage="draft_ready",
+        regeneration_count=4,
+        failed_at=datetime(2026, 1, 20, 12, 0, 0, tzinfo=UTC),
+        failure_reason="regeneration bound exhausted after 4 attempts: "
+        "Refusing to advance past the Groundedness Gate: 1 violation(s) against the Payload.",
+    )
+    session.add(run)
+    session.commit()
+    store_report_draft(
+        session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_an_empty_generated_draft(),
+        attempt=3,
+    )
+    session.commit()
 
     with pytest.raises(ReportNotFoundError):
         export_report(session, run.id)

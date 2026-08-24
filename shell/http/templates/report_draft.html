@@ -10,6 +10,25 @@
     <main>
       <h1>Report draft</h1>
 
+      {% if run %}
+      <section id="gate-failures">
+        <h2>Gate failures</h2>
+        <p>{{ run.failure_reason }}</p>
+        {% if violations %}
+        <ul>
+          {% for violation in violations %}
+          <li>
+            <strong>{{ violation.kind }}</strong> in <em>{{ violation.section }}</em>:
+            <blockquote>{{ violation.sentence }}</blockquote>
+            <p>{{ violation.detail }}</p>
+            <p>Cited entries: {{ violation.entry_ids | join(", ") if violation.entry_ids else "none" }}</p>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </section>
+      {% endif %}
+
       {% for section_name in section_order %}
       <section>
         <h2>{{ section_name }}</h2>

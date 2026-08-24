@@ -760,3 +760,155 @@ def test_the_draft_view_for_a_failed_run_still_404s(
     response = authenticated_client.get(f"/report-runs/{run.id}/draft")
 
     assert response.status_code == 404
+
+
+# --- Story 5.5: seeing exactly what failed and what it contradicts ------------------
+
+
+def _a_bound_exhausted_run(client_id) -> ReportRun:
+    """A ``ReportRun`` in Story 5.4's exact regeneration-bound-exhausted
+    terminal state: ``stage`` stays ``"draft_ready"`` (never rewound back,
+    unlike a run mid-regeneration), ``failed_at``/``failure_reason`` are set,
+    and (unlike ``_a_failed_run``, Story 4.8's generic stage-failure shape)
+    a ``ReportDraft`` row for this run does exist -- mirrors
+    ``shell/runner/driver.py``'s ``except GateFailedError`` branch once
+    ``regeneration_count`` exceeds ``_MAX_REGENERATIONS``."""
+    return ReportRun(
+        client_id=client_id,
+        month="2026-01",
+        stage="draft_ready",
+        regeneration_count=4,
+        failed_at=datetime(2026, 1, 20, 12, 0, 0, tzinfo=UTC),
+        failure_reason="regeneration bound exhausted after 4 attempts: "
+        "Refusing to advance past the Groundedness Gate: 1 violation(s) against the Payload.",
+    )
+
+
+def test_getting_the_draft_for_a_bound_exhausted_run_shows_gate_violations_and_failure_reason(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """AC1: Francesco opens the draft view of a Report that exhausted its
+    regeneration bound and sees the Report text, each failing Claim's
+    section/sentence/detail, and the run's failure reason -- ``run_gate()``
+    is recomputed on demand from the already-persisted latest ``ReportDraft``
+    + ``ReportPayload`` (Story 5.2, AD-1's purity), not read back from any
+    new persistence."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    # "marte" is a closed-vocabulary planet token (Story 5.1), so this
+    # sentence is a Claim (Story 5.2's `is_claim()`); citing nothing at all
+    # is an unconditional "empty_citation" violation, regardless of what it
+    # asserts -- the simplest, deterministic way to force a real
+    # `run_gate()` failure without depending on the Payload's own contents.
+    ungrounded_draft = GeneratedDraft(
+        energia_generale=(Sentence(text="Marte è retrogrado.", entry_ids=()),),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=ungrounded_draft,
+        attempt=3,
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "Marte è retrogrado." in response.text
+    assert "empty_citation" in response.text
+    assert "energia_generale" in response.text
+    assert "sentence is a Claim" in response.text
+    assert run.failure_reason in response.text
+
+
+def test_getting_the_draft_for_a_generic_failure_with_a_grounded_draft_still_shows_the_reason(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Regression: a run can be marked terminally failed (``failed_at`` set)
+    by a *generic*, non-``GateFailedError`` failure at the ``gate_passed``
+    stage -- e.g. a DB error inside ``store_report()`` after the Gate has
+    already passed in-memory -- leaving behind a latest ``ReportDraft`` that
+    ``run_gate()`` recomputes as grounded (zero violations). The "Gate
+    failures" section must still render ``run.failure_reason`` in that case
+    -- it must not be gated behind ``violations`` being non-empty, since
+    ``view_report_draft`` sets ``run`` in context whenever ``run.failed_at
+    is not None``, independent of what the recomputed Gate finds."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="draft_ready",
+        failed_at=datetime(2026, 1, 20, 12, 0, 0, tzinfo=UTC),
+        failure_reason="stage 'gate_passed' failed 5 consecutive times: simulated DB error",
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    grounded_draft = _a_generated_draft_for(frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=grounded_draft,
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "Gate failures" in response.text
+    # Not the raw `run.failure_reason in response.text`: Jinja2's
+    # autoescaping turns the apostrophes in "stage 'gate_passed'..." into
+    # HTML entities, so a substring free of quoting is checked instead
+    # (mirrors `test_a_failed_runs_poll_fragment_shows_the_reason_with_no_hx_trigger`).
+    assert "simulated DB error" in response.text
+    gate_failures_section = response.text.split('<section id="gate-failures">')[1].split(
+        "</section>"
+    )[0]
+    assert "<ul>" not in gate_failures_section
+    assert "Cited entries" not in gate_failures_section
+
+
+def test_getting_the_draft_for_a_passing_run_shows_no_gate_failures_block(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """I/O & Edge-Case Matrix row 2: a passing run's draft view (``failed_at``
+    is ``None``) is unchanged -- no Gate recomputation, no "Gate failures"
+    block, even though the underlying draft in this test cites nothing more
+    grounded than the bound-exhausted-run test above would produce a
+    violation for."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "Gate failures" not in response.text
