@@ -47,6 +47,7 @@ from core.types.memory import ReportTheme, ThemeAspect, ThemeLunation
 from core.types.place import ResolvedPlace
 from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
 from shell.adapters.postgres.client import create_client_with_chart, deserialize_natal_chart
+from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_draft import _json_safe as _draft_json_safe
@@ -855,6 +856,18 @@ def test_gate_passed_advances_on_a_clean_draft_and_persists_a_report_row(
     assert stored_report.payload_schema_version == stored_payload.schema_version
     assert stored_report.gate_vocabulary_version == _VOCABULARY.version
 
+    # Story 5.6: exactly one immutable gate_result row also records the pass.
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 1
+    stored_gate_result = stored_gate_results[0]
+    assert stored_gate_result.client_id == client.id
+    assert stored_gate_result.passed is True
+    assert stored_gate_result.regeneration_count == 0
+    assert stored_gate_result.vocabulary_version == _VOCABULARY.version
+    assert stored_gate_result.violations == []
+
 
 def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_drive_call(
     session: Session,
@@ -889,6 +902,18 @@ def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_drive_
     stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
     assert stored_reports == []
 
+    # Story 5.6: exactly one gate_result row records the failing check, at
+    # its pre-increment regeneration_count (0, not 1 -- run.regeneration_count
+    # is only incremented after this write).
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 1
+    assert stored_gate_results[0].passed is False
+    assert stored_gate_results[0].regeneration_count == 0
+    assert stored_gate_results[0].vocabulary_version == _VOCABULARY.version
+    assert stored_gate_results[0].violations
+
     result = _drive(session, run, natal_chart, generator=generator)
 
     assert result.stage == "payload_ready"
@@ -899,6 +924,15 @@ def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_drive_
     assert {stored.attempt for stored in stored_drafts} == {0, 1}
     stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
     assert stored_reports == []
+
+    # A second failing check adds a second gate_result row, at
+    # regeneration_count 1 -- both failed, none passed.
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 2
+    assert {row.regeneration_count for row in stored_gate_results} == {0, 1}
+    assert all(row.passed is False for row in stored_gate_results)
 
 
 def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
@@ -994,6 +1028,16 @@ def test_gate_passed_regenerates_and_advances_once_a_later_attempt_passes(
     stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
     assert len(stored_reports) == 1
 
+    # Story 5.6: one failing gate_result row (attempt 0) and one passing
+    # gate_result row (attempt 1) -- both recorded, not just the pass.
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 2
+    by_regeneration_count = {row.regeneration_count: row for row in stored_gate_results}
+    assert by_regeneration_count[0].passed is False
+    assert by_regeneration_count[1].passed is True
+
     stored_drafts = session.exec(
         select(ReportDraft).where(ReportDraft.report_run_id == run.id)
     ).all()
@@ -1044,6 +1088,17 @@ def test_gate_passed_exhausting_the_regeneration_bound_marks_the_run_terminally_
     )
     stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
     assert stored_reports == []
+
+    # Story 5.6: every failing check along the way -- including the final,
+    # bound-exhausting one -- got its own gate_result row before
+    # run.failed_at was set. None passed.
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert {row.regeneration_count for row in stored_gate_results} == set(
+        range(driver_module._MAX_REGENERATIONS + 1)
+    )
+    assert all(row.passed is False for row in stored_gate_results)
 
 
 # --- _deserialize_generated_draft round trip ------------------------------------------

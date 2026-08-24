@@ -86,7 +86,7 @@ development_status:
   5-3-make-the-gate-the-only-path-to-an-exportable-report: review
   5-4-regenerate-a-failing-report-automatically-whole: review
   5-5-see-exactly-what-failed-and-what-it-contradicts: review
-  5-6-keep-the-gate-s-record-so-a-regression-is-visible-early: backlog
+  5-6-keep-the-gate-s-record-so-a-regression-is-visible-early: review
   epic-5-retrospective: optional
 
   epic-6: backlog

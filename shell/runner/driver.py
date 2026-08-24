@@ -77,6 +77,7 @@ from core.types.memory import ReportTheme, ThemeAspect, ThemeLunation
 from core.types.sections import SectionsConfig
 from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
 from shell.adapters.postgres.client import Client
+from shell.adapters.postgres.gate_result import store_gate_result
 from shell.adapters.postgres.report import store_report
 from shell.adapters.postgres.report_draft import ReportDraft, store_report_draft
 from shell.adapters.postgres.report_payload import ReportPayload, store_report_payload
@@ -546,7 +547,12 @@ def _run_gate_passed(
     ``GeneratedDraft`` and ``Payload``, run the Groundedness Gate
     (Story 5.2, ``core/gate/run.py::run_gate()``) against them, and on a
     pass persist a new immutable ``Report`` row -- never on failure
-    (Story 5.3).
+    (Story 5.3) -- alongside a ``StoredGateResult`` row recording the pass
+    (Story 5.6). The mirror write for a *failing* check lives in ``drive()``'s
+    ``except GateFailedError`` block instead, not here: ``with_backoff``
+    retries any exception -- including this stage raising
+    ``GateFailedError`` -- up to 3 times, so a write here would persist
+    duplicate rows for one logical failure (this story's Design Notes).
 
     ``stored_draft``/``stored_payload`` are both read back -- from
     ``ReportDraft``/``ReportPayload`` respectively, via
@@ -590,6 +596,14 @@ def _run_gate_passed(
         style_guide_version=stored_draft.style_guide_version,
         payload_schema_version=stored_payload.schema_version,
         gate_vocabulary_version=result.vocabulary_version,
+    )
+    store_gate_result(
+        session,
+        run=run,
+        passed=True,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=result.vocabulary_version,
+        violations=result.violations,
     )
 
 
@@ -651,9 +665,11 @@ def drive(
     unchanged.
 
     A :class:`core.errors.GateFailedError` from ``gate_passed`` is handled
-    separately from every other stage exception (Story 5.4): it increments
-    ``run.regeneration_count`` (never ``stage_failure_count``, left
-    untouched) and, while that count is at or below
+    separately from every other stage exception (Story 5.4): it persists a
+    failing ``StoredGateResult`` row (Story 5.6, ``regeneration_count`` at
+    its pre-increment value, ``error.violations``, ``vocabulary.version``)
+    before incrementing ``run.regeneration_count`` (never ``stage_failure_count``,
+    left untouched) and, while that count is at or below
     :data:`_MAX_REGENERATIONS`, rewinds ``run.stage`` to ``payload_ready`` so
     the *next* ``drive()`` call re-runs ``draft_ready`` -- a genuinely new
     ``GeneratedDraft`` from the same stored Payload -- and then ``gate_passed``
@@ -708,6 +724,14 @@ def drive(
             # require.
             _logger.exception(
                 "gate_passed rejected the draft, regenerating: %s", run.id
+            )
+            store_gate_result(
+                session,
+                run=run,
+                passed=False,
+                regeneration_count=run.regeneration_count,
+                vocabulary_version=vocabulary.version,
+                violations=error.violations,
             )
             run.regeneration_count += 1
             run.updated_at = datetime.now(UTC)

@@ -24,6 +24,7 @@ from core.ephemeris.identity import EphemerisIdentity
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.computation import ComputationConfig
 from core.types.place import ResolvedPlace
+from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
@@ -45,7 +46,15 @@ __all__ = [
 #: constant -- a table added here without joining the delete function below,
 #: or vice versa, is exactly the drift that invariant test exists to catch.
 _CLIENT_CASCADE_TABLES: frozenset[str] = frozenset(
-    {"natal_chart", "report_run", "report_payload", "report_theme", "report_draft", "report"}
+    {
+        "natal_chart",
+        "report_run",
+        "report_payload",
+        "report_theme",
+        "report_draft",
+        "report",
+        "gate_result",
+    }
 )
 
 
@@ -267,23 +276,26 @@ def correct_client_and_chart(
 def delete_client_and_derived(session: Session, *, client: Client) -> None:
     """Delete ``client`` and every row derived from it, in one flush (Story 2.8;
     ``ReportRun`` joined the cascade in Story 3.5; ``StoredReportTheme`` in
-    Story 4.3; ``ReportDraft`` in Story 4.6; ``Report`` in Story 5.3).
+    Story 4.3; ``ReportDraft`` in Story 4.6; ``Report`` in Story 5.3;
+    ``StoredGateResult`` in Story 5.6).
 
     Every ``StoredNatalChart`` row for ``client`` -- current and superseded --
     every ``ReportPayload`` row, every ``StoredReportTheme`` row, every
-    ``ReportDraft`` row, every ``Report`` row and every ``ReportRun`` row for
-    ``client`` are deleted first, then the ``Client`` row itself: children
-    before parent, matching how no foreign key in this codebase declares
-    ``ondelete`` at the schema level, so the cascade is explicit application
-    code, not the database's job. ``ReportPayload``, ``StoredReportTheme``,
-    ``ReportDraft`` and ``Report`` rows are all deleted before ``ReportRun``
-    rows specifically -- ``ReportPayload.report_run_id`` (Story 3.8),
+    ``ReportDraft`` row, every ``Report`` row, every ``StoredGateResult`` row
+    and every ``ReportRun`` row for ``client`` are deleted first, then the
+    ``Client`` row itself: children before parent, matching how no foreign
+    key in this codebase declares ``ondelete`` at the schema level, so the
+    cascade is explicit application code, not the database's job.
+    ``ReportPayload``, ``StoredReportTheme``, ``ReportDraft``, ``Report`` and
+    ``StoredGateResult`` rows are all deleted before ``ReportRun`` rows
+    specifically -- ``ReportPayload.report_run_id`` (Story 3.8),
     ``StoredReportTheme.report_run_id`` (Story 4.3), ``ReportDraft.report_run_id``
-    (Story 4.6) and ``Report.report_run_id`` (Story 5.3) are themselves
-    foreign keys to ``report_run.id``, so a ``ReportRun`` row still
-    referenced by any of them would violate that constraint if deleted
-    first. :data:`_CLIENT_CASCADE_TABLES` is the single source of truth for
-    which tables that first step must cover; the cascade-invariant test in
+    (Story 4.6), ``Report.report_run_id`` (Story 5.3) and
+    ``StoredGateResult.report_run_id`` (Story 5.6) are themselves foreign
+    keys to ``report_run.id``, so a ``ReportRun`` row still referenced by any
+    of them would violate that constraint if deleted first.
+    :data:`_CLIENT_CASCADE_TABLES` is the single source of truth for which
+    tables that first step must cover; the cascade-invariant test in
     ``tests/test_client_store.py`` asserts it stays equal to every table in
     ``SQLModel.metadata`` carrying a foreign key to ``client.id``.
 
@@ -320,6 +332,12 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     reports = session.exec(select(Report).where(Report.client_id == client.id)).all()
     for stored_report in reports:
         session.delete(stored_report)
+
+    gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.client_id == client.id)
+    ).all()
+    for stored_gate_result in gate_results:
+        session.delete(stored_gate_result)
 
     runs = session.exec(select(ReportRun).where(ReportRun.client_id == client.id)).all()
     for run in runs:
