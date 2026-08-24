@@ -152,12 +152,20 @@ class GateFailedError(RuntimeError):
     ``Report`` row is written only on a passing ``GateResult``, never before
     (Story 5.3's Boundaries), so nothing is persisted rather than something
     unverifiable. Raised from :mod:`shell.runner.driver`'s ``gate_passed``
-    stage function so ``drive()``'s existing stage-failure/backoff
-    bookkeeping handles a Gate failure exactly like any other stage failure
-    -- ``run.stage`` stays at ``draft_ready``. Carries the failing
+    stage function, where ``drive()`` catches it in a dedicated
+    ``except GateFailedError`` branch, separate from every other stage's
+    generic failure handling (Story 5.4): it increments
+    ``run.regeneration_count`` (never ``run.stage_failure_count``, which is
+    left untouched) and, while that count is at or below
+    ``_MAX_REGENERATIONS``, rewinds ``run.stage`` to ``payload_ready`` so the
+    next ``drive()`` call regenerates a whole new ``GeneratedDraft`` from the
+    same stored Payload and re-checks it. Only once
+    ``run.regeneration_count`` exceeds ``_MAX_REGENERATIONS`` is the run
+    marked terminally failed (``failed_at``/``failure_reason`` set), with
+    ``run.stage`` left at ``draft_ready`` so the last, still-failing draft
+    stays reachable rather than discarded. Carries the failing
     ``GateResult``'s own violations, for a future story (5.5) to surface
-    directly to Francesco; bounded, controlled regeneration on this error is
-    Story 5.4's own job, not this one's.
+    directly to Francesco.
     """
 
     def __init__(self, violations: tuple[GateViolation, ...]) -> None:

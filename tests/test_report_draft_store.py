@@ -126,6 +126,7 @@ def test_store_report_draft_persists_identity_and_the_whole_draft_as_json(
     assert reloaded.report_run_id == run.id
     assert reloaded.style_guide_version == 3
     assert reloaded.sections_config_version == 2
+    assert reloaded.attempt == 0, "attempt defaults to 0 when not passed explicitly"
     assert reloaded.created_at is not None
 
     assert reloaded.draft["energia_generale"] == [
@@ -174,27 +175,72 @@ def test_mutating_and_committing_a_persisted_report_draft_raises(session: Sessio
 # --- Uniqueness ----------------------------------------------------------------
 
 
-def test_a_second_report_draft_for_the_same_report_run_id_raises_integrity_error(
+def test_a_second_report_draft_at_the_same_attempt_raises_integrity_error(
     session: Session,
 ) -> None:
-    """Exactly one ``ReportDraft`` per ``ReportRun``, enforced by a unique
-    index on ``report_run_id`` -- not merely by ``store_report_draft()`` only
-    ever being called once per ``ReportRun`` in ``shell/runner/driver.py``'s
-    ``draft_ready`` stage."""
+    """Exactly one ``ReportDraft`` per ``(ReportRun, attempt)`` (Story 5.4
+    loosened this from "per ``ReportRun``"), enforced by a unique constraint
+    on ``(report_run_id, attempt)`` -- not merely by ``store_report_draft()``
+    only ever being called once per attempt in
+    ``shell/runner/driver.py``'s ``draft_ready`` stage."""
     client = _create_client(session)
     run = _create_run(session, client)
 
     store_report_draft(
-        session, run=run, style_guide_version=1, sections_config_version=1, draft=_a_draft()
+        session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_a_draft(),
+        attempt=0,
     )
     session.commit()
 
     with pytest.raises(IntegrityError):
         store_report_draft(
-            session, run=run, style_guide_version=1, sections_config_version=1, draft=_a_draft()
+            session,
+            run=run,
+            style_guide_version=1,
+            sections_config_version=1,
+            draft=_a_draft(),
+            attempt=0,
         )
 
     session.rollback()
+
+
+def test_a_second_report_draft_at_a_different_attempt_for_the_same_run_succeeds(
+    session: Session,
+) -> None:
+    """A second draft for the same ``ReportRun`` is no longer a bug once
+    regeneration is real (Story 5.4) -- only a repeated ``attempt`` for the
+    same run conflicts."""
+    client = _create_client(session)
+    run = _create_run(session, client)
+
+    first = store_report_draft(
+        session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_a_draft(),
+        attempt=0,
+    )
+    second = store_report_draft(
+        session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_a_draft(),
+        attempt=1,
+    )
+    session.commit()
+
+    stored_drafts = session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).all()
+    assert {stored.id for stored in stored_drafts} == {first.id, second.id}
+    assert {stored.attempt for stored in stored_drafts} == {0, 1}
 
 
 def test_two_report_runs_for_one_client_each_get_their_own_report_draft_row(

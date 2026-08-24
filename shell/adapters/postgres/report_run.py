@@ -75,6 +75,13 @@ class ReportRun(SQLModel, table=True):
     across separate ``drive()`` calls, and the terminal-failure state that
     accumulating enough of them produces -- see each field's own comment
     below for its exact semantics.
+
+    ``regeneration_count`` (Story 5.4) is a separate counter tracking
+    ``gate_passed`` regeneration attempts across the run's current
+    regeneration cycle -- distinct from ``stage_failure_count``, which a
+    successful ``draft_ready`` re-run resets to 0 every cycle and so cannot
+    also track a persistent Gate problem. See
+    ``shell/runner/driver.py``'s Design Notes.
     """
 
     __tablename__ = "report_run"
@@ -102,6 +109,21 @@ class ReportRun(SQLModel, table=True):
     # (`shell/runner/driver.py`) to decide when a run is terminally failed
     # rather than retried forever.
     stage_failure_count: int = Field(default=0)
+    # Gate failures absorbed across the run's current regeneration cycle
+    # (Story 5.4) -- incremented on every `GateFailedError`, compared
+    # against `_MAX_REGENERATIONS` (`shell/runner/driver.py`) to decide
+    # when a run is terminally failed rather than regenerated forever.
+    # Never reset by a successful stage advance, unlike
+    # `stage_failure_count` -- see that field's own comment above.
+    #
+    # Counts failures absorbed, not regenerations completed:
+    # `regeneration_count == 1` means one Gate failure has just been caught
+    # and one regeneration is about to run next, not that one has already
+    # finished. N here corresponds to N+1 total `ReportDraft.attempt` values
+    # persisted for this run once that Nth regeneration's own draft lands --
+    # attempt `0` is the original, never-regenerated draft, attempts `1..N`
+    # are the regenerations this counter tracked.
+    regeneration_count: int = Field(default=0)
     # `NULL` until a run is marked terminally failed; a timestamp then marks
     # it permanently, mirroring `StoredNatalChart.superseded_at`'s own
     # nullable-timestamp pattern for "this row's normal life is over."

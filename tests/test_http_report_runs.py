@@ -594,6 +594,54 @@ def test_getting_the_draft_renders_prose_and_list_sections_localized_to_the_clie
     assert "2026-01-10 09:00:00 CST" in response.text
 
 
+def test_getting_the_draft_shows_the_latest_attempt_when_more_than_one_exists(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """I/O & Edge-Case Matrix row 5, "Reading the draft mid-regeneration"
+    (Story 5.4): more than one ``ReportDraft`` row can exist for a run once
+    it has regenerated at least once -- the route must render the latest
+    (highest-``attempt``) row, never an arbitrary or the first one."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+        attempt=0,
+    )
+    second_draft = GeneratedDraft(
+        energia_generale=(Sentence(text="Un mese di ripartenza.", entry_ids=()),),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=second_draft,
+        attempt=1,
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "Un mese di ripartenza." in response.text
+    assert "Un mese equilibrato." not in response.text
+
+
 def test_the_poll_view_links_to_the_draft_once_it_is_ready(
     authenticated_client: TestClient, db_session: Session, fake_drive
 ) -> None:

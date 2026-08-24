@@ -196,9 +196,16 @@ def view_report_draft(
     ``draft_ready`` yet" -- both collapse to the same query finding no
     ``ReportDraft`` row for ``run_id``, mirroring ``view_report_payload``'s
     own 404 collapse.
+
+    Ordered by ``attempt`` descending (Story 5.4): more than one
+    ``ReportDraft`` row can now exist for ``run_id`` once a run has
+    regenerated at least once, and Francesco must always see the latest
+    attempt, never an arbitrary one.
     """
     stored_draft = session.exec(
-        select(ReportDraft).where(ReportDraft.report_run_id == run_id)
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run_id)
+        .order_by(ReportDraft.attempt.desc())
     ).first()
     if stored_draft is None:
         raise HTTPException(status_code=404)

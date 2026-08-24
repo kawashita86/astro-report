@@ -856,15 +856,17 @@ def test_gate_passed_advances_on_a_clean_draft_and_persists_a_report_row(
     assert stored_report.gate_vocabulary_version == _VOCABULARY.version
 
 
-def test_gate_passed_leaves_the_run_at_draft_ready_and_persists_no_report_when_the_gate_fails(
+def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_drive_call(
     session: Session,
 ) -> None:
-    """Acceptance Criteria: given a failing ``GateResult``, ``run.stage``
-    stays at ``draft_ready`` (never advances to ``gate_passed``),
-    ``stage_failure_count`` increments, and no ``Report`` row is written --
-    the ``GateFailedError`` this stage raises is caught by ``drive()``'s own
-    stage-failure/backoff bookkeeping exactly like any other stage
-    exception."""
+    """I/O & Edge-Case Matrix row 1, "First Gate failure": given a failing
+    ``GateResult``, ``run.stage`` rewinds to ``payload_ready`` (not
+    ``draft_ready`` -- Story 5.4 replaces the old generic stage-failure
+    bookkeeping for this specific error), ``regeneration_count`` becomes 1,
+    ``stage_failure_count`` is left untouched, and no ``Report`` row is
+    written. A second, still-violating ``drive()`` call regenerates: a new
+    ``ReportDraft`` at ``attempt=1`` is persisted from the same Payload, and
+    ``regeneration_count`` reaches 2."""
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
@@ -873,8 +875,9 @@ def test_gate_passed_leaves_the_run_at_draft_ready_and_persists_no_report_when_t
     generator = _FakeGenerator(_a_violating_generated_draft())
     result = _drive(session, run, natal_chart, generator=generator)
 
-    assert result.stage == "draft_ready"
-    assert result.stage_failure_count == 1
+    assert result.stage == "payload_ready"
+    assert result.regeneration_count == 1
+    assert result.stage_failure_count == 0
     assert result.failed_at is None
     # The violating draft was still persisted verbatim by draft_ready --
     # only gate_passed's own advance (and its Report row) failed.
@@ -882,6 +885,18 @@ def test_gate_passed_leaves_the_run_at_draft_ready_and_persists_no_report_when_t
         select(ReportDraft).where(ReportDraft.report_run_id == run.id)
     ).all()
     assert len(stored_drafts) == 1
+    assert stored_drafts[0].attempt == 0
+    stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert stored_reports == []
+
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "payload_ready"
+    assert result.regeneration_count == 2
+    stored_drafts = session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).all()
+    assert {stored.attempt for stored in stored_drafts} == {0, 1}
     stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
     assert stored_reports == []
 
@@ -891,16 +906,39 @@ def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
 ) -> None:
     """Unit-level: ``_run_gate_passed`` itself raises ``GateFailedError`` on
     a failing ``GateResult`` -- proven directly, not only through
-    ``drive()``'s retry/backoff wrapper, mirroring this story's own
-    Boundaries ("raises a new GateFailedError... so drive()'s existing
-    stage-failure/backoff bookkeeping handles it uniformly")."""
+    ``drive()``'s regeneration handling. The fixture calls every earlier
+    stage function directly, in sequence, real ``core/`` code and all --
+    ending with ``_run_draft_ready`` against a violating draft -- to reach
+    exactly the state ``_run_gate_passed`` needs (a persisted ``ReportDraft``
+    and ``ReportPayload`` for ``run``, at ``draft_ready``) without going
+    through ``drive()`` or touching ``_STAGE_FUNCTIONS`` at all."""
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
     session.commit()
 
     generator = _FakeGenerator(_a_violating_generated_draft())
-    _drive(session, run, natal_chart, generator=generator)
+
+    for stage_fn in (
+        driver_module._run_natal_ready,
+        driver_module._run_transits_ready,
+        driver_module._run_payload_ready,
+        driver_module._run_draft_ready,
+    ):
+        stage_fn(
+            session,
+            run,
+            natal_chart,
+            _COMPUTATION_CONFIG,
+            _EPHEMERIS_IDENTITY,
+            _SECTIONS_CONFIG,
+            generator,
+            _VOCABULARY,
+        )
+        session.commit()
+    run.stage = "draft_ready"
+    session.add(run)
+    session.commit()
     assert run.stage == "draft_ready", "fixture did not stop at draft_ready -- test is vacuous"
 
     with pytest.raises(GateFailedError) as caught:
@@ -917,6 +955,95 @@ def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
 
     assert caught.value.violations
     assert caught.value.violations[0].kind == "empty_citation"
+
+
+def test_gate_passed_regenerates_and_advances_once_a_later_attempt_passes(
+    session: Session,
+) -> None:
+    """I/O & Edge-Case Matrix row 2, "Regeneration then pass": a Gate
+    failure followed by a clean regenerated draft reaches ``gate_passed``
+    with exactly one persisted ``Report``, ``regeneration_count`` reflects
+    the one attempt used, and (matrix row 4, "Same Payload across
+    attempts") both ``ReportDraft`` rows reference the same, unchanged
+    ``ReportPayload`` row -- ``payload_ready`` is never re-run once
+    ``run.stage`` rewinds to it (the module's own Design Notes)."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    class _ViolatesOnceThenCleanGenerator:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, payload, style_guide, theme_previous, theme_current):
+            self.calls += 1
+            return _a_violating_generated_draft() if self.calls == 1 else _a_generated_draft()
+
+    generator = _ViolatesOnceThenCleanGenerator()
+
+    first = _drive(session, run, natal_chart, generator=generator)
+    assert first.stage == "payload_ready", "fixture did not fail once -- test is vacuous"
+    assert first.regeneration_count == 1
+
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "gate_passed"
+    assert result.regeneration_count == 1
+
+    stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert len(stored_reports) == 1
+
+    stored_drafts = session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).all()
+    assert {stored.attempt for stored in stored_drafts} == {0, 1}
+
+    stored_payloads = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
+    ).all()
+    assert len(stored_payloads) == 1, "the same Payload row must be reused across attempts"
+
+
+def test_gate_passed_exhausting_the_regeneration_bound_marks_the_run_terminally_failed(
+    session: Session,
+) -> None:
+    """I/O & Edge-Case Matrix row 3, "Bound exhausted": the Generator always
+    returns the same violating draft, so every regenerated attempt's
+    ``gate_passed`` fails identically (``run_gate()`` is pure). Once
+    ``run.regeneration_count`` exceeds ``_MAX_REGENERATIONS``, the run is
+    marked terminally failed with ``run.stage`` left at ``draft_ready`` (not
+    rewound) so the final, still-failing draft stays reachable rather than
+    discarded."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+
+    for expected_regeneration_count in range(1, driver_module._MAX_REGENERATIONS + 1):
+        result = _drive(session, run, natal_chart, generator=generator)
+        assert result.stage == "payload_ready"
+        assert result.regeneration_count == expected_regeneration_count
+        assert result.failed_at is None
+
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready"
+    assert result.regeneration_count == driver_module._MAX_REGENERATIONS + 1
+    assert result.failed_at is not None
+    assert result.failure_reason is not None
+    assert "regeneration bound exhausted" in result.failure_reason
+
+    stored_drafts = session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).all()
+    assert {stored.attempt for stored in stored_drafts} == set(
+        range(driver_module._MAX_REGENERATIONS + 1)
+    )
+    stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert stored_reports == []
 
 
 # --- _deserialize_generated_draft round trip ------------------------------------------
@@ -1017,44 +1144,6 @@ def test_draft_ready_failing_five_consecutive_drive_calls_marks_the_run_terminal
     assert result.failed_at is not None
     assert result.failure_reason is not None
     assert "draft_ready" in result.failure_reason
-
-
-def test_gate_passed_failing_five_consecutive_drive_calls_marks_the_run_terminally_failed(
-    session: Session,
-) -> None:
-    """I/O & Edge-Case Matrix: "Persistent gate_passed failure across many
-    polls" -- mirrors
-    ``test_draft_ready_failing_five_consecutive_drive_calls_marks_the_run_terminally_failed``'s
-    own shape (Story 4.8) for the new ``gate_passed`` stage (Story 5.3): a
-    draft that always fails the Groundedness Gate (``run_gate()`` is pure --
-    the same violating draft fails identically every attempt) leaves the run
-    stuck at ``draft_ready`` (draft_ready itself already succeeded once and
-    is never re-run); the 5th ``drive()`` call sets ``failed_at``/
-    ``failure_reason`` and the run never advances past ``draft_ready``.
-
-    ``gate_passed`` has no entry in ``_STAGE_BACKOFF_OVERRIDES`` -- it is
-    local and not rate-limited (this story's Boundaries) -- so this uses
-    ``with_backoff``'s plain default schedule, same as
-    ``test_a_stage_other_than_draft_ready_failing_persistently_also_reaches_terminal_failure``'s
-    own ``natal_ready`` version; no zero-delay override is needed."""
-    client, natal_chart = _create_client_and_chart(session)
-    run = ReportRun(client_id=client.id, month="2026-01")
-    session.add(run)
-    session.commit()
-
-    generator = _FakeGenerator(_a_violating_generated_draft())
-    for _ in range(4):
-        _drive(session, run, natal_chart, generator=generator)
-        assert run.stage == "draft_ready"
-        assert run.failed_at is None
-
-    result = _drive(session, run, natal_chart, generator=generator)
-
-    assert result.stage == "draft_ready"
-    assert result.stage_failure_count == 5
-    assert result.failed_at is not None
-    assert result.failure_reason is not None
-    assert "gate_passed" in result.failure_reason
 
 
 def test_a_failed_run_is_a_noop_on_drive(

@@ -129,6 +129,17 @@ _STAGE_BACKOFF_OVERRIDES: dict[str, dict[str, object]] = {
 #: own Design Notes).
 _MAX_STAGE_FAILURES = 5
 
+#: Regeneration attempts a run's current cycle may spend on a `GateFailedError`
+#: before it is marked terminally failed instead of regenerated forever
+#: (Story 5.4). Separate from `_MAX_STAGE_FAILURES`: a `GateFailedError` never
+#: touches `stage_failure_count` (the module's own Design Notes explain why a
+#: shared counter can't work -- a regeneration's `draft_ready` re-run succeeds
+#: by definition, resetting `stage_failure_count` before `gate_passed` even
+#: runs again). No planning artifact states a number (FR-21/AD-10 only
+#: require "bounded"); `3` mirrors `with_backoff`'s own default
+#: `max_attempts=3`.
+_MAX_REGENERATIONS = 3
+
 #: A stage function's uniform signature: every registered stage receives the
 #: same context, whether or not it needs all of it, so the registry stays a
 #: plain ``{name: function}`` mapping rather than growing per-stage plumbing
@@ -482,6 +493,13 @@ def _run_draft_ready(
     :data:`StageFn`'s uniform signature (Story 5.3); this stage does not use
     it -- the Groundedness Gate it feeds runs one stage later, at
     ``gate_passed``.
+
+    The persisted ``ReportDraft`` is tagged ``attempt=run.regeneration_count``
+    (Story 5.4): ``0`` the first time this stage runs for ``run``, and
+    whatever ``drive()``'s ``GateFailedError`` handling has already
+    incremented it to on a re-run after a Gate failure -- so a second (or
+    third) draft for the same run is a new, distinctly-tagged row, never a
+    conflict with the first.
     """
     stored_payload = session.exec(
         select(ReportPayload).where(ReportPayload.report_run_id == run.id)
@@ -510,6 +528,7 @@ def _run_draft_ready(
         style_guide_version=style_guide.version,
         sections_config_version=stored_payload.sections_config_version,
         draft=draft,
+        attempt=run.regeneration_count,
     )
 
 
@@ -535,16 +554,26 @@ def _run_gate_passed(
     mirroring every other stage function's own "read back, never
     recomputed" pattern (this story's Boundaries). On
     ``GateResult.passed is False``, raises :class:`core.errors.GateFailedError`
-    so ``drive()``'s existing stage-failure/backoff bookkeeping handles it
-    uniformly -- ``run.stage`` stays at ``draft_ready``, and no ``Report``
-    row is ever written on a failing pass (bounded, controlled regeneration
-    is Story 5.4's own job, not this one's). ``natal_chart``/
+    so ``drive()``'s ``GateFailedError``-specific handling (Story 5.4)
+    rewinds ``run.stage`` to ``payload_ready`` for a bounded regeneration --
+    no ``Report`` row is ever written on a failing pass. ``natal_chart``/
     ``ephemeris_identity`` are part of :data:`StageFn`'s uniform signature;
     this stage does not use either.
+
+    ``stored_draft`` is the *latest* ``ReportDraft`` for ``run`` -- highest
+    ``attempt`` -- never ``.one()`` (Story 5.4): more than one row is now
+    expected once a run has regenerated at least once, and the Gate must
+    always check the most recently generated draft, not an arbitrary or the
+    very first one.
     """
     stored_draft = session.exec(
-        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
-    ).one()
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run.id)
+        .order_by(ReportDraft.attempt.desc())
+    ).first()
+    assert stored_draft is not None, (
+        f"ReportRun {run.id} reached gate_passed without a persisted ReportDraft."
+    )
     stored_payload = session.exec(
         select(ReportPayload).where(ReportPayload.report_run_id == run.id)
     ).one()
@@ -621,6 +650,21 @@ def drive(
     function runs, no ``with_backoff`` call is made, ``run`` is returned
     unchanged.
 
+    A :class:`core.errors.GateFailedError` from ``gate_passed`` is handled
+    separately from every other stage exception (Story 5.4): it increments
+    ``run.regeneration_count`` (never ``stage_failure_count``, left
+    untouched) and, while that count is at or below
+    :data:`_MAX_REGENERATIONS`, rewinds ``run.stage`` to ``payload_ready`` so
+    the *next* ``drive()`` call re-runs ``draft_ready`` -- a genuinely new
+    ``GeneratedDraft`` from the same stored Payload -- and then ``gate_passed``
+    again. Once ``run.regeneration_count`` exceeds :data:`_MAX_REGENERATIONS`,
+    ``run`` is marked terminally failed the same way a
+    :data:`_MAX_STAGE_FAILURES` exhaustion is, except ``run.stage`` is left
+    at ``draft_ready`` (never rewound) so the last, still-failing draft stays
+    reachable rather than discarded. Either branch commits and returns
+    immediately -- regeneration itself always happens on a subsequent
+    ``drive()`` call, never within the same one that caught the failure.
+
     Called from both the start route and the poll route
     (``shell/http/routes/report_runs.py``): a stalled or interrupted run
     resumes on whichever request -- start or poll -- calls this next.
@@ -654,6 +698,41 @@ def drive(
                 ),
                 **backoff_kwargs,
             )
+        except GateFailedError as error:
+            # A pure Gate re-checking the same already-persisted draft fails
+            # identically forever -- the generic stage-failure path below
+            # would just retry that same draft until _MAX_STAGE_FAILURES,
+            # never actually regenerating anything. Regeneration is a
+            # distinct counter/path (Story 5.4): stage_failure_count is left
+            # untouched here, exactly as the module's own Design Notes
+            # require.
+            _logger.exception(
+                "gate_passed rejected the draft, regenerating: %s", run.id
+            )
+            run.regeneration_count += 1
+            run.updated_at = datetime.now(UTC)
+            if run.regeneration_count <= _MAX_REGENERATIONS:
+                run.stage = "payload_ready"
+                _logger.info(
+                    "report run rewound to payload_ready for regeneration "
+                    "attempt %s: %s",
+                    run.regeneration_count,
+                    run.id,
+                )
+            else:
+                run.failed_at = run.updated_at
+                run.failure_reason = (
+                    f"regeneration bound exhausted after {run.regeneration_count} "
+                    f"attempts: {error}"
+                )
+                _logger.error(
+                    "report run marked terminally failed: regeneration bound "
+                    "exhausted: %s",
+                    run.id,
+                )
+            session.add(run)
+            session.commit()
+            break
         except Exception as error:
             _logger.exception("report run stage failed, left un-advanced: %s", run.id)
             run.stage_failure_count += 1
