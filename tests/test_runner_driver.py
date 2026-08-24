@@ -5,23 +5,28 @@ for ``payload_ready``, Story 4.6's own row for ``draft_ready``, and
 
 An in-memory SQLite engine stands in for Postgres, mirroring
 ``tests/test_client_store.py``; the Natal Chart, ``ComputationConfig``,
-``SectionsConfig`` and ``EphemerisIdentity`` are all real (the same
-known-good Fort Worth fixture ``tests/test_client_store.py`` uses), since
-three of the four registered stages (``natal_ready``, ``transits_ready``,
-``payload_ready``) call real ``core/`` code -- only the *failure* scenarios
-below inject a fake stage function, mirroring the story's own Design Notes
-("no live external call demonstrates the backoff"). ``draft_ready`` is the
-one stage with a genuine external call (the Generator port), so every test
-here drives it through ``_FakeGenerator`` rather than a real Gemini call --
-``tests/test_report_draft_store.py`` covers the persisted row's own shape,
-and the Gemini adapter has its own test module.
+``SectionsConfig``, ``EphemerisIdentity`` and ``GateVocabulary`` are all real
+(the same known-good Fort Worth fixture ``tests/test_client_store.py`` uses,
+and the same shipped vocabulary ``tests/test_gate_run.py`` uses), since four
+of the five registered stages (``natal_ready``, ``transits_ready``,
+``payload_ready``, ``gate_passed``) call real ``core/`` code -- only the
+*failure* scenarios below inject a fake stage function, mirroring the
+story's own Design Notes ("no live external call demonstrates the backoff").
+``draft_ready`` is the one stage with a genuine external call (the Generator
+port), so every test here drives it through ``_FakeGenerator`` rather than a
+real Gemini call -- ``tests/test_report_draft_store.py`` covers the
+persisted row's own shape, and the Gemini adapter has its own test module.
 
-Four real stages are now registered (Story 4.6 added ``draft_ready``), so a
-fresh, fully-successful ``drive()`` call advances to ``draft_ready`` -- the
-first name in ``_STAGE_SEQUENCE`` with no registered function is now
-``gate_passed``. ``_create_client_and_chart`` seeds a Style Guide version
-alongside the Client/Natal Chart so every full-drive test below reaches
-``draft_ready`` without each test seeding one itself.
+Five real stages are now registered (Story 5.3 added ``gate_passed``), so a
+fresh, fully-successful ``drive()`` call -- with the clean, non-Claim-bearing
+draft ``_FakeGenerator`` returns by default -- advances all the way to
+``gate_passed``, persisting a ``Report`` row along the way; the first name in
+``_STAGE_SEQUENCE`` with no registered function is now ``exported``.
+``_create_client_and_chart`` seeds a Style Guide version alongside the
+Client/Natal Chart so every full-drive test below reaches ``draft_ready``
+without each test seeding one itself. ``tests/test_gate_run.py`` covers
+``run_gate()``'s own checking logic; only the gate-pass/gate-fail stage
+tests below need a fake, ungrounded draft to demonstrate a failure.
 """
 
 from __future__ import annotations
@@ -36,18 +41,22 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import shell.runner.driver as driver_module
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
+from core.errors import GateFailedError
 from core.types.generation import GeneratedDraft, Sentence
 from core.types.memory import ReportTheme, ThemeAspect, ThemeLunation
 from core.types.place import ResolvedPlace
 from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
 from shell.adapters.postgres.client import create_client_with_chart, deserialize_natal_chart
+from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
+from shell.adapters.postgres.report_draft import _json_safe as _draft_json_safe
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.postgres.report_theme import StoredReportTheme
 from shell.adapters.postgres.report_theme import _json_safe as _theme_json_safe
 from shell.adapters.postgres.style_guide import create_style_guide_version
 from shell.computation import load_computation_config
+from shell.gate import DEFAULT_VOCABULARY_PATH, load_gate_vocabulary
 from shell.ports.generator import Generator, StyleGuideVersion
 from shell.runner.driver import _STAGE_FUNCTIONS, _deserialize_transit_events, drive
 from shell.sections import load_sections_config
@@ -55,6 +64,7 @@ from shell.sections import load_sections_config
 _EPHEMERIS_IDENTITY = verify_ephemeris_identity()
 _COMPUTATION_CONFIG = load_computation_config()
 _SECTIONS_CONFIG = load_sections_config()
+_VOCABULARY = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
 
 # Fort Worth, TX, 2026-01-01 00:00 America/Chicago (UTC-6) -- the same
 # known-good input tests/test_client_store.py uses.
@@ -154,13 +164,14 @@ def _drive(session: Session, run: ReportRun, natal_chart, generator: Generator |
         ephemeris_identity=_EPHEMERIS_IDENTITY,
         sections_config=_SECTIONS_CONFIG,
         generator=generator if generator is not None else _FakeGenerator(),
+        vocabulary=_VOCABULARY,
     )
 
 
-# --- Fresh run, all four registered stages succeed -----------------------------
+# --- Fresh run, all five registered stages succeed -----------------------------
 
 
-def test_fresh_run_advances_through_all_four_registered_stages(session: Session) -> None:
+def test_fresh_run_advances_through_all_five_registered_stages(session: Session) -> None:
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
@@ -168,7 +179,7 @@ def test_fresh_run_advances_through_all_four_registered_stages(session: Session)
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     assert result.month_start_utc == datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
     assert result.month_end_utc == datetime(2026, 2, 1, 6, 0, 0, tzinfo=UTC)
     assert isinstance(result.transit_events, list)
@@ -213,7 +224,7 @@ def test_a_completed_run_is_persisted_to_the_database(session: Session) -> None:
 
     stored = session.get(ReportRun, run.id)
     assert stored is not None
-    assert stored.stage == "draft_ready"
+    assert stored.stage == "gate_passed"
     assert stored.transit_events is not None
 
 
@@ -243,7 +254,7 @@ def test_payload_ready_advances_and_persists_a_report_payload_row(session: Sessi
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     stored_payloads = session.exec(
         select(ReportPayload).where(ReportPayload.report_run_id == run.id)
     ).all()
@@ -276,7 +287,7 @@ def test_payload_ready_also_derives_and_persists_a_report_theme_row(session: Ses
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     stored_themes = session.exec(
         select(StoredReportTheme).where(StoredReportTheme.report_run_id == run.id)
     ).all()
@@ -318,7 +329,7 @@ def test_re_drive_after_natal_ready_alone_runs_transits_ready_next_without_recom
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     assert result.month_start_utc == recorded_start
     assert result.month_end_utc == recorded_end
     assert result.transit_events is not None
@@ -336,7 +347,7 @@ def test_re_drive_after_full_completion_is_a_noop(
     session.commit()
 
     _drive(session, run, natal_chart)
-    assert run.stage == "draft_ready", "fixture did not complete -- test is vacuous"
+    assert run.stage == "gate_passed", "fixture did not complete -- test is vacuous"
     events_before = run.transit_events
     updated_at_before = run.updated_at
 
@@ -347,11 +358,12 @@ def test_re_drive_after_full_completion_is_a_noop(
     monkeypatch.setitem(_STAGE_FUNCTIONS, "transits_ready", _raise_if_called)
     monkeypatch.setitem(_STAGE_FUNCTIONS, "payload_ready", _raise_if_called)
     monkeypatch.setitem(_STAGE_FUNCTIONS, "draft_ready", _raise_if_called)
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "gate_passed", _raise_if_called)
 
     result = _drive(session, run, natal_chart)
 
     assert result is run
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     assert result.transit_events == events_before
     assert result.updated_at == updated_at_before
 
@@ -372,6 +384,10 @@ def test_re_drive_after_full_completion_is_a_noop(
         select(ReportDraft).where(ReportDraft.report_run_id == run.id)
     ).all()
     assert len(stored_drafts) == 1
+
+    # Nor a second Report row (Story 5.3).
+    stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert len(stored_reports) == 1
 
 
 # --- A transiently failing stage still advances normally via with_backoff -----------
@@ -405,7 +421,7 @@ def test_a_stage_that_fails_once_then_succeeds_still_advances_run_stage_within_o
     result = _drive(session, run, natal_chart)
 
     assert len(calls) == 2, "the stage function must have been retried, not just called once"
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     assert result.month_start_utc is not None
     assert result.transit_events is not None
 
@@ -495,7 +511,7 @@ def test_process_killed_between_stages_resumes_reading_the_row_back(
 
         result = _drive(second_session, reloaded_run, natal_chart)
 
-        assert result.stage == "draft_ready"
+        assert result.stage == "gate_passed"
         assert result.month_start_utc == recorded_start, "month bounds must not be recomputed"
         assert result.month_end_utc == recorded_end
         assert result.transit_events is not None
@@ -512,9 +528,9 @@ def test_drive_stops_cleanly_once_it_reaches_an_unregistered_stage(session: Sess
 
     result = _drive(session, run, natal_chart)
 
-    # gate_passed has no registered function -- drive() must stop there
-    # without raising, having already completed draft_ready (Story 4.6).
-    assert result.stage == "draft_ready"
+    # exported has no registered function -- drive() must stop there without
+    # raising, having already completed gate_passed (Story 5.3).
+    assert result.stage == "gate_passed"
 
 
 # --- deserialize_natal_chart interop --------------------------------------------------
@@ -540,7 +556,7 @@ def test_drive_works_against_a_deserialized_natal_chart(session: Session) -> Non
 
     result = _drive(session, run, natal_chart)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     assert result.transit_events
 
 
@@ -671,7 +687,7 @@ def test_draft_ready_calls_the_generator_with_the_persisted_payload_style_guide_
     generator = _FakeGenerator()
     result = _drive(session, run, natal_chart, generator=generator)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     assert len(generator.calls) == 1, "the Generator must be called exactly once"
     called_payload, called_style_guide, theme_previous, theme_current = generator.calls[0]
 
@@ -697,7 +713,7 @@ def test_draft_ready_passes_the_most_recent_prior_report_theme_for_a_returning_c
     session.add(first_run)
     session.commit()
     _drive(session, first_run, natal_chart)
-    assert first_run.stage == "draft_ready", "fixture did not complete -- test is vacuous"
+    assert first_run.stage == "gate_passed", "fixture did not complete -- test is vacuous"
 
     first_stored_theme = session.exec(
         select(StoredReportTheme).where(StoredReportTheme.report_run_id == first_run.id)
@@ -710,7 +726,7 @@ def test_draft_ready_passes_the_most_recent_prior_report_theme_for_a_returning_c
     generator = _FakeGenerator()
     result = _drive(session, second_run, natal_chart, generator=generator)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     assert len(generator.calls) == 1
     _, _, theme_previous, _ = generator.calls[0]
     assert theme_previous == expected_theme_previous
@@ -727,7 +743,7 @@ def test_draft_ready_still_finds_the_prior_theme_when_a_month_was_skipped(
     session.add(first_run)
     session.commit()
     _drive(session, first_run, natal_chart)
-    assert first_run.stage == "draft_ready", "fixture did not complete -- test is vacuous"
+    assert first_run.stage == "gate_passed", "fixture did not complete -- test is vacuous"
 
     first_stored_theme = session.exec(
         select(StoredReportTheme).where(StoredReportTheme.report_run_id == first_run.id)
@@ -740,7 +756,7 @@ def test_draft_ready_still_finds_the_prior_theme_when_a_month_was_skipped(
     generator = _FakeGenerator()
     result = _drive(session, third_run, natal_chart, generator=generator)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     _, _, theme_previous, _ = generator.calls[0]
     assert theme_previous == expected_theme_previous
 
@@ -767,7 +783,7 @@ def test_draft_ready_persists_the_generated_draft_verbatim_with_its_versions(
 
     result = _drive(session, run, natal_chart, generator=generator)
 
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     stored_payload = session.exec(
         select(ReportPayload).where(ReportPayload.report_run_id == run.id)
     ).one()
@@ -786,6 +802,165 @@ def test_draft_ready_persists_the_generated_draft_verbatim_with_its_versions(
     ]
     assert stored_draft.draft["consiglio_finale"] == [{"text": "Respira.", "entry_ids": []}]
     assert stored_draft.draft["amore"] == []
+
+
+# --- Story 5.3's own row: gate_passed checks the draft against the Payload -----------
+# --- and persists a Report, only on a pass (I/O & Edge-Case Matrix rows 1-2) ---------
+
+
+def _a_violating_generated_draft() -> GeneratedDraft:
+    """A draft containing exactly one Claim (Story 5.1: ``"Marte"`` is a
+    closed-vocabulary planet token) that cites nothing -- ``run_gate()``
+    (Story 5.2) flags this as an ``"empty_citation"`` violation, for
+    gate-fail tests below."""
+    return GeneratedDraft(
+        energia_generale=(Sentence(text="Marte è forte questo mese.", entry_ids=()),),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+
+def test_gate_passed_advances_on_a_clean_draft_and_persists_a_report_row(
+    session: Session,
+) -> None:
+    """Acceptance Criteria: given a run at ``draft_ready``, when it advances
+    with a clean (non-Claim-bearing) draft, the run reaches ``gate_passed``
+    and exactly one ``Report`` row is persisted, recording the Style Guide,
+    Payload schema and Gate vocabulary versions that produced it."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    result = _drive(session, run, natal_chart)
+
+    assert result.stage == "gate_passed"
+    stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert len(stored_reports) == 1
+    stored_report = stored_reports[0]
+    assert stored_report.client_id == client.id
+
+    stored_draft = session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).one()
+    stored_payload = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
+    ).one()
+    assert stored_report.style_guide_version == stored_draft.style_guide_version
+    assert stored_report.payload_schema_version == stored_payload.schema_version
+    assert stored_report.gate_vocabulary_version == _VOCABULARY.version
+
+
+def test_gate_passed_leaves_the_run_at_draft_ready_and_persists_no_report_when_the_gate_fails(
+    session: Session,
+) -> None:
+    """Acceptance Criteria: given a failing ``GateResult``, ``run.stage``
+    stays at ``draft_ready`` (never advances to ``gate_passed``),
+    ``stage_failure_count`` increments, and no ``Report`` row is written --
+    the ``GateFailedError`` this stage raises is caught by ``drive()``'s own
+    stage-failure/backoff bookkeeping exactly like any other stage
+    exception."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready"
+    assert result.stage_failure_count == 1
+    assert result.failed_at is None
+    # The violating draft was still persisted verbatim by draft_ready --
+    # only gate_passed's own advance (and its Report row) failed.
+    stored_drafts = session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).all()
+    assert len(stored_drafts) == 1
+    stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert stored_reports == []
+
+
+def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
+    session: Session,
+) -> None:
+    """Unit-level: ``_run_gate_passed`` itself raises ``GateFailedError`` on
+    a failing ``GateResult`` -- proven directly, not only through
+    ``drive()``'s retry/backoff wrapper, mirroring this story's own
+    Boundaries ("raises a new GateFailedError... so drive()'s existing
+    stage-failure/backoff bookkeeping handles it uniformly")."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+    _drive(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready", "fixture did not stop at draft_ready -- test is vacuous"
+
+    with pytest.raises(GateFailedError) as caught:
+        driver_module._run_gate_passed(
+            session,
+            run,
+            natal_chart,
+            _COMPUTATION_CONFIG,
+            _EPHEMERIS_IDENTITY,
+            _SECTIONS_CONFIG,
+            generator,
+            _VOCABULARY,
+        )
+
+    assert caught.value.violations
+    assert caught.value.violations[0].kind == "empty_citation"
+
+
+# --- _deserialize_generated_draft round trip ------------------------------------------
+
+
+def test_deserialize_generated_draft_round_trips_a_generated_draft() -> None:
+    """The reverse of ``ReportDraft.draft``'s own JSON encoding
+    (``shell/adapters/postgres/report_draft.py``'s ``_json_safe``): every
+    field of a ``GeneratedDraft`` -- including an empty ``entry_ids`` tuple
+    -- must reconstruct equal to what was serialized, mirroring
+    ``test_deserialize_theme_round_trips_a_report_theme``'s own round-trip
+    shape."""
+    draft = GeneratedDraft(
+        energia_generale=(Sentence(text="Un mese stabile.", entry_ids=("id-1", "id-2")),),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(Sentence(text="Respira.", entry_ids=()),),
+    )
+
+    serialized = _draft_json_safe(draft)
+    deserialized = driver_module._deserialize_generated_draft(serialized)
+
+    assert deserialized == draft
+
+
+def test_deserialize_generated_draft_round_trips_an_empty_draft() -> None:
+    draft = GeneratedDraft(
+        energia_generale=(),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+    deserialized = driver_module._deserialize_generated_draft(_draft_json_safe(draft))
+
+    assert deserialized == draft
 
 
 # --- Story 4.8: persistent draft_ready failure marks the run terminally failed --
@@ -842,6 +1017,44 @@ def test_draft_ready_failing_five_consecutive_drive_calls_marks_the_run_terminal
     assert result.failed_at is not None
     assert result.failure_reason is not None
     assert "draft_ready" in result.failure_reason
+
+
+def test_gate_passed_failing_five_consecutive_drive_calls_marks_the_run_terminally_failed(
+    session: Session,
+) -> None:
+    """I/O & Edge-Case Matrix: "Persistent gate_passed failure across many
+    polls" -- mirrors
+    ``test_draft_ready_failing_five_consecutive_drive_calls_marks_the_run_terminally_failed``'s
+    own shape (Story 4.8) for the new ``gate_passed`` stage (Story 5.3): a
+    draft that always fails the Groundedness Gate (``run_gate()`` is pure --
+    the same violating draft fails identically every attempt) leaves the run
+    stuck at ``draft_ready`` (draft_ready itself already succeeded once and
+    is never re-run); the 5th ``drive()`` call sets ``failed_at``/
+    ``failure_reason`` and the run never advances past ``draft_ready``.
+
+    ``gate_passed`` has no entry in ``_STAGE_BACKOFF_OVERRIDES`` -- it is
+    local and not rate-limited (this story's Boundaries) -- so this uses
+    ``with_backoff``'s plain default schedule, same as
+    ``test_a_stage_other_than_draft_ready_failing_persistently_also_reaches_terminal_failure``'s
+    own ``natal_ready`` version; no zero-delay override is needed."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+    for _ in range(4):
+        _drive(session, run, natal_chart, generator=generator)
+        assert run.stage == "draft_ready"
+        assert run.failed_at is None
+
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready"
+    assert result.stage_failure_count == 5
+    assert result.failed_at is not None
+    assert result.failure_reason is not None
+    assert "gate_passed" in result.failure_reason
 
 
 def test_a_failed_run_is_a_noop_on_drive(
@@ -910,7 +1123,7 @@ def test_draft_ready_failing_then_succeeding_resets_the_failure_counter(
     result = _drive(session, run, natal_chart, generator=_FailsOnceThenSucceeds())
 
     assert len(calls) == 2, "the Generator must have been retried by with_backoff"
-    assert result.stage == "draft_ready"
+    assert result.stage == "gate_passed"
     assert result.stage_failure_count == 0
     assert result.failed_at is None
 

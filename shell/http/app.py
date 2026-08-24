@@ -34,10 +34,12 @@ from sqlmodel import Session
 
 from core.ephemeris.identity import EphemerisIdentity, verify_ephemeris_identity
 from core.types.computation import ComputationConfig
+from core.types.gate import GateVocabulary
 from core.types.sections import SectionsConfig
 from shell import config
 from shell.computation import load_computation_config
 from shell.config import Environment, Settings
+from shell.gate import load_gate_vocabulary
 from shell.http.auth import (
     SESSION_COOKIE_NAME,
     SESSION_MAX_AGE_SECONDS,
@@ -53,6 +55,7 @@ __all__ = [
     "computation_config",
     "create_app",
     "ephemeris_identity",
+    "gate_vocabulary",
     "get_session",
     "sections_config",
 ]
@@ -111,6 +114,7 @@ def create_app(settings: Settings) -> FastAPI:
     application.state.computation_config = computation_config
     application.state.sections_config = sections_config
     application.state.ephemeris_identity = ephemeris_identity
+    application.state.gate_vocabulary = gate_vocabulary
     application.add_middleware(AuthMiddleware)
     application.include_router(clients_router)
     application.include_router(chart_router)
@@ -202,6 +206,13 @@ computation_config: ComputationConfig = load_computation_config()
 #: stage (``shell/runner/driver.py``) is the first consumer, via
 #: ``shell/http/routes/report_runs.py``'s ``_drive_run``.
 sections_config: SectionsConfig = load_sections_config()
+
+#: The versioned closed Italian vocabulary that decides what counts as a
+#: Claim (Story 5.1, AD-8), loaded once at import time exactly like
+#: ``computation_config``/``sections_config``. ``shell/runner/driver.py``'s
+#: ``gate_passed`` stage (via ``shell/http/routes/report_runs.py``'s
+#: ``_drive_run``) is the first consumer.
+gate_vocabulary: GateVocabulary = load_gate_vocabulary()
 
 #: The instance the ASGI server imports (``shell.http.app:app``).
 app = create_app(config.settings)

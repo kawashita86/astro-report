@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
+
+from core.types.gate import GateViolation
 
 __all__ = [
     "ComputationConfigError",
     "EphemerisIntegrityError",
+    "GateFailedError",
     "GateVocabularyError",
     "GenerationError",
     "GenerationStep",
     "PlaceResolutionError",
     "PlaceResolutionStep",
+    "ReportNotFoundError",
     "SectionsConfigError",
 ]
 
@@ -136,3 +141,47 @@ class GenerationError(RuntimeError):
     def __init__(self, step: GenerationStep, message: str) -> None:
         self.step = step
         super().__init__(f"Refusing to return a generated draft ({step}): {message}")
+
+
+class GateFailedError(RuntimeError):
+    """The Groundedness Gate (Story 5.2, ``core/gate/run.py::run_gate()``)
+    rejected a ``GeneratedDraft``: at least one Claim is ungrounded in, or
+    contradicts, this run's Report Payload.
+
+    There is no partial or best-guess ``Report`` to fall back to -- a
+    ``Report`` row is written only on a passing ``GateResult``, never before
+    (Story 5.3's Boundaries), so nothing is persisted rather than something
+    unverifiable. Raised from :mod:`shell.runner.driver`'s ``gate_passed``
+    stage function so ``drive()``'s existing stage-failure/backoff
+    bookkeeping handles a Gate failure exactly like any other stage failure
+    -- ``run.stage`` stays at ``draft_ready``. Carries the failing
+    ``GateResult``'s own violations, for a future story (5.5) to surface
+    directly to Francesco; bounded, controlled regeneration on this error is
+    Story 5.4's own job, not this one's.
+    """
+
+    def __init__(self, violations: tuple[GateViolation, ...]) -> None:
+        self.violations = violations
+        super().__init__(
+            "Refusing to advance past the Groundedness Gate: "
+            f"{len(violations)} violation(s) against the Payload."
+        )
+
+
+class ReportNotFoundError(RuntimeError):
+    """No passed ``Report`` row exists for the id an export was attempted
+    against (Story 5.3).
+
+    There is no partial or best-guess export to fall back to -- a ``Report``
+    row is written only on a passing Groundedness Gate result
+    (``shell/runner/driver.py``'s ``gate_passed`` stage), so this is also how
+    "the Gate has not passed" refuses export: there is no separate check for
+    it, because the row's mere absence already encodes it. Raised from
+    :mod:`shell.export`'s ``export_report()``, naming the ``report_id`` that
+    was refused, rather than letting a bare ``session.get()`` return ``None``
+    escape untyped.
+    """
+
+    def __init__(self, report_id: UUID) -> None:
+        self.report_id = report_id
+        super().__init__(f"Refusing to export: no passed Report exists for report_id={report_id}.")

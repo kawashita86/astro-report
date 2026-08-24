@@ -108,6 +108,7 @@ def _drive_run(
         ephemeris_identity=request.app.state.ephemeris_identity,
         sections_config=request.app.state.sections_config,
         generator=generator,
+        vocabulary=request.app.state.gate_vocabulary,
     )
 
 
