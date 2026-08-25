@@ -19,6 +19,7 @@ fragment/full-page split.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as time_of_day
 from decimal import Decimal
@@ -31,8 +32,10 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
+from core.gate.run import run_gate
 from core.payload.freeze import freeze_payload
 from core.types.day_lists import DayLists
+from core.types.gate import GateViolation
 from core.types.generation import GeneratedDraft, Sentence
 from core.types.payload import Payload, SectionPayload
 from core.types.place import ResolvedPlace
@@ -40,11 +43,13 @@ from core.types.transits import Station, TransitAspectEvent
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, create_client_with_chart
+from shell.adapters.postgres.gate_result import store_gate_result
 from shell.adapters.postgres.report_draft import store_report_draft
 from shell.adapters.postgres.report_payload import store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
 from shell.config import Environment, Settings
+from shell.gate import DEFAULT_VOCABULARY_PATH, load_gate_vocabulary
 from shell.http.app import create_app, get_session
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
 from shell.http.routes.report_runs import get_generator
@@ -789,10 +794,10 @@ def test_getting_the_draft_for_a_bound_exhausted_run_shows_gate_violations_and_f
 ) -> None:
     """AC1: Francesco opens the draft view of a Report that exhausted its
     regeneration bound and sees the Report text, each failing Claim's
-    section/sentence/detail, and the run's failure reason -- ``run_gate()``
-    is recomputed on demand from the already-persisted latest ``ReportDraft``
-    + ``ReportPayload`` (Story 5.2, AD-1's purity), not read back from any
-    new persistence."""
+    section/sentence/detail, and the run's failure reason -- the violations
+    are read from the persisted ``StoredGateResult`` row that actually
+    recorded this run's failure (Story 5.6), not recomputed against the
+    currently loaded vocabulary (epic-5-retro-item-38)."""
     ada = _create_client_with_real_chart(db_session)
     run = _a_bound_exhausted_run(ada.id)
     db_session.add(run)
@@ -822,6 +827,20 @@ def test_getting_the_draft_for_a_bound_exhausted_run_shows_gate_violations_and_f
         draft=ungrounded_draft,
         attempt=3,
     )
+    # The real Gate check that actually failed this run (mirrors
+    # `shell/runner/driver.py`'s own `except GateFailedError` write, and
+    # `tests/test_runner_driver.py:60,68`'s own vocabulary loading) --
+    # `store_gate_result` is what Story 5.6 built and this story wires up.
+    vocabulary = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+    gate_result = run_gate(ungrounded_draft, frozen, vocabulary)
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=gate_result.passed,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=gate_result.vocabulary_version,
+        violations=gate_result.violations,
+    )
     db_session.commit()
 
     response = authenticated_client.get(f"/report-runs/{run.id}/draft")
@@ -834,18 +853,141 @@ def test_getting_the_draft_for_a_bound_exhausted_run_shows_gate_violations_and_f
     assert run.failure_reason in response.text
 
 
+def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_latest(
+    authenticated_client: TestClient, db_session: Session, app_instance: FastAPI
+) -> None:
+    """I/O & Edge-Case Matrix row 4: more than one ``StoredGateResult`` row
+    can exist for a run once it has regenerated more than once (Story 5.4) --
+    the row with the highest ``regeneration_count`` is always the one that
+    actually caused the terminal failure, so it is the one shown, even when
+    the currently loaded vocabulary (``request.app.state.gate_vocabulary``)
+    has since diverged from every stored row. This is exactly the drift
+    epic-5-retro-item-38 closes: the response must not depend on the live
+    vocabulary at all.
+
+    Rows are inserted out of ``regeneration_count`` order (3, then 0, then
+    1) -- ``StoredGateResult.id`` is a time-sortable ``uuid7``, so inserting
+    in ascending ``regeneration_count`` order would let a query that merely
+    orders by insertion/id order pass this test too. Inserting out of order
+    means only a query that actually orders by ``regeneration_count``
+    descending can pick the right row. ``regeneration_count=3`` (not 2) is
+    used for the row that caused the failure: ``_a_bound_exhausted_run()``
+    sets ``run.regeneration_count = 4`` and ``shell/runner/driver.py``'s
+    ``_MAX_REGENERATIONS`` is 3, so the check that actually pushed the count
+    past the bound ran at the pre-increment value of 3, matching how
+    ``drive()``'s ``except GateFailedError`` block calls ``store_gate_result``
+    before incrementing ``run.regeneration_count``.
+
+    Also proves ``report_run_id`` isolation: a second ``ReportRun`` gets its
+    own ``StoredGateResult`` row with distinguishable violation text, and
+    that text must never appear in the first run's draft view -- a
+    regression that weakened or dropped the ``report_run_id`` filter would
+    still pass every other test here, since they only ever seed rows for
+    the one run under test."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=3,
+    )
+    for count in (3, 0, 1):
+        store_gate_result(
+            db_session,
+            run=run,
+            passed=False,
+            regeneration_count=count,
+            vocabulary_version=1,
+            violations=(
+                GateViolation(
+                    kind="empty_citation",
+                    section="lavoro",
+                    sentence=f"regeneration {count} sentence",
+                    entry_ids=(),
+                    detail=f"detail for regeneration {count}",
+                ),
+            ),
+        )
+    other_client = _create_client_with_real_chart(db_session, name="Grace Hopper")
+    other_run = _a_bound_exhausted_run(other_client.id)
+    db_session.add(other_run)
+    db_session.commit()
+    other_frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=other_run, frozen=other_frozen)
+    store_report_draft(
+        db_session,
+        run=other_run,
+        style_guide_version=1,
+        sections_config_version=other_frozen["sections_config_version"],
+        draft=_a_generated_draft_for(other_frozen),
+        attempt=3,
+    )
+    store_gate_result(
+        db_session,
+        run=other_run,
+        passed=False,
+        regeneration_count=3,
+        vocabulary_version=1,
+        violations=(
+            GateViolation(
+                kind="empty_citation",
+                section="lavoro",
+                sentence="other run's sentence",
+                entry_ids=(),
+                detail="other run's detail",
+            ),
+        ),
+    )
+    db_session.commit()
+    # Diverge the live vocabulary so a live recomputation (the bug this
+    # story fixes) would find *zero* violations against `draft`/`frozen` --
+    # none of the closed-vocabulary tokens match anything any more -- while
+    # every stored row above still has one. If the route were still calling
+    # `run_gate()` live, this assertion would fail.
+    live_vocabulary = app_instance.state.gate_vocabulary
+    app_instance.state.gate_vocabulary = replace(
+        live_vocabulary,
+        version=live_vocabulary.version + 1,
+        planets=frozenset(),
+        signs=frozenset(),
+        casa_ordinals=frozenset(),
+        retrogrado="not-a-real-token",
+        stazionario="not-a-real-token-2",
+    )
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "regeneration 3 sentence" in response.text
+    assert "detail for regeneration 3" in response.text
+    assert "regeneration 0 sentence" not in response.text
+    assert "regeneration 1 sentence" not in response.text
+    assert "other run's sentence" not in response.text
+    assert "other run's detail" not in response.text
+
+
 def test_getting_the_draft_for_a_generic_failure_with_a_grounded_draft_still_shows_the_reason(
     authenticated_client: TestClient, db_session: Session
 ) -> None:
     """Regression: a run can be marked terminally failed (``failed_at`` set)
     by a *generic*, non-``GateFailedError`` failure at the ``gate_passed``
     stage -- e.g. a DB error inside ``store_report()`` after the Gate has
-    already passed in-memory -- leaving behind a latest ``ReportDraft`` that
-    ``run_gate()`` recomputes as grounded (zero violations). The "Gate
-    failures" section must still render ``run.failure_reason`` in that case
-    -- it must not be gated behind ``violations`` being non-empty, since
-    ``view_report_draft`` sets ``run`` in context whenever ``run.failed_at
-    is not None``, independent of what the recomputed Gate finds."""
+    already passed in-memory -- leaving behind a latest ``ReportDraft`` with
+    no matching ``StoredGateResult`` row at all (the Gate never failed for
+    this run, so nothing was ever written), which is why ``violations``
+    defaults to an empty list here. The "Gate failures" section must still
+    render ``run.failure_reason`` in that case -- it must not be gated
+    behind ``violations`` being non-empty, since ``view_report_draft`` sets
+    ``run`` in context whenever ``run.failed_at is not None``, independent
+    of whether a ``StoredGateResult`` row exists."""
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(
         client_id=ada.id,

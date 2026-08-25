@@ -28,10 +28,10 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
-from core.gate.run import run_gate
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, StoredNatalChart, deserialize_natal_chart
+from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
@@ -206,15 +206,16 @@ def view_report_draft(
 
     When ``run.failed_at`` is set (Story 5.4's regeneration bound exhausted,
     the last ``ReportDraft`` still reachable), the Groundedness Gate is
-    recomputed on demand from that latest draft plus the run's stored
-    Payload (``run_gate()`` is pure, Story 5.2 AD-1, so this costs nothing
-    extra) against the currently loaded vocabulary -- this can differ from
-    what actually caused the failure if the vocabulary changes in between,
-    until Story 5.6 persists the vocabulary version per run -- and its
-    ``violations`` -- plus ``run`` itself, for ``failure_reason`` -- are
-    added to the template context so Francesco sees exactly what failed and
-    what it contradicts (Story 5.5). A passing run's context is left
-    byte-for-byte unchanged: no recomputation, no new context keys.
+    *not* recomputed -- Story 5.6's persisted ``StoredGateResult`` row for
+    this run (the one with the highest ``regeneration_count``, i.e. the
+    check that actually caused the failure) is read back instead, so a
+    vocabulary edit landing between the run's terminal failure and Francesco
+    opening its draft can never show a different violation set than what
+    actually failed (epic-5-retro-item-38). No row found (a generic,
+    non-Gate terminal failure never wrote one) -> ``violations`` defaults to
+    an empty list. Either way, ``run`` itself is added to the template
+    context, for ``failure_reason`` (Story 5.5). A passing run's context is
+    left byte-for-byte unchanged: no query, no new context keys.
     """
     run = session.get(ReportRun, run_id)
     if run is None:
@@ -247,8 +248,15 @@ def view_report_draft(
         "list_section_names": LIST_SECTION_NAMES,
     }
     if run.failed_at is not None:
-        gate_result = run_gate(draft, stored_payload.payload, request.app.state.gate_vocabulary)
-        context["violations"] = gate_result.violations
+        stored_gate_result = session.exec(
+            select(StoredGateResult)
+            .where(StoredGateResult.report_run_id == run_id)
+            .where(StoredGateResult.passed.is_(False))
+            .order_by(StoredGateResult.regeneration_count.desc())
+        ).first()
+        context["violations"] = (
+            stored_gate_result.violations if stored_gate_result is not None else []
+        )
         context["run"] = run
 
     return _templates.TemplateResponse(request, "report_draft.html", context)

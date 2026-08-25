@@ -39,6 +39,38 @@ the spec that surfaced it. Append only.
   summary: `sprint-status.yaml` has no audit trail linking a story's status to the commit, spec, or code-review round that produced it.
   evidence: The workflow notes describe a dev-moves-to-review-then-code-review cycle, and the header comments reference an `action_items` mechanism, but the file has neither a populated `action_items:` section nor any per-story field pointing back to a commit hash or spec file. Reconciling story 1-1's status required cross-referencing the spec's own frontmatter and Spec Change Log by hand; the tracker itself gives no way to audit "what made this true."
 
+- source_spec: none
+  summary: Guard `shell/runner/driver.py`'s two-write stage functions (`_run_gate_passed`'s `store_report`+`store_gate_result`, and `drive()`'s unguarded `except GateFailedError` block's own `store_gate_result` call) against a partial-flush-poisoned SQLAlchemy session (`epic-5-retro-item-39`, re-prioritizing the still-open `epic-4-retro-item-23`).
+  evidence: Split from the epic-5-retrospective batch (`_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md`, Finding 2) at the user's choice to tackle `epic-5-retro-item-38` alone first; deferred for its own focused plan/review cycle rather than bundled in.
+
+- source_spec: none
+  summary: Expand `core/gate`'s test suite (`tests/test_gate_classify.py`, `tests/test_gate_run.py`) with adversarial non-astrological Italian sentences (a bare 1-31 number as a duration/count, "casa" + ordinal in a mundane sense) to measure the classifier's documented false-positive rate (`epic-5-retro-item-40`).
+  evidence: Split from the epic-5-retrospective batch (`_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md`, Finding 3) at the user's choice to tackle `epic-5-retro-item-38` alone first.
+
+- source_spec: none
+  summary: Validate `vocabulary.it.json`'s `planets`/`signs`/`casa_ordinals` word sets against `core/gate/run.py`'s hardcoded `_BODY_MAP`/`_SIGN_MAP`/`_CASA_ORDINAL_TO_HOUSE` translation maps at load time in `shell/gate.py`, so a future vocabulary revision that adds an untranslated word fails loudly instead of silently under-checking that category (`epic-5-retro-item-41`).
+  evidence: Split from the epic-5-retrospective batch (`_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md`, Finding 4) at the user's choice to tackle `epic-5-retro-item-38` alone first.
+
+- source_spec: none
+  summary: Add a defensive try/except around `core/gate/run.py::_date_facts`'s `datetime.fromisoformat()` call, mirroring the isinstance-guard pattern its sibling fact-extraction functions already use, so a malformed Payload date degrades to a skipped fact rather than crashing `run_gate()` (`epic-5-retro-item-42`).
+  evidence: Split from the epic-5-retrospective batch (`_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md`, Finding 5) at the user's choice to tackle `epic-5-retro-item-38` alone first.
+
+- source_spec: none
+  summary: Add `"gate_passed": {"max_attempts": 1}` to `shell/runner/driver.py::_STAGE_BACKOFF_OVERRIDES`, since `run_gate()` is deterministic and retrying an already-failed check gains nothing (`epic-5-retro-item-43`).
+  evidence: Split from the epic-5-retrospective batch (`_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md`, Finding 6) at the user's choice to tackle `epic-5-retro-item-38` alone first.
+
+- source_spec: none
+  summary: Guard `shell/runner/driver.py::_run_draft_ready`'s attempt-tagged `store_report_draft` write against a concurrent `drive()` race (start route + poll route, no locking), matching the still-open `epic-4-retro-item-26`'s intended fix for the sibling `ReportPayload` case (`epic-5-retro-item-44`).
+  evidence: Split from the epic-5-retrospective batch (`_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md`, Finding 7) at the user's choice to tackle `epic-5-retro-item-38` alone first.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-5-retro-item-38-wire-view-report-draft-to-stored-gate-result.md`
+  summary: `StoredGateResult` has no DB-level composite uniqueness on `(report_run_id, regeneration_count)`, and the "regeneration_count strictly increases across a run's writes" invariant view_report_draft's latest-row query now depends on is enforced only by prose in `gate_result.py`'s module docstring, not the schema or type system.
+  evidence: Surfaced by the Blind Hunter review layer during `epic-5-retro-item-38`'s implementation. A future `shell/runner/driver.py` refactor could silently violate the invariant (e.g. two rows sharing a `regeneration_count`, breaking the "highest wins" ordering determinism) with no DB constraint and no test to catch it. Out of this story's scope, which explicitly excluded touching `StoredGateResult`/`driver.py`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-5-retro-item-38-wire-view-report-draft-to-stored-gate-result.md`
+  summary: `StoredGateResult.vocabulary_version`/`.created_at` are persisted specifically to answer "which vocabulary produced this, and when" but neither is surfaced anywhere in `view_report_draft`'s context or `report_draft.html`.
+  evidence: Surfaced by the Blind Hunter review layer during `epic-5-retro-item-38`'s implementation. Francesco still has no way to see, from the draft view itself, which vocabulary version or check time produced the violations he's looking at -- only that they're now guaranteed to be the ones that actually caused the failure. Out of this story's scope, which explicitly excluded changing `report_draft.html`.
+
 - source_spec: `_bmad-output/implementation-artifacts/spec-reconcile-story-1-1-status.md`
   summary: The story-status enum doesn't distinguish "implementation complete" from "human-gated manual steps confirmed."
   evidence: Story 1.1's spec lists a "Manual checks (Francesco — requires account access)" section (Render/Neon provisioning, post-deploy HTTPS verification) that only a human can perform. `sprint-status.yaml` has a single flat `done` state with no field recording whether those out-of-band checks were actually completed, so a story can read `done` while deploy-time verification remains unconfirmed.
