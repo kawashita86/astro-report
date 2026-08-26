@@ -3,6 +3,26 @@
 Findings surfaced by review that are real but not this story's problem. Each names
 the spec that surfaced it. Append only.
 
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-browse-everything-i-have-produced-for-a-client.md`
+  summary: `ReportRun.natal_chart_id`'s traceability claim can silently diverge from the chart a stalled run's later stages actually computed against.
+  evidence: `_drive_run` (`shell/http/routes/report_runs.py`) re-resolves `_current_chart()` fresh on every `drive()` call, including a poll that resumes a run stalled or regenerating after `natal_ready` already recorded a chart id. If the Client's chart is corrected between such polls, `transits_ready`/`payload_ready`/`draft_ready` compute against the newly-current chart while `run.natal_chart_id` still names the original one -- narrow (requires a correction landing mid-flight of the same Client's stalled run), pre-existing in `_drive_run`'s chart-sourcing design, not introduced by Story 6.4's new column.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-browse-everything-i-have-produced-for-a-client.md`
+  summary: No page in the app links to `GET /clients/{client_id}/reports` (or to any other Client-scoped page) -- every Client-related route, this new one included, is reachable only by typing its URL.
+  evidence: `grep` across `shell/http/templates/*.html` finds no reference to `/clients/.../reports`, `/clients/.../edit`, or `/clients/.../delete` from any other template; `POST /clients` itself returns plain text ("Client {id} created.") with no link anywhere. Pre-existing across the whole app, not specific to this story -- FR-27's "browse" is technically satisfied but only for someone who already knows the URL.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-browse-everything-i-have-produced-for-a-client.md`
+  summary: Nothing prevents two passed Reports from sharing the same `(ReportRun.client_id, month)`, and the new history listing has no secondary sort key to order them deterministically if that happens.
+  evidence: `start_report_run` (`shell/http/routes/report_runs.py`) only validates month format and that the Client exists before creating a new `ReportRun` -- no uniqueness check against existing runs for that Client/month. `list_client_reports`'s query orders by `ReportRun.month.desc()` alone, so two same-month Reports would render with an undefined relative order and no way to tell them apart in the list.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-browse-everything-i-have-produced-for-a-client.md`
+  summary: Only one test in the whole suite (`test_delete_client_and_derived_succeeds_with_a_report_run_referencing_a_natal_chart`, `tests/test_client_store.py`) enables real SQLite foreign-key enforcement; every other cascade/deletion test still runs against the default non-enforcing connection.
+  evidence: That test's own docstring explains why this matters: an FK-ordering bug in `delete_client_and_derived` passed the entire suite once already (this story's Spec Change Log) because SQLite does not enforce foreign keys by default. The fix closes the gap only for the one new relationship it was written to guard, not for the rest of the cascade or the wider test suite going forward.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-browse-everything-i-have-produced-for-a-client.md`
+  summary: `alembic upgrade head` fails against a genuinely fresh database at revision `0014_bound_client_and_chart_string_columns`, unrelated to this story.
+  evidence: Alembic's default `alembic_version.version_num` column is `VARCHAR(32)`, but this repo's revision ids are long descriptive strings -- `0014_bound_client_and_chart_string_columns` is 43 characters -- so writing it throws `StringDataRightTruncation`. Confirmed independently twice (by both implementation passes of this story, against a real throwaway Postgres container) that every migration from `0014` onward, including this story's own `0017`, has never actually been exercised end-to-end from a clean database.
+
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-1-a-deployable-application-skeleton.md`
   summary: No CI pipeline runs the test suite, so every mechanical guard in the repository is opt-in while Render auto-deploys each commit.
   evidence: `render.yaml` sets `autoDeployTrigger: commit`, and there is no `.github/workflows` or equivalent. The guard tests carry docstrings saying "this is a rule only while this test exists" — but nothing runs them between a commit and the deploy it triggers. BUILD-ORDER's E0 "done when" clause expects the import-boundary test green *in CI*, so a pipeline is owed by Epic 1; Story 1.2 is its natural home.

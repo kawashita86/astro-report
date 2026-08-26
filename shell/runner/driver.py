@@ -53,6 +53,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from sqlmodel import Session, select
 
@@ -623,6 +624,7 @@ def drive(
     run: ReportRun,
     *,
     natal_chart: NatalChart,
+    natal_chart_id: UUID,
     config: ComputationConfig,
     ephemeris_identity: EphemerisIdentity,
     sections_config: SectionsConfig,
@@ -632,6 +634,15 @@ def drive(
     """Advance ``run`` through every stage in ``_STAGE_SEQUENCE`` that has a
     registered function in ``_STAGE_FUNCTIONS`` and that ``run.stage`` has
     not already passed, committing after each stage succeeds.
+
+    ``natal_chart_id`` (Story 6.4) is recorded onto ``run.natal_chart_id``
+    exactly once, the first time this call advances ``run`` through
+    ``natal_ready`` -- never touched again by any later stage or
+    regeneration, mirroring ``month_start_utc``/``month_end_utc``'s own
+    forward-only assignment inside that same stage. It is set here, in this
+    generic per-stage success block, rather than added to :data:`StageFn`'s
+    shared signature, so ``_run_natal_ready`` and the other four stage
+    functions stay byte-for-byte unchanged.
 
     ``generator``/``vocabulary`` are threaded through to every stage
     function uniformly (Stories 4.6/5.3, :data:`StageFn`) -- only
@@ -816,6 +827,8 @@ def drive(
             session.commit()
             break
 
+        if stage_name == "natal_ready":
+            run.natal_chart_id = natal_chart_id
         run.stage = stage_name
         run.stage_failure_count = 0
         run.updated_at = datetime.now(UTC)

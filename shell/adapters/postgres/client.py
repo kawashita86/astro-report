@@ -295,17 +295,17 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     Story 4.3; ``ReportDraft`` in Story 4.6; ``Report`` in Story 5.3;
     ``StoredGateResult`` in Story 5.6; ``ExportRecord`` in Story 6.2).
 
-    Every ``StoredNatalChart`` row for ``client`` -- current and superseded --
-    every ``ReportPayload`` row, every ``StoredReportTheme`` row, every
+    Every ``ReportPayload`` row, every ``StoredReportTheme`` row, every
     ``ReportDraft`` row, every ``ExportRecord`` row, every ``Report`` row,
     every ``StoredGateResult`` row and every ``ReportRun`` row for ``client``
-    are deleted first, then the ``Client`` row itself: children before
-    parent, matching how no foreign key in this codebase declares
-    ``ondelete`` at the schema level, so the cascade is explicit application
-    code, not the database's job. ``ExportRecord`` rows are deleted before
-    ``Report`` rows specifically -- ``ExportRecord.report_id`` (Story 6.2)
-    is itself a foreign key to ``report.id``, so a ``Report`` row still
-    referenced by one would violate that constraint if deleted first.
+    are deleted first, then every ``StoredNatalChart`` row for ``client`` --
+    current and superseded -- and only then the ``Client`` row itself:
+    children before parent, matching how no foreign key in this codebase
+    declares ``ondelete`` at the schema level, so the cascade is explicit
+    application code, not the database's job. ``ExportRecord`` rows are
+    deleted before ``Report`` rows specifically -- ``ExportRecord.report_id``
+    (Story 6.2) is itself a foreign key to ``report.id``, so a ``Report`` row
+    still referenced by one would violate that constraint if deleted first.
     ``ReportPayload``, ``StoredReportTheme``, ``ReportDraft``, ``Report`` and
     ``StoredGateResult`` rows are all deleted before ``ReportRun`` rows
     specifically -- ``ReportPayload.report_run_id`` (Story 3.8),
@@ -313,7 +313,14 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     (Story 4.6), ``Report.report_run_id`` (Story 5.3) and
     ``StoredGateResult.report_run_id`` (Story 5.6) are themselves foreign
     keys to ``report_run.id``, so a ``ReportRun`` row still referenced by any
-    of them would violate that constraint if deleted first.
+    of them would violate that constraint if deleted first. ``StoredNatalChart``
+    rows are deleted *after* ``ReportRun`` rows specifically, the one entry in
+    this cascade running in the opposite direction from every other table
+    here -- ``ReportRun.natal_chart_id`` (Story 6.4) is a foreign key *from*
+    ``report_run`` *to* ``natal_chart.id``, so a ``StoredNatalChart`` row
+    still referenced by a ``ReportRun`` would violate that constraint if
+    deleted first, exactly the same hazard as every table above, just
+    pointing the other way.
     :data:`_CLIENT_CASCADE_TABLES` is the single source of truth for which
     tables that first step must cover; the cascade-invariant test in
     ``tests/test_client_store.py`` asserts it stays equal to every table in
@@ -325,12 +332,6 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     transaction boundary. The caller commits only once every deletion here has
     succeeded.
     """
-    charts = session.exec(
-        select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
-    ).all()
-    for chart in charts:
-        session.delete(chart)
-
     payloads = session.exec(
         select(ReportPayload).where(ReportPayload.client_id == client.id)
     ).all()
@@ -368,6 +369,29 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     runs = session.exec(select(ReportRun).where(ReportRun.client_id == client.id)).all()
     for run in runs:
         session.delete(run)
+
+    # Deleted last, after every ReportRun: ReportRun.natal_chart_id (Story
+    # 6.4) is a foreign key from report_run to natal_chart.id, the opposite
+    # direction from every other table in this cascade -- see this
+    # function's own docstring.
+    charts = session.exec(
+        select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
+    ).all()
+    for chart in charts:
+        session.delete(chart)
+
+    # Every table above relies on the SQLAlchemy `Session`'s own autoflush
+    # -- triggered by the next `select()` in the loop above -- to actually
+    # emit each batch of `DELETE` statements before the next one is queued,
+    # since none of these tables declare an ORM `relationship()` for the
+    # unit of work to infer cross-table delete ordering from on its own.
+    # ``client`` has no following `select()` after it to trigger that same
+    # autoflush, so this explicit `flush()` plays that same role here:
+    # without it, the chart deletes above and the client delete below would
+    # land in one unordered flush and could violate
+    # ``report_run.natal_chart_id``'s new foreign key (Story 6.4) or
+    # ``natal_chart.client_id``'s existing one.
+    session.flush()
 
     session.delete(client)
 

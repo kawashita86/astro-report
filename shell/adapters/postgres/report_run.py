@@ -88,6 +88,16 @@ class ReportRun(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid7, primary_key=True)
     client_id: UUID = Field(foreign_key="client.id", index=True)
+    # Set exactly once, inside `drive()`'s existing per-stage success path
+    # (`shell/runner/driver.py`), the first time `stage_name == "natal_ready"`
+    # succeeds -- mirrors `month_start_utc`/`month_end_utc`'s own
+    # forward-only assignment (Story 6.4). `NULL` for any `ReportRun` row
+    # created before this column existed, and for one that never reached
+    # `natal_ready` -- both cases leave "which chart produced this run"
+    # undeterminable, which is exactly what the Client-history listing
+    # (`shell/http/routes/clients.py`) treats as "not markable as
+    # superseded."
+    natal_chart_id: UUID | None = Field(default=None, foreign_key="natal_chart.id", index=True)
     month: str
     stage: str | None = Field(default=None)
     # `sa_column=Column(...)` bypasses SQLModel's usual inference of

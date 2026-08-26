@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as time_of_day
 from decimal import Decimal
 
 import pytest
@@ -25,7 +26,14 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from core.errors import EphemerisIntegrityError, PlaceResolutionError
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.place import PlaceCandidate, ResolvedPlace
-from shell.adapters.postgres.client import Client, StoredNatalChart
+from shell.adapters.postgres.client import (
+    Client,
+    StoredNatalChart,
+    correct_client_and_chart,
+    create_client_with_chart,
+)
+from shell.adapters.postgres.report import store_report
+from shell.adapters.postgres.report_run import ReportRun
 from shell.config import Environment, Settings
 from shell.http.app import create_app, get_session
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
@@ -505,3 +513,195 @@ def test_the_stored_chart_records_computation_config_and_ephemeris_identity(
     assert {f["filename"] for f in chart.ephemeris_files} == {
         f.filename for f in app_instance.state.ephemeris_identity.files
     }
+
+
+# --- GET /clients/{client_id}/reports (Story 6.4) ----------------------------------
+
+
+def _create_client_with_chart(
+    app_instance: FastAPI, db_session: Session, *, name: str = "Ada Lovelace"
+) -> tuple[Client, StoredNatalChart]:
+    """A Client with a real, persisted ``StoredNatalChart`` -- built directly
+    (bypassing the ``/clients`` route) since these tests exercise the
+    listing route's own query, never chart computation itself."""
+    client_row = create_client_with_chart(
+        db_session,
+        name=name,
+        birth_date=date(2026, 1, 1),
+        birth_time=time_of_day(0, 0),
+        resolved_place=_RESOLVED_PLACE,
+        natal_chart=_FAKE_NATAL_CHART,
+        computation_config=app_instance.state.computation_config,
+        ephemeris_identity=app_instance.state.ephemeris_identity,
+    )
+    db_session.commit()
+    chart = db_session.exec(
+        select(StoredNatalChart).where(StoredNatalChart.client_id == client_row.id)
+    ).one()
+    return client_row, chart
+
+
+def _create_passed_report(
+    db_session: Session, *, client_id, month: str, natal_chart_id=None
+) -> ReportRun:
+    """A ``ReportRun`` at ``gate_passed`` plus its ``Report`` row -- the
+    listing route joins on ``Report``, so no ``ReportDraft``/``ReportPayload``
+    row is needed to exercise it."""
+    run = ReportRun(
+        client_id=client_id, month=month, stage="gate_passed", natal_chart_id=natal_chart_id
+    )
+    db_session.add(run)
+    db_session.commit()
+    store_report(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+    )
+    db_session.commit()
+    return run
+
+
+def test_getting_the_reports_list_without_a_session_is_401(client: TestClient) -> None:
+    response = client.get("/clients/01a01abf-0000-7000-8000-000000000000/reports")
+
+    assert response.status_code == 401
+
+
+def test_the_reports_list_for_an_unknown_client_is_404(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get(
+        "/clients/01a01abf-0000-7000-8000-000000000000/reports"
+    )
+
+    assert response.status_code == 404
+
+
+def test_a_client_with_no_reports_shows_an_empty_list(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, _chart = _create_client_with_chart(app_instance, db_session)
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert "No Reports" in response.text
+
+
+def test_a_client_with_several_reports_lists_them_by_month_most_recent_first(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    _create_passed_report(db_session, client_id=ada.id, month="2026-01", natal_chart_id=chart.id)
+    _create_passed_report(db_session, client_id=ada.id, month="2026-03", natal_chart_id=chart.id)
+    _create_passed_report(db_session, client_id=ada.id, month="2026-02", natal_chart_id=chart.id)
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    positions = [response.text.index(month) for month in ("2026-03", "2026-02", "2026-01")]
+    assert positions == sorted(positions), "months must be listed most recent first"
+
+
+def test_reopening_a_listed_report_reaches_the_existing_report_route(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    run = _create_passed_report(
+        db_session, client_id=ada.id, month="2026-01", natal_chart_id=chart.id
+    )
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/report"' in response.text
+
+
+def test_a_report_run_that_never_passed_the_gate_is_not_listed(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    unpassed = ReportRun(
+        client_id=ada.id, month="2026-01", stage="draft_ready", natal_chart_id=chart.id
+    )
+    db_session.add(unpassed)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert "2026-01" not in response.text
+
+
+def test_a_report_against_a_superseded_chart_is_marked_but_still_opens(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, original_chart = _create_client_with_chart(app_instance, db_session)
+    run = _create_passed_report(
+        db_session, client_id=ada.id, month="2026-01", natal_chart_id=original_chart.id
+    )
+
+    # Supersede the chart the run was generated against (Story 2.7).
+    correct_client_and_chart(
+        db_session,
+        client=ada,
+        name=ada.name,
+        birth_date=ada.birth_date,
+        birth_time=ada.birth_time,
+        resolved_place=_RESOLVED_PLACE,
+        natal_chart=_FAKE_NATAL_CHART,
+        computation_config=app_instance.state.computation_config,
+        ephemeris_identity=app_instance.state.ephemeris_identity,
+    )
+    db_session.commit()
+    assert db_session.get(StoredNatalChart, original_chart.id).superseded_at is not None, (
+        "fixture did not supersede the chart -- test is vacuous"
+    )
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/report"' in response.text
+    assert "superseded" in response.text.lower()
+
+
+def test_a_pre_migration_report_with_no_recorded_chart_is_not_marked_superseded(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Matrix row: "Pre-migration Report" -- ``ReportRun.natal_chart_id`` is
+    ``NULL`` (a run driven before this story, or one that never reached
+    ``natal_ready``), so whether its chart was ever superseded is
+    undeterminable -- never marked, not even a false positive."""
+    ada, _chart = _create_client_with_chart(app_instance, db_session)
+    run = _create_passed_report(
+        db_session, client_id=ada.id, month="2026-01", natal_chart_id=None
+    )
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/report"' in response.text
+    assert "superseded" not in response.text.lower()
+
+
+def test_the_reports_list_is_scoped_per_client(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, ada_chart = _create_client_with_chart(app_instance, db_session, name="Ada Lovelace")
+    grace, grace_chart = _create_client_with_chart(app_instance, db_session, name="Grace Hopper")
+    _create_passed_report(
+        db_session, client_id=ada.id, month="2026-01", natal_chart_id=ada_chart.id
+    )
+    _create_passed_report(
+        db_session, client_id=grace.id, month="2026-05", natal_chart_id=grace_chart.id
+    )
+
+    ada_response = authenticated_client.get(f"/clients/{ada.id}/reports")
+    grace_response = authenticated_client.get(f"/clients/{grace.id}/reports")
+
+    assert "2026-01" in ada_response.text
+    assert "2026-05" not in ada_response.text
+    assert "2026-05" in grace_response.text
+    assert "2026-01" not in grace_response.text

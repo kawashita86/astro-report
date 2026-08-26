@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Reports — {{ client.name }} — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>Reports for {{ client.name }}</h1>
+
+      {% if entries %}
+      <ul>
+        {% for entry in entries %}
+        <li>
+          <a href="/report-runs/{{ entry.run_id }}/report">{{ entry.month }}</a>
+          {% if entry.superseded %}
+          <span>(superseded chart)</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>No Reports yet for this Client.</p>
+      {% endif %}
+    </main>
+  </body>
+</html>

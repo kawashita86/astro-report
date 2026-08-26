@@ -141,6 +141,7 @@ def _drive_run(
         session,
         run,
         natal_chart=natal_chart,
+        natal_chart_id=stored_chart.id,
         config=request.app.state.computation_config,
         ephemeris_identity=request.app.state.ephemeris_identity,
         sections_config=request.app.state.sections_config,

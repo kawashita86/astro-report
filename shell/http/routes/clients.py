@@ -53,6 +53,8 @@ from shell.adapters.postgres.client import (
     create_client_with_chart,
     delete_client_and_derived,
 )
+from shell.adapters.postgres.report import Report
+from shell.adapters.postgres.report_run import ReportRun
 from shell.http.app import get_session
 from shell.http.auth import log_client_deleted
 from shell.ports.geocoder import Geocoder
@@ -610,3 +612,60 @@ async def delete_client(
     log_client_deleted(client_id)
 
     return Response(content=f"Client {client_id} deleted.", media_type="text/plain")
+
+
+@router.get("/clients/{client_id}/reports", include_in_schema=False)
+def list_client_reports(
+    client_id: UUID, request: Request, session: Session = Depends(get_session)
+) -> Response:
+    """List every Gate-passed Report for ``client_id``, by month, most
+    recent first (Story 6.4, FR-27) -- Francesco's way into a Client's
+    history when a month is only known by having already been generated,
+    not by an already-known ``run_id``.
+
+    404s if ``client_id`` names no ``Client`` -- mirrors every other route
+    in this module. A ``Client`` with no passed Report simply renders an
+    empty list, not an error.
+
+    Each row joins ``Report`` (a passed Gate outcome) to its ``ReportRun``
+    for ``month`` -- a ``ReportRun`` that never reached ``gate_passed``
+    never has a ``Report`` row and so never appears. For each, the
+    ``StoredNatalChart`` ``run.natal_chart_id`` names (``None``-safe: unset
+    for a run driven before this story, or one that never reached
+    ``natal_ready``) decides whether the entry is marked as belonging to a
+    since-superseded chart -- reopening it still works identically either
+    way, straight into the existing, untouched ``/report-runs/{run_id}/report``
+    route.
+    """
+    client = session.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404)
+
+    rows = session.exec(
+        select(Report, ReportRun)
+        .join(ReportRun, Report.report_run_id == ReportRun.id)
+        .where(Report.client_id == client_id)
+        .order_by(ReportRun.month.desc())
+    ).all()
+
+    chart_ids = {
+        run.natal_chart_id for _stored_report, run in rows if run.natal_chart_id is not None
+    }
+    charts_by_id = {
+        chart.id: chart
+        for chart in session.exec(
+            select(StoredNatalChart).where(StoredNatalChart.id.in_(chart_ids))
+        ).all()
+    }
+
+    entries = []
+    for _stored_report, run in rows:
+        chart = charts_by_id.get(run.natal_chart_id) if run.natal_chart_id is not None else None
+        superseded = chart is not None and chart.superseded_at is not None
+        entries.append({"run_id": run.id, "month": run.month, "superseded": superseded})
+
+    return _templates.TemplateResponse(
+        request,
+        "client_reports.html",
+        {"client_id": client_id, "client": client, "entries": entries},
+    )

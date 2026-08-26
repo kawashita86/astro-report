@@ -156,6 +156,7 @@ def fake_drive(app_instance: FastAPI, monkeypatch: pytest.MonkeyPatch):
         run,
         *,
         natal_chart,
+        natal_chart_id,
         config,
         ephemeris_identity,
         sections_config,
@@ -166,6 +167,7 @@ def fake_drive(app_instance: FastAPI, monkeypatch: pytest.MonkeyPatch):
             run.month_start_utc = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
             run.month_end_utc = datetime(2026, 2, 1, 6, 0, 0, tzinfo=UTC)
             run.stage = "natal_ready"
+            run.natal_chart_id = natal_chart_id
             session.add(run)
             session.commit()
         if run.stage == "natal_ready":

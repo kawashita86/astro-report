@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -84,6 +85,11 @@ _BIRTH_INSTANT_UTC = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
 #: every test in this module -- so a full, fresh ``_drive()`` call reaches
 #: ``draft_ready`` without each test seeding its own.
 _STYLE_GUIDE_CONTENT = "Scrivi con calore, citando sempre il Payload."
+
+#: A fixed test UUID standing in for a real ``StoredNatalChart.id`` (Story
+#: 6.4) -- these tests exercise ``drive()``'s own bookkeeping of
+#: ``natal_chart_id``, not chart-store lookup, so any stable UUID does.
+_NATAL_CHART_ID: UUID = uuid4()
 
 
 @pytest.fixture
@@ -157,11 +163,18 @@ class _FakeGenerator:
         return self._draft
 
 
-def _drive(session: Session, run: ReportRun, natal_chart, generator: Generator | None = None):
+def _drive(
+    session: Session,
+    run: ReportRun,
+    natal_chart,
+    generator: Generator | None = None,
+    natal_chart_id: UUID = _NATAL_CHART_ID,
+):
     return drive(
         session,
         run,
         natal_chart=natal_chart,
+        natal_chart_id=natal_chart_id,
         config=_COMPUTATION_CONFIG,
         ephemeris_identity=_EPHEMERIS_IDENTITY,
         sections_config=_SECTIONS_CONFIG,
@@ -228,6 +241,52 @@ def test_a_completed_run_is_persisted_to_the_database(session: Session) -> None:
     assert stored is not None
     assert stored.stage == "gate_passed"
     assert stored.transit_events is not None
+
+
+# --- Story 6.4's own row: natal_chart_id set once at natal_ready ---------------
+
+
+def test_natal_chart_id_is_set_the_first_time_natal_ready_succeeds(session: Session) -> None:
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    result = _drive(session, run, natal_chart, natal_chart_id=_NATAL_CHART_ID)
+
+    assert result.stage == "gate_passed"
+    assert result.natal_chart_id == _NATAL_CHART_ID
+
+
+def test_natal_chart_id_is_unaffected_by_a_later_regeneration_rewind_to_payload_ready(
+    session: Session,
+) -> None:
+    """natal_chart_id is recorded once, at natal_ready, and never touched
+    again -- including by a Gate-failure regeneration rewind to
+    payload_ready (Story 5.4), which never re-runs natal_ready."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+    result = _drive(
+        session, run, natal_chart, generator=generator, natal_chart_id=_NATAL_CHART_ID
+    )
+
+    assert result.stage == "payload_ready", "fixture did not regenerate -- test is vacuous"
+    assert result.natal_chart_id == _NATAL_CHART_ID
+
+    # A second drive() call regenerates (draft_ready -> gate_passed again)
+    # without ever re-running natal_ready -- natal_chart_id must stay
+    # exactly what it was set to the first time, even when a different id is
+    # passed to this later call.
+    other_chart_id = uuid4()
+    result = _drive(session, run, natal_chart, generator=generator, natal_chart_id=other_chart_id)
+
+    assert result.natal_chart_id == _NATAL_CHART_ID, (
+        "natal_chart_id must not be overwritten by a later drive() call"
+    )
 
 
 # --- Story 3.8's own row: payload_ready advances and persists a ReportPayload --
