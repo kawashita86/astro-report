@@ -31,7 +31,11 @@ from sqlmodel import Session, select
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, StoredNatalChart, deserialize_natal_chart
-from shell.adapters.postgres.export_record import store_export_record
+from shell.adapters.postgres.export_record import (
+    ExportRecord,
+    record_send_disposition,
+    store_export_record,
+)
 from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
@@ -64,6 +68,16 @@ _templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 #: if it were a transient one and quietly leave the run un-advanced.
 _MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
+#: The only two values ``record_send_disposition`` (and the route below)
+#: ever accept -- Story 6.3's Boundaries forbid a third value or free text.
+#: Paired with the button label ``report.html`` renders for each, in the
+#: fixed order Francesco sees them.
+DISPOSITION_CHOICES: tuple[tuple[str, str], ...] = (
+    ("as_generated", "Sent as generated"),
+    ("edited", "Sent, edited first"),
+)
+_DISPOSITION_VALUES = {value for value, _label in DISPOSITION_CHOICES}
+
 
 def _current_chart(session: Session, client_id: UUID) -> StoredNatalChart | None:
     return session.exec(
@@ -71,6 +85,24 @@ def _current_chart(session: Session, client_id: UUID) -> StoredNatalChart | None
             StoredNatalChart.client_id == client_id,
             StoredNatalChart.superseded_at.is_(None),
         )
+    ).first()
+
+
+def _latest_export_record(session: Session, run_id: UUID) -> ExportRecord | None:
+    """The most recent ``ExportRecord`` for ``run_id``'s ``Report`` (by
+    ``created_at`` descending, ``id`` descending as a deterministic
+    tiebreaker for two rows created within the same timestamp resolution),
+    or ``None`` if no ``Report`` row exists for ``run_id`` or that ``Report``
+    has never been exported -- shared by ``view_report`` (to show the
+    disposition UI) and ``record_export_disposition`` (to 404 before ever
+    calling ``record_send_disposition``)."""
+    stored_report = session.exec(select(Report).where(Report.report_run_id == run_id)).first()
+    if stored_report is None:
+        return None
+    return session.exec(
+        select(ExportRecord)
+        .where(ExportRecord.report_id == stored_report.id)
+        .order_by(ExportRecord.created_at.desc(), ExportRecord.id.desc())
     ).first()
 
 
@@ -292,6 +324,12 @@ def view_report(
     The regeneration count shown is read off the persisted, passing
     ``StoredGateResult`` row, never off ``run.regeneration_count`` directly
     -- epic-5-retro-item-38's precedent, see this story's Design Notes.
+
+    Also passes ``latest_export`` (the most recent ``ExportRecord`` for this
+    Report, or ``None`` before the first export) and ``disposition_choices``
+    (Story 6.3) -- ``report.html`` uses these to show the one-click
+    "how did it go out" forms once an export exists and disposition is still
+    unset, or the recorded choice once it is set.
     """
     stored_report = session.exec(select(Report).where(Report.report_run_id == run_id)).first()
     if stored_report is None:
@@ -341,6 +379,8 @@ def view_report(
             "run_id": run_id,
             "run": run,
             "gate_result": stored_gate_result,
+            "latest_export": _latest_export_record(session, run_id),
+            "disposition_choices": DISPOSITION_CHOICES,
         },
     )
 
@@ -374,7 +414,10 @@ def download_report_pdf(
     once, mirroring how ``run.stage`` only ever advances forward; every
     export after that leaves ``run.stage`` alone and only writes a new
     ``ExportRecord`` row (``shell/adapters/postgres/export_record.py``) --
-    one row per export, first or repeat.
+    one row per export, first or repeat. That row's ``elapsed_seconds``
+    (Story 6.3) is computed here, from ``run.created_at`` (Client selection)
+    to now, never estimated later; its ``disposition`` starts ``NULL`` and is
+    set afterward, in one click, by ``record_export_disposition`` below.
     """
     stored_report = session.exec(select(Report).where(Report.report_run_id == run_id)).first()
     if stored_report is None:
@@ -418,7 +461,10 @@ def download_report_pdf(
     if run.stage != "exported":
         run.stage = "exported"
         session.add(run)
-    store_export_record(session, report=stored_report, format="pdf")
+    elapsed_seconds = int((datetime.now(UTC) - run.created_at).total_seconds())
+    store_export_record(
+        session, report=stored_report, format="pdf", elapsed_seconds=elapsed_seconds
+    )
     session.commit()
 
     return Response(
@@ -426,3 +472,39 @@ def download_report_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="report-{run_id}.pdf"'},
     )
+
+
+@router.post("/report-runs/{run_id}/export/disposition", include_in_schema=False)
+def record_export_disposition(
+    run_id: UUID,
+    disposition: str = Form(...),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Record how the latest export of ``run_id``'s Report actually went out
+    -- ``"as_generated"`` or ``"edited"`` -- in one click (Story 6.3).
+
+    404s if no ``ExportRecord`` exists yet for ``run_id``'s ``Report``
+    (covering "no such run" too, since neither can exist without the
+    other) -- checked directly via ``_latest_export_record`` before
+    ``record_send_disposition`` is ever called, so that function's own
+    ``False`` return (no row updated) can only mean "already set", never
+    "nothing to update": a genuine no-op, not an error, redirecting exactly
+    like a first-time set does (this story's I/O & Edge-Case Matrix).
+    """
+    if disposition not in _DISPOSITION_VALUES:
+        raise HTTPException(
+            status_code=422,
+            detail="disposition must be one of: " + ", ".join(sorted(_DISPOSITION_VALUES)),
+        )
+
+    if _latest_export_record(session, run_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail="this Report has not been exported yet -- there is no export to record a "
+            "disposition against.",
+        )
+
+    record_send_disposition(session, run_id=run_id, disposition=disposition)
+    session.commit()
+
+    return RedirectResponse(f"/report-runs/{run_id}/report", status_code=303)

@@ -1,15 +1,17 @@
-"""``ExportRecord`` (Story 6.2): an in-memory SQLite engine stands in for
-Postgres, mirroring ``tests/test_gate_result_store.py``. Covers the row's
-own shape, ``store_export_record()``'s write, the ``before_update``
-immutability guard, and that ``export_record`` joins the FR-29
-Client-deletion cascade.
+"""``ExportRecord`` (Story 6.2, extended by Story 6.3): an in-memory SQLite
+engine stands in for Postgres, mirroring ``tests/test_gate_result_store.py``.
+Covers the row's own shape, ``store_export_record()``'s write, the
+``before_update`` immutability guard, that ``export_record`` joins the
+FR-29 Client-deletion cascade, and (Story 6.3) ``elapsed_seconds``'s
+persistence plus ``record_send_disposition()``'s set-once/no-op/missing-row
+behavior.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.exc import StatementError
@@ -24,7 +26,11 @@ from shell.adapters.postgres.client import (
     create_client_with_chart,
     delete_client_and_derived,
 )
-from shell.adapters.postgres.export_record import ExportRecord, store_export_record
+from shell.adapters.postgres.export_record import (
+    ExportRecord,
+    record_send_disposition,
+    store_export_record,
+)
 from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
@@ -94,7 +100,7 @@ def _create_passed_report(session: Session) -> tuple[Client, ReportRun, Report]:
 def test_an_export_record_id_is_uuidv7(session: Session) -> None:
     _, _run, report = _create_passed_report(session)
 
-    stored = store_export_record(session, report=report, format="pdf")
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
     session.commit()
 
     assert isinstance(stored.id, UUID) and stored.id.version == 7
@@ -103,7 +109,7 @@ def test_an_export_record_id_is_uuidv7(session: Session) -> None:
 def test_store_export_record_persists_the_export(session: Session) -> None:
     client, _run, report = _create_passed_report(session)
 
-    stored = store_export_record(session, report=report, format="pdf")
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
     session.commit()
 
     reloaded = session.get(ExportRecord, stored.id)
@@ -114,10 +120,38 @@ def test_store_export_record_persists_the_export(session: Session) -> None:
     assert reloaded.created_at is not None
 
 
+def test_store_export_record_persists_elapsed_seconds(session: Session) -> None:
+    """Story 6.3: ``elapsed_seconds`` is the caller's own computation
+    (``download_report_pdf``, Client selection to export) -- this function
+    only stores whatever whole-second value it is given."""
+    _, _run, report = _create_passed_report(session)
+
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=317)
+    session.commit()
+
+    reloaded = session.get(ExportRecord, stored.id)
+    assert reloaded is not None
+    assert reloaded.elapsed_seconds == 317
+
+
+def test_a_freshly_stored_export_record_has_no_disposition(session: Session) -> None:
+    """Story 6.3: ``disposition`` starts ``NULL`` -- it can only be known
+    after Francesco actually sends the Report, later, via
+    ``record_send_disposition``."""
+    _, _run, report = _create_passed_report(session)
+
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
+    session.commit()
+
+    reloaded = session.get(ExportRecord, stored.id)
+    assert reloaded is not None
+    assert reloaded.disposition is None
+
+
 def test_store_export_record_only_flushes_never_commits(session: Session) -> None:
     _, _run, report = _create_passed_report(session)
 
-    stored = store_export_record(session, report=report, format="pdf")
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
     stored_id = stored.id
     session.rollback()
 
@@ -130,8 +164,8 @@ def test_a_report_can_be_exported_more_than_once(session: Session) -> None:
     row (this story's Matrix row 4)."""
     _, _run, report = _create_passed_report(session)
 
-    store_export_record(session, report=report, format="pdf")
-    store_export_record(session, report=report, format="pdf")
+    store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
+    store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
     session.commit()
 
     stored = session.exec(select(ExportRecord).where(ExportRecord.report_id == report.id)).all()
@@ -144,7 +178,7 @@ def test_a_report_can_be_exported_more_than_once(session: Session) -> None:
 def test_mutating_and_committing_a_persisted_export_record_raises(session: Session) -> None:
     _, _run, report = _create_passed_report(session)
 
-    stored = store_export_record(session, report=report, format="pdf")
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
     session.commit()
 
     stored.format = "markdown"
@@ -156,12 +190,121 @@ def test_mutating_and_committing_a_persisted_export_record_raises(session: Sessi
     assert "immutable" in str(caught.value)
 
 
+# --- Story 6.3: record_send_disposition -------------------------------------------
+
+
+def test_record_send_disposition_sets_the_disposition_the_first_time(session: Session) -> None:
+    _, run, report = _create_passed_report(session)
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
+    session.commit()
+
+    updated = record_send_disposition(session, run_id=run.id, disposition="as_generated")
+    session.commit()
+
+    assert updated is True
+    reloaded = session.get(ExportRecord, stored.id)
+    assert reloaded is not None
+    assert reloaded.disposition == "as_generated"
+
+
+def test_record_send_disposition_is_a_no_op_once_already_set(session: Session) -> None:
+    """The ``WHERE disposition IS NULL`` clause makes a second call match
+    zero rows -- idempotent, not an error, and the first recorded choice is
+    never silently overwritten by a second, different one."""
+    _, run, report = _create_passed_report(session)
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
+    session.commit()
+
+    first = record_send_disposition(session, run_id=run.id, disposition="as_generated")
+    session.commit()
+    second = record_send_disposition(session, run_id=run.id, disposition="edited")
+    session.commit()
+
+    assert first is True
+    assert second is False
+    reloaded = session.get(ExportRecord, stored.id)
+    assert reloaded is not None
+    assert reloaded.disposition == "as_generated"
+
+
+def test_record_send_disposition_acts_on_the_latest_export_record(session: Session) -> None:
+    """Story 6.3's Boundaries: the route/adapter act on the **latest**
+    ``ExportRecord`` for the run, by ``created_at`` descending -- not the
+    first one written. Explicit, well-separated ``created_at`` values (built
+    directly, bypassing ``store_export_record``'s own ``datetime.now(UTC)``
+    default) make the ordering deterministic rather than relying on two
+    wall-clock reads landing far enough apart."""
+    client, run, report = _create_passed_report(session)
+    first_export = ExportRecord(
+        client_id=client.id,
+        report_id=report.id,
+        format="pdf",
+        elapsed_seconds=10,
+        created_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
+    )
+    second_export = ExportRecord(
+        client_id=client.id,
+        report_id=report.id,
+        format="pdf",
+        elapsed_seconds=20,
+        created_at=datetime(2026, 1, 1, 12, 5, 0, tzinfo=UTC),
+    )
+    session.add(first_export)
+    session.add(second_export)
+    session.commit()
+
+    updated = record_send_disposition(session, run_id=run.id, disposition="edited")
+    session.commit()
+
+    assert updated is True
+    reloaded_first = session.get(ExportRecord, first_export.id)
+    reloaded_second = session.get(ExportRecord, second_export.id)
+    assert reloaded_first is not None and reloaded_first.disposition is None
+    assert reloaded_second is not None and reloaded_second.disposition == "edited"
+
+
+def test_record_send_disposition_returns_false_for_a_run_with_no_export(
+    session: Session,
+) -> None:
+    """No ``ExportRecord`` exists yet for the run's ``Report`` -- the route
+    tells this apart from the already-set no-op by checking existence
+    itself before calling this function."""
+    _, run, _report = _create_passed_report(session)
+
+    updated = record_send_disposition(session, run_id=run.id, disposition="as_generated")
+
+    assert updated is False
+
+
+def test_record_send_disposition_returns_false_for_an_unknown_run(session: Session) -> None:
+    updated = record_send_disposition(session, run_id=uuid4(), disposition="as_generated")
+
+    assert updated is False
+
+
+def test_record_send_disposition_never_mutates_through_the_orm_object(session: Session) -> None:
+    """Sets the column through the Core-level ``UPDATE`` even though the
+    row's own ``before_update`` listener unconditionally forbids an
+    ORM-driven mutation -- proves this is the deliberate, narrow bypass the
+    Design Notes describe, not an accidental change to the guard."""
+    _, run, report = _create_passed_report(session)
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
+    session.commit()
+
+    record_send_disposition(session, run_id=run.id, disposition="as_generated")
+    session.commit()  # would raise RuntimeError/StatementError if this went through the ORM
+
+    reloaded = session.get(ExportRecord, stored.id)
+    assert reloaded is not None
+    assert reloaded.disposition == "as_generated"
+
+
 # --- FR-29 cascade ---------------------------------------------------------------
 
 
 def test_delete_client_and_derived_removes_its_export_records(session: Session) -> None:
     client, _run, report = _create_passed_report(session)
-    stored = store_export_record(session, report=report, format="pdf")
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
     session.commit()
 
     delete_client_and_derived(session, client=client)
@@ -176,7 +319,7 @@ def test_delete_client_and_derived_does_not_persist_export_record_deletion_witho
     session: Session,
 ) -> None:
     client, _run, report = _create_passed_report(session)
-    stored = store_export_record(session, report=report, format="pdf")
+    stored = store_export_record(session, report=report, format="pdf", elapsed_seconds=42)
     session.commit()
 
     delete_client_and_derived(session, client=client)

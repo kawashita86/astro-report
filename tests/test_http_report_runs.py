@@ -1700,3 +1700,247 @@ def test_the_report_view_links_to_the_export_pdf_route(
 
     assert response.status_code == 200
     assert f'href="/report-runs/{run.id}/export/pdf"' in response.text
+
+
+# --- Story 6.3: elapsed_seconds at export time -------------------------------------
+
+
+def test_the_first_export_records_elapsed_seconds_from_run_creation(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Export happens" -- ``elapsed_seconds`` reflects the time
+    from ``run.created_at`` (Client selection) to the export, in whole
+    seconds, and the new row's ``disposition`` starts ``NULL``."""
+    ada = _create_client_with_real_chart(db_session)
+    created_at = datetime.now(UTC) - timedelta(seconds=100)
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 200
+    records = _export_records(db_session)
+    assert len(records) == 1
+    # Only a lower bound: >= 100 is the deliberate gap set up above. No
+    # upper bound -- how long the request itself (including a real PDF
+    # render) takes is not this test's concern, and asserting one would
+    # make the test flaky under CI load or on slower hardware.
+    assert records[0].elapsed_seconds >= 100
+    assert records[0].disposition is None
+
+
+# --- Story 6.3: POST /report-runs/{run_id}/export/disposition ----------------------
+
+
+def _passed_report_run(db_session: Session) -> ReportRun:
+    """Build a passed, exportable ``ReportRun`` -- shared setup for the
+    disposition-route tests below."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+    return run
+
+
+def test_recording_disposition_without_a_session_is_401(client: TestClient) -> None:
+    response = client.post(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/export/disposition",
+        data={"disposition": "as_generated"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_recording_disposition_for_an_unknown_run_is_404(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.post(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/export/disposition",
+        data={"disposition": "as_generated"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_recording_disposition_with_no_prior_export_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Recording, no prior export" -- a passed Report exists
+    but has never been exported, so no ``ExportRecord`` row exists yet."""
+    run = _passed_report_run(db_session)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/export/disposition", data={"disposition": "as_generated"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_recording_an_invalid_disposition_with_no_prior_export_is_422_not_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Pins the precedence between the route's two error paths: an invalid
+    ``disposition`` value is rejected with 422 before the route ever checks
+    whether an ``ExportRecord`` exists, even against a run that has never
+    been exported (which would otherwise 404 on its own, per the test
+    above)."""
+    run = _passed_report_run(db_session)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/export/disposition", data={"disposition": "bogus"}
+    )
+
+    assert response.status_code == 422
+    assert _export_records(db_session) == []
+
+
+def test_recording_an_invalid_disposition_value_is_422(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Boundaries: exactly two disposition values -- never a third or free
+    text."""
+    run = _passed_report_run(db_session)
+    authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/export/disposition", data={"disposition": "bogus"}
+    )
+
+    assert response.status_code == 422
+    assert _export_records(db_session)[0].disposition is None
+
+
+def test_recording_disposition_the_first_time_redirects_and_sets_it(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Recording, first time" -- redirects to the Report view,
+    and the latest ``ExportRecord.disposition`` is now set."""
+    run = _passed_report_run(db_session)
+    authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/export/disposition",
+        data={"disposition": "as_generated"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/report"
+    records = _export_records(db_session)
+    assert len(records) == 1
+    assert records[0].disposition == "as_generated"
+
+
+def test_recording_disposition_a_second_time_is_a_no_op_and_still_redirects(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Recording, already set" -- idempotent, zero rows
+    updated: the first recorded choice is never silently overwritten by a
+    second, different one."""
+    run = _passed_report_run(db_session)
+    authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+    authenticated_client.post(
+        f"/report-runs/{run.id}/export/disposition", data={"disposition": "as_generated"}
+    )
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/export/disposition",
+        data={"disposition": "edited"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/report"
+    records = _export_records(db_session)
+    assert len(records) == 1
+    assert records[0].disposition == "as_generated"
+
+
+def test_recording_disposition_acts_on_the_latest_export(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Two exports have happened; recording disposition sets it on the
+    latest ``ExportRecord``, never the first."""
+    run = _passed_report_run(db_session)
+    authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+    authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/export/disposition", data={"disposition": "edited"}
+    )
+
+    assert response.status_code == 200  # TestClient follows the redirect by default
+    records = sorted(_export_records(db_session), key=lambda record: record.created_at)
+    assert len(records) == 2
+    assert records[0].disposition is None
+    assert records[1].disposition == "edited"
+
+
+# --- Story 6.3: the disposition UI on report.html -----------------------------------
+
+
+def test_the_report_view_has_no_disposition_ui_before_any_export(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Report view, no export yet" -- neither the disposition
+    forms nor a recorded-disposition line render."""
+    run = _passed_report_run(db_session)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert 'id="disposition"' not in response.text
+    assert "Sent as generated" not in response.text
+    assert "Sent, edited first" not in response.text
+
+
+def test_the_report_view_shows_both_disposition_forms_once_exported(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Report view, disposition pending" -- both one-click
+    forms render."""
+    run = _passed_report_run(db_session)
+    authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert "Sent as generated" in response.text
+    assert "Sent, edited first" in response.text
+    assert response.text.count(f'action="/report-runs/{run.id}/export/disposition"') == 2
+
+
+def test_the_report_view_shows_the_recorded_disposition_and_hides_the_forms(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Report view, disposition recorded" -- the recorded
+    choice is shown as text, with no buttons to silently overwrite it."""
+    run = _passed_report_run(db_session)
+    authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+    authenticated_client.post(
+        f"/report-runs/{run.id}/export/disposition", data={"disposition": "as_generated"}
+    )
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert "Sent as generated" in response.text
+    assert "Sent, edited first" not in response.text
+    disposition_section = response.text.split('id="disposition"')[1].split("</div>")[0]
+    assert "<form" not in disposition_section
+    assert "<button" not in disposition_section

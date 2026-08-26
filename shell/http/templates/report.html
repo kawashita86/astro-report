@@ -15,6 +15,24 @@
         <p>Passed (regenerated {{ gate_result.regeneration_count }} times)</p>
         <p><a href="/report-runs/{{ run_id }}/payload">View Payload</a></p>
         <p><a href="/report-runs/{{ run_id }}/export/pdf">Export PDF</a></p>
+        {% if latest_export %}
+        <div id="disposition">
+          {% if latest_export.disposition is none %}
+          {% for value, label in disposition_choices %}
+          <form method="post" action="/report-runs/{{ run_id }}/export/disposition">
+            <input type="hidden" name="disposition" value="{{ value }}" />
+            <button type="submit">{{ label }}</button>
+          </form>
+          {% endfor %}
+          {% else %}
+          <p>
+            {% for value, label in disposition_choices %}
+            {% if value == latest_export.disposition %}{{ label }}{% endif %}
+            {% endfor %}
+          </p>
+          {% endif %}
+        </div>
+        {% endif %}
       </section>
 
       {% for section_name in section_order %}
