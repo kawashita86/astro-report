@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from core.ephemeris.identity import EphemerisIdentity
 from core.types.computation import ComputationConfig
 from shell.config import Environment, Settings
+from shell.http import app as shell_http_app
 from shell.http.app import app, computation_config, create_app, ephemeris_identity
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
 
@@ -86,6 +87,57 @@ def test_debug_follows_the_environment() -> None:
 def test_the_module_level_app_exists_for_the_server_to_import() -> None:
     """`uvicorn shell.http.app:app` is what the Dockerfile runs."""
     assert isinstance(app, FastAPI)
+
+
+def test_engine_construction_enables_pre_ping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stale pooled connection must be detected and transparently replaced
+    before use -- Neon, the managed Postgres provider (`render.yaml`), can
+    suspend or drop an idle connection silently."""
+    captured_kwargs: dict[str, object] = {}
+    real_create_engine = shell_http_app.create_engine
+
+    def spy_create_engine(url: str, **kwargs: object):
+        captured_kwargs.update(kwargs)
+        return real_create_engine(url, **kwargs)
+
+    monkeypatch.setattr(shell_http_app, "create_engine", spy_create_engine)
+
+    create_app(LOCAL)
+
+    assert captured_kwargs.get("pool_pre_ping") is True
+
+
+def test_dispose_is_called_once_when_the_app_is_run_as_a_lifespan_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the lifespan's shutdown path -- not app construction itself --
+    disposes the engine."""
+    application = create_app(LOCAL)
+    engine = application.state.engine
+    dispose_calls: list[None] = []
+    monkeypatch.setattr(engine, "dispose", lambda: dispose_calls.append(None))
+
+    with TestClient(application):
+        assert dispose_calls == []
+
+    assert len(dispose_calls) == 1
+
+
+def test_dispose_is_never_called_without_entering_the_lifespan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Today's existing test pattern across the suite -- a bare
+    `TestClient(create_app(...))` with no `with` -- never triggers ASGI
+    lifespan events, so `dispose()` must never run."""
+    application = create_app(LOCAL)
+    engine = application.state.engine
+    dispose_calls: list[None] = []
+    monkeypatch.setattr(engine, "dispose", lambda: dispose_calls.append(None))
+
+    plain_client = TestClient(application)
+    plain_client.get("/healthz")
+
+    assert dispose_calls == []
 
 
 # --- Ephemeris identity: asserted at import time, before anything is served --

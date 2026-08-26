@@ -23,7 +23,8 @@ future second consumer never has to import this module. See
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import parse_qsl
 
@@ -83,6 +84,21 @@ def get_session(request: Request) -> Iterator[Session]:
         yield session
 
 
+@asynccontextmanager
+async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
+    """Dispose the app's engine on shutdown only.
+
+    Reads ``application.state.engine`` off ``application`` rather than closing
+    over a local variable. That attribute is assigned synchronously inside
+    ``create_app()`` before the app is ever handed to an ASGI server, so it is
+    already set by the time this lifespan is invoked at all -- both before
+    ``yield`` (startup) and after it (shutdown), not merely by the time this
+    generator resumes post-``yield``.
+    """
+    yield
+    application.state.engine.dispose()
+
+
 def create_app(settings: Settings) -> FastAPI:
     """Build the application from an already-validated :class:`Settings`.
 
@@ -108,9 +124,10 @@ def create_app(settings: Settings) -> FastAPI:
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=_lifespan,
     )
     application.state.settings = settings
-    application.state.engine = create_engine(settings.sqlalchemy_url)
+    application.state.engine = create_engine(settings.sqlalchemy_url, pool_pre_ping=True)
     application.state.computation_config = computation_config
     application.state.sections_config = sections_config
     application.state.ephemeris_identity = ephemeris_identity
