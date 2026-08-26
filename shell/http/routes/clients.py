@@ -46,6 +46,7 @@ from core.ephemeris.chart import compute_natal_chart
 from core.errors import EphemerisIntegrityError, PlaceResolutionError
 from core.types.place import PlaceCandidate
 from shell.adapters.nominatim.geocoder import NominatimGeocoder
+from shell.adapters.postgres.backup_record import latest_backup_record
 from shell.adapters.postgres.client import (
     Client,
     StoredNatalChart,
@@ -614,6 +615,30 @@ async def delete_client(
     return Response(content=f"Client {client_id} deleted.", media_type="text/plain")
 
 
+def _backup_is_stale(session: Session) -> bool:
+    """Whether the newest ``Report`` anywhere in the system postdates the
+    last recorded backup (Story 6.6) -- computed globally, not scoped to any
+    one Client, since one un-backed-up Report anywhere is the durability gap
+    this warns about.
+
+    No ``Report`` at all -> never stale, even with no ``backup_record`` row
+    yet: there is nothing new a backup could be missing. Otherwise, no
+    ``backup_record`` row at all -> stale (the safe default for a freshly
+    restored database, per this story's Boundaries).
+    """
+    newest_report_created_at = session.exec(
+        select(Report.created_at).order_by(Report.created_at.desc())
+    ).first()
+    if newest_report_created_at is None:
+        return False
+
+    latest_backup = latest_backup_record(session)
+    if latest_backup is None:
+        return True
+
+    return newest_report_created_at > latest_backup.created_at
+
+
 @router.get("/clients/{client_id}/reports", include_in_schema=False)
 def list_client_reports(
     client_id: UUID, request: Request, session: Session = Depends(get_session)
@@ -636,6 +661,12 @@ def list_client_reports(
     since-superseded chart -- reopening it still works identically either
     way, straight into the existing, untouched ``/report-runs/{run_id}/report``
     route.
+
+    Also passes ``backup_stale`` (Story 6.6) -- whether the newest ``Report``
+    across every Client postdates the last recorded backup -- computed by
+    :func:`_backup_is_stale`, chosen as this page's Design Notes explain
+    Francesco returns here repeatedly during a batch and this app has no
+    shared layout or home page today.
     """
     client = session.get(Client, client_id)
     if client is None:
@@ -667,5 +698,10 @@ def list_client_reports(
     return _templates.TemplateResponse(
         request,
         "client_reports.html",
-        {"client_id": client_id, "client": client, "entries": entries},
+        {
+            "client_id": client_id,
+            "client": client,
+            "entries": entries,
+            "backup_stale": _backup_is_stale(session),
+        },
     )

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as time_of_day
 from decimal import Decimal
 
@@ -26,13 +26,14 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from core.errors import EphemerisIntegrityError, PlaceResolutionError
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.place import PlaceCandidate, ResolvedPlace
+from shell.adapters.postgres.backup_record import BackupRecord
 from shell.adapters.postgres.client import (
     Client,
     StoredNatalChart,
     correct_client_and_chart,
     create_client_with_chart,
 )
-from shell.adapters.postgres.report import store_report
+from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_run import ReportRun
 from shell.config import Environment, Settings
 from shell.http.app import create_app, get_session
@@ -705,3 +706,151 @@ def test_the_reports_list_is_scoped_per_client(
     assert "2026-05" not in ada_response.text
     assert "2026-05" in grace_response.text
     assert "2026-01" not in grace_response.text
+
+
+# --- Backup staleness warning (Story 6.6) -------------------------------------
+
+_WARNING_TEXT = "Backup out of date"
+
+
+def _make_passed_report_at(
+    db_session: Session, *, client_id, month: str, natal_chart_id, created_at: datetime
+) -> Report:
+    """A ``ReportRun`` at ``gate_passed`` plus its ``Report`` row, with an
+    explicit ``Report.created_at`` -- built directly rather than via
+    ``store_report()`` (which always stamps ``now()``) so the I/O matrix's
+    relative-ordering scenarios against ``backup_record.created_at`` can be
+    constructed deterministically. Mirrors ``_create_passed_report`` above,
+    plus the explicit timestamp."""
+    run = ReportRun(
+        client_id=client_id, month=month, stage="gate_passed", natal_chart_id=natal_chart_id
+    )
+    db_session.add(run)
+    db_session.flush()
+    report = Report(
+        client_id=client_id,
+        report_run_id=run.id,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+        created_at=created_at,
+    )
+    db_session.add(report)
+    db_session.commit()
+    return report
+
+
+def _make_backup_record_at(db_session: Session, *, created_at: datetime) -> BackupRecord:
+    backup_record = BackupRecord(created_at=created_at)
+    db_session.add(backup_record)
+    db_session.commit()
+    return backup_record
+
+
+def test_never_backed_up_with_a_report_shows_the_warning(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Matrix row: never backed up -- >=1 Report exists, backup_record
+    empty -> backup_stale=True."""
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    _make_passed_report_at(
+        db_session,
+        client_id=ada.id,
+        month="2026-01",
+        natal_chart_id=chart.id,
+        created_at=datetime(2026, 1, 15, tzinfo=UTC),
+    )
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert _WARNING_TEXT in response.text
+
+
+def test_a_fresh_backup_shows_no_warning(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Matrix row: fresh backup -- newest backup_record.created_at > newest
+    Report.created_at -> backup_stale=False."""
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    _make_passed_report_at(
+        db_session,
+        client_id=ada.id,
+        month="2026-01",
+        natal_chart_id=chart.id,
+        created_at=datetime(2026, 1, 15, tzinfo=UTC),
+    )
+    _make_backup_record_at(db_session, created_at=datetime(2026, 1, 16, tzinfo=UTC))
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert _WARNING_TEXT not in response.text
+
+
+def test_a_new_report_after_the_last_backup_shows_the_warning(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Matrix row: new Report after last backup -- newest Report.created_at
+    > newest backup_record.created_at -> backup_stale=True."""
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    _make_backup_record_at(db_session, created_at=datetime(2026, 1, 10, tzinfo=UTC))
+    _make_passed_report_at(
+        db_session,
+        client_id=ada.id,
+        month="2026-01",
+        natal_chart_id=chart.id,
+        created_at=datetime(2026, 1, 20, tzinfo=UTC),
+    )
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert _WARNING_TEXT in response.text
+
+
+def test_no_reports_anywhere_shows_no_warning_even_if_never_backed_up(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Matrix row: no Reports anywhere yet -- the report table is empty ->
+    backup_stale=False, regardless of backup_record's own state."""
+    ada, _chart = _create_client_with_chart(app_instance, db_session)
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert _WARNING_TEXT not in response.text
+
+
+def test_staleness_is_computed_globally_not_per_client(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """The warning compares against the newest Report across every Client,
+    not just the one Francesco is currently viewing (this story's Approach
+    and Boundaries)."""
+    ada, ada_chart = _create_client_with_chart(app_instance, db_session, name="Ada Lovelace")
+    grace, grace_chart = _create_client_with_chart(app_instance, db_session, name="Grace Hopper")
+
+    _make_passed_report_at(
+        db_session,
+        client_id=ada.id,
+        month="2026-01",
+        natal_chart_id=ada_chart.id,
+        created_at=datetime(2026, 1, 5, tzinfo=UTC),
+    )
+    _make_backup_record_at(db_session, created_at=datetime(2026, 1, 10, tzinfo=UTC))
+    # Grace's Report lands after Ada's backup-covering timestamp -- Ada's own
+    # page must still show stale, since the newest Report system-wide (not
+    # just Ada's own) postdates the last backup.
+    _make_passed_report_at(
+        db_session,
+        client_id=grace.id,
+        month="2026-01",
+        natal_chart_id=grace_chart.id,
+        created_at=datetime(2026, 1, 20, tzinfo=UTC),
+    )
+
+    ada_response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert ada_response.status_code == 200
+    assert _WARNING_TEXT in ada_response.text

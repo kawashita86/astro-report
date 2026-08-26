@@ -577,3 +577,11 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-5-take-a-backup-i-actually-hold.md`
   summary: Nothing addresses what happens to a downloaded backup file after it leaves the browser -- encryption at rest, secure storage, retention, or rotation of old backups, even though the file is a full, unencrypted plaintext dump of every Client's PII (names, birth dates/times, precise coordinates).
   evidence: Blind Hunter review of this story's diff. Out of scope for a backend route -- this is an operational/procedural decision for how Francesco actually holds the file once downloaded, not a code change, but real given the export's sensitivity and worth a conscious decision before this route sees regular use.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-6-be-told-when-my-backup-is-out-of-date.md`
+  summary: `GET /backup` now has a durable side effect (an INSERT + COMMIT into `backup_record` on every call), violating GET's safety/idempotency expectation -- a browser retry, link prefetch, proxy, or health-check scanner hitting the route would silently record a "backup completed" timestamp that was never a deliberate operator action.
+  evidence: Blind Hunter review of this story's diff. Low real-world likelihood for a single-operator, authenticated, attachment-download route not linked from anywhere crawlable -- but a genuine correctness gap in the staleness signal's own honesty if it is ever triggered by something other than Francesco's deliberate click.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-6-be-told-when-my-backup-is-out-of-date.md`
+  summary: This app has no CSS anywhere (no stylesheet, no `<style>` block, no shared layout) across any of its 13 templates, so the new "Backup out of date" warning -- like every other status message in the app -- renders as a plain, unstyled paragraph indistinguishable from ordinary text, undercutting its purpose as a warning worth noticing during a batch.
+  evidence: Blind Hunter review of this story's diff. Pre-existing and systemic across the whole app, not introduced by this story -- worth a deliberate, app-wide minimal-styling pass rather than a one-off fix scoped to this single banner.

@@ -22,9 +22,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from shell.adapters.postgres import client as client_module
+from shell.adapters.postgres.backup_record import BackupRecord
 from shell.adapters.postgres.client import Client, StoredNatalChart
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
@@ -465,6 +466,46 @@ def test_a_report_with_two_export_records_and_no_draft_theme_or_gate_result_asso
     assert len(report_rows) == 1
     assert report_rows[0]["id"] == str(report.id)
     assert report_rows[0]["report_run_id"] == str(run.id)
+
+
+# --- Backup staleness record (Story 6.6) ------------------------------------
+
+
+def test_a_completed_backup_commits_one_backup_record_row(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    response = authenticated_client.get("/backup")
+
+    assert response.status_code == 200
+    rows = db_session.exec(select(BackupRecord)).all()
+    assert len(rows) == 1
+    assert rows[0].created_at is not None
+
+
+def test_two_completed_backups_commit_two_backup_record_rows(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    first = authenticated_client.get("/backup")
+    second = authenticated_client.get("/backup")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    rows = db_session.exec(select(BackupRecord)).all()
+    assert len(rows) == 2
+
+
+def test_backup_record_is_not_included_in_the_export_body(
+    authenticated_client: TestClient,
+) -> None:
+    """``backup_record`` is deliberately not one of the ten
+    ``_BACKUP_MODELS`` tables (this story's Boundaries) -- a restored
+    database with no ``backup_record`` row simply shows stale until the next
+    backup."""
+    response = authenticated_client.get("/backup")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "backup_record" not in body
 
 
 # --- Value-level serialization -----------------------------------------------

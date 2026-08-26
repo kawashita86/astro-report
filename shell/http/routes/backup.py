@@ -39,6 +39,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from sqlmodel import Session, select
 
+from shell.adapters.postgres.backup_record import store_backup_record
 from shell.adapters.postgres.client import Client, StoredNatalChart
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
@@ -94,6 +95,12 @@ def download_backup(session: Session = Depends(get_session)) -> Response:
         ]
         for model in _BACKUP_MODELS
     }
+
+    # Recorded only now that the export body is fully built -- a failure
+    # while reading/serializing any table above never records a backup that
+    # didn't actually happen (Story 6.6's Boundaries).
+    store_backup_record(session)
+    session.commit()
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return Response(

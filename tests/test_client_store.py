@@ -18,6 +18,7 @@ from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.types.place import ResolvedPlace
 from shell.adapters.postgres import client as client_module
+from shell.adapters.postgres.backup_record import BackupRecord, store_backup_record
 from shell.adapters.postgres.client import (
     Client,
     StoredNatalChart,
@@ -322,6 +323,25 @@ def test_the_cascade_constant_includes_export_record() -> None:
     covers the actual deletion behavior end to end, mirroring
     ``tests/test_gate_result_store.py``'s own cascade tests."""
     assert "export_record" in client_module._CLIENT_CASCADE_TABLES
+
+
+def test_delete_client_and_derived_leaves_backup_record_untouched(session: Session) -> None:
+    """Story 6.6: ``backup_record`` has no ``client_id`` -- it is global,
+    not per-Client -- so it must be correctly excluded from the FR-29
+    cascade, unlike every table named in ``_CLIENT_CASCADE_TABLES`` above.
+    A cheap, direct regression guard for the claim already made in
+    ``shell/adapters/postgres/backup_record.py``'s and this story's own
+    docstrings."""
+    client = _create(session)
+    session.commit()
+    backup_record = store_backup_record(session)
+    session.commit()
+
+    delete_client_and_derived(session, client=client)
+    session.commit()
+
+    assert session.get(Client, client.id) is None
+    assert session.get(BackupRecord, backup_record.id) is not None
 
 
 def test_every_table_with_a_client_id_foreign_key_is_covered_by_the_cascade_constant() -> None:

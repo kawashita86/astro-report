@@ -10,6 +10,13 @@
     <main>
       <h1>Reports for {{ client.name }}</h1>
 
+      {% if backup_stale %}
+      <p role="alert">
+        Backup out of date — new Reports exist since the last backup.
+        <a href="/backup">Back up now</a>
+      </p>
+      {% endif %}
+
       {% if entries %}
       <ul>
         {% for entry in entries %}
