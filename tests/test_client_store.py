@@ -313,6 +313,15 @@ def test_the_cascade_constant_includes_gate_result() -> None:
     assert "gate_result" in client_module._CLIENT_CASCADE_TABLES
 
 
+def test_the_cascade_constant_includes_export_record() -> None:
+    """Story 6.2: ``export_record`` must join ``_CLIENT_CASCADE_TABLES`` --
+    a regression on top of the general invariant test below, naming the
+    table this story added explicitly. ``tests/test_export_record_store.py``
+    covers the actual deletion behavior end to end, mirroring
+    ``tests/test_gate_result_store.py``'s own cascade tests."""
+    assert "export_record" in client_module._CLIENT_CASCADE_TABLES
+
+
 def test_every_table_with_a_client_id_foreign_key_is_covered_by_the_cascade_constant() -> None:
     """The cascade-invariant test: a later story that adds a new table with a
     foreign key to ``client.id`` without also adding it to

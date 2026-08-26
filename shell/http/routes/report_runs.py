@@ -31,11 +31,13 @@ from sqlmodel import Session, select
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, StoredNatalChart, deserialize_natal_chart
+from shell.adapters.postgres.export_record import store_export_record
 from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
+from shell.adapters.weasyprint.render import html_to_pdf
 from shell.config import Environment
 from shell.http.app import get_session
 from shell.http.draft_view import (
@@ -340,4 +342,87 @@ def view_report(
             "run": run,
             "gate_result": stored_gate_result,
         },
+    )
+
+
+@router.get("/report-runs/{run_id}/export/pdf", include_in_schema=False)
+def download_report_pdf(
+    run_id: UUID, request: Request, session: Session = Depends(get_session)
+) -> Response:
+    """Download a passed Report's eight Sections plus the Client's name as a
+    standalone PDF file (Story 6.2) -- Francesco's hand-to-a-client artifact.
+
+    Gated on the same persisted ``Report`` row's mere existence
+    ``view_report`` (Story 6.1) gates on, never on ``run.stage``: 404 covers
+    both "no such ``ReportRun``" and "that run's Gate hasn't passed yet",
+    exactly mirroring ``view_report``'s own boundary
+    (``shell/export.py::export_report()``'s structural gate).
+
+    Once a ``Report`` row exists, the same ``ReportDraft``/``ReportPayload``/
+    ``Client`` rows it implies are read back with ``RuntimeError`` guards,
+    never a 404 -- their absence at that point would be a data-integrity
+    bug, mirroring ``view_report``'s own shape exactly (this route does not
+    call ``view_report`` itself -- Boundaries: that route/its template stay
+    untouched beyond one added link).
+
+    The PDF itself carries only the eight Sections and the Client's name
+    (``shell/http/templates/report_export.html``) -- no chart wheel, no
+    Payload, no Gate result, no run identifier, no internal metadata
+    (this story's Boundaries).
+
+    The first successful export advances ``run.stage`` to ``"exported"``
+    once, mirroring how ``run.stage`` only ever advances forward; every
+    export after that leaves ``run.stage`` alone and only writes a new
+    ``ExportRecord`` row (``shell/adapters/postgres/export_record.py``) --
+    one row per export, first or repeat.
+    """
+    stored_report = session.exec(select(Report).where(Report.report_run_id == run_id)).first()
+    if stored_report is None:
+        raise HTTPException(status_code=404)
+
+    run = session.get(ReportRun, run_id)
+    if run is None:
+        raise RuntimeError(f"Report {stored_report.id} references a missing ReportRun.")
+
+    stored_draft = session.exec(
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run_id)
+        .order_by(ReportDraft.attempt.desc())
+    ).first()
+    if stored_draft is None:
+        raise RuntimeError(f"Report {stored_report.id} has no matching ReportDraft.")
+
+    stored_payload = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run_id)
+    ).first()
+    if stored_payload is None:
+        raise RuntimeError(f"Report {stored_report.id} has no matching ReportPayload.")
+
+    client = session.get(Client, stored_draft.client_id)
+    if client is None:
+        raise RuntimeError(f"Report {stored_report.id} references a missing Client.")
+
+    draft = deserialize_generated_draft(stored_draft.draft)
+    rendered = render_draft(draft, stored_payload.payload, iana_zone=client.iana_zone)
+
+    export_html = _templates.get_template("report_export.html").render(
+        {
+            "client_name": client.name,
+            "draft": rendered,
+            "section_order": SECTION_ORDER,
+            "list_section_names": LIST_SECTION_NAMES,
+        }
+    )
+    pdf_bytes = html_to_pdf(export_html)
+
+    if run.stage != "exported":
+        run.stage = "exported"
+        session.add(run)
+    store_export_record(session, report=stored_report, format="pdf")
+    session.commit()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="report-{run_id}.pdf"'},
     )

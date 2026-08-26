@@ -24,6 +24,7 @@ from core.ephemeris.identity import EphemerisIdentity
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.computation import ComputationConfig
 from core.types.place import ResolvedPlace
+from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
@@ -54,6 +55,7 @@ _CLIENT_CASCADE_TABLES: frozenset[str] = frozenset(
         "report_draft",
         "report",
         "gate_result",
+        "export_record",
     }
 )
 
@@ -291,15 +293,19 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     """Delete ``client`` and every row derived from it, in one flush (Story 2.8;
     ``ReportRun`` joined the cascade in Story 3.5; ``StoredReportTheme`` in
     Story 4.3; ``ReportDraft`` in Story 4.6; ``Report`` in Story 5.3;
-    ``StoredGateResult`` in Story 5.6).
+    ``StoredGateResult`` in Story 5.6; ``ExportRecord`` in Story 6.2).
 
     Every ``StoredNatalChart`` row for ``client`` -- current and superseded --
     every ``ReportPayload`` row, every ``StoredReportTheme`` row, every
-    ``ReportDraft`` row, every ``Report`` row, every ``StoredGateResult`` row
-    and every ``ReportRun`` row for ``client`` are deleted first, then the
-    ``Client`` row itself: children before parent, matching how no foreign
-    key in this codebase declares ``ondelete`` at the schema level, so the
-    cascade is explicit application code, not the database's job.
+    ``ReportDraft`` row, every ``ExportRecord`` row, every ``Report`` row,
+    every ``StoredGateResult`` row and every ``ReportRun`` row for ``client``
+    are deleted first, then the ``Client`` row itself: children before
+    parent, matching how no foreign key in this codebase declares
+    ``ondelete`` at the schema level, so the cascade is explicit application
+    code, not the database's job. ``ExportRecord`` rows are deleted before
+    ``Report`` rows specifically -- ``ExportRecord.report_id`` (Story 6.2)
+    is itself a foreign key to ``report.id``, so a ``Report`` row still
+    referenced by one would violate that constraint if deleted first.
     ``ReportPayload``, ``StoredReportTheme``, ``ReportDraft``, ``Report`` and
     ``StoredGateResult`` rows are all deleted before ``ReportRun`` rows
     specifically -- ``ReportPayload.report_run_id`` (Story 3.8),
@@ -342,6 +348,12 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     ).all()
     for stored_draft in drafts:
         session.delete(stored_draft)
+
+    export_records = session.exec(
+        select(ExportRecord).where(ExportRecord.client_id == client.id)
+    ).all()
+    for stored_export_record in export_records:
+        session.delete(stored_export_record)
 
     reports = session.exec(select(Report).where(Report.client_id == client.id)).all()
     for stored_report in reports:

@@ -501,3 +501,31 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-1-read-a-report-with-its-facts-one-click-away.md`
   summary: `report.html`'s per-section/list-section rendering loop is a byte-for-byte copy of `report_draft.html`'s own loop (Story 4.6), with no shared Jinja partial -- any future change to how a Section renders has to be made in both files to stay in sync.
   evidence: Blind Hunter review of this story's diff. Deduplicating requires editing `report_draft.html`, which this story's own spec Boundaries named out of scope ("Never: ... stay byte-for-byte unchanged"); a shared `{% include %}` partial is the natural fix once that file is back in scope for another story.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-export-a-passed-report-to-pdf-and-markdown.md`
+  summary: Export a passed Report to Markdown, alongside the PDF export this spec covers.
+  evidence: Split at planning time to keep the spec within the 900-1600 token scope target -- the original draft covering both formats (WeasyPrint PDF adapter + a separate Markdown renderer, on top of the shared `ExportRecord` table/migration/cascade) measured ~2367 tokens. Markdown export can reuse the same `ExportRecord` table, gate, and route family this spec establishes for PDF; only a second renderer and route are needed -- and will need its own template distinct from `report_export.html`, which is HTML/PDF-oriented.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-export-a-passed-report-to-pdf-and-markdown.md`
+  summary: `download_report_pdf` (`GET /report-runs/{run_id}/export/pdf`) is a GET route that always mutates state -- it writes a new `ExportRecord` row on every call and may advance `run.stage` to `"exported"` on the first one -- so a browser link-prefetch, crawler, or accidental retry silently inflates the export audit trail.
+  evidence: Blind Hunter review of this story's diff. Consistent with the existing `poll_report_run` precedent of a GET route with side effects in the same module (`shell/http/routes/report_runs.py`), so not unique to this story, but worth a deliberate look once more GET routes accumulate this shape.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-export-a-passed-report-to-pdf-and-markdown.md`
+  summary: The exported PDF's section headings render as the raw internal snake_case keys (`energia_generale`, `giorni_di_attenzione`, `consiglio_finale`, etc.) rather than human-readable Italian titles, in a document meant to be handed directly to a client.
+  evidence: Blind Hunter review of this story's diff. Inherited unchanged from `report.html`/`report_draft.html`'s own section-heading rendering (Stories 4.6/6.1), which this story's Boundaries required reusing verbatim -- not introduced by this story, and would need a shared section-title mapping to fix everywhere at once.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-export-a-passed-report-to-pdf-and-markdown.md`
+  summary: `shell/http/templates/report_export.html` ships with no CSS at all -- no page-break control, margins, or typography -- for a PDF meant to be handed directly to a paying client rather than an internal debug view.
+  evidence: Blind Hunter review of this story's diff. This story's spec scoped the template as "minimal HTML for WeasyPrint input" with no styling requirement named; visual polish is a natural follow-up once the plain-content export is proven out.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-export-a-passed-report-to-pdf-and-markdown.md`
+  summary: `download_report_pdf` re-implements `view_report`'s fetch-and-assemble chain (`Report` -> `ReportRun` -> `ReportDraft` -> `ReportPayload` -> `Client` -> `render_draft`) inline instead of factoring out a shared helper -- a fourth near-identical occurrence in the same module.
+  evidence: Blind Hunter review of this story's diff. The first three occurrences (`view_report_payload`, `view_report_draft`, `view_report`) were already logged as a deferred-work item after Story 6.1's review; this story's Boundaries required `view_report` to "stay untouched beyond one added link," so extracting a shared helper now would mean touching a route this story was scoped to leave alone.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-export-a-passed-report-to-pdf-and-markdown.md`
+  summary: No test exercises two rapid/concurrent export requests for the same run, and no test asserts the actual PDF content of a *second* export -- only its `ExportRecord` count and `run.stage` are checked on repeat exports.
+  evidence: Blind Hunter review of this story's diff. Matches this codebase's existing convention of tracking concurrency edge cases as deferred-work rather than blocking a story on race-condition tests (e.g. epic-4-retro-item-26, epic-5-retro-item-44).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-export-a-passed-report-to-pdf-and-markdown.md`
+  summary: `shell/http/templates/report_export.html` (and every other template in `shell/http/templates/`) declares `<html lang="en">` even though most of this application's rendered content -- including every Report Section -- is Italian prose.
+  evidence: Blind Hunter review of this story's diff. Pre-existing and app-wide: all 13 existing templates use `lang="en"` uniformly, including `report.html`/`report_draft.html` which this story's template deliberately mirrors; not introduced by this story and would need a coordinated fix across every template, not a one-off change here.

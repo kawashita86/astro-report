@@ -43,10 +43,11 @@ from core.types.transits import Station, TransitAspectEvent
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, create_client_with_chart
+from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
 from shell.adapters.postgres.report import Report, store_report
-from shell.adapters.postgres.report_draft import store_report_draft
-from shell.adapters.postgres.report_payload import store_report_payload
+from shell.adapters.postgres.report_draft import ReportDraft, store_report_draft
+from shell.adapters.postgres.report_payload import ReportPayload, store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
 from shell.config import Environment, Settings
@@ -1380,3 +1381,322 @@ def test_the_poll_view_has_no_report_link_before_the_gate_has_passed(
     response = authenticated_client.get(f"/report-runs/{run.id}")
 
     assert "View Report" not in response.text
+
+
+# --- Story 6.2: GET /report-runs/{run_id}/export/pdf --------------------------------
+
+
+def _export_records(db_session: Session) -> list[ExportRecord]:
+    return list(db_session.exec(select(ExportRecord)))
+
+
+def test_downloading_the_export_pdf_without_a_session_is_401(client: TestClient) -> None:
+    response = client.get("/report-runs/01a01abf-0000-7000-8000-000000000000/export/pdf")
+
+    assert response.status_code == 401
+
+
+def test_downloading_the_export_pdf_for_an_unknown_run_is_404(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/export/pdf"
+    )
+
+    assert response.status_code == 404
+
+
+def test_downloading_the_export_pdf_for_a_run_whose_gate_has_not_passed_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Gate not yet passed" -- gating is on the persisted
+    ``Report`` row's existence, never on ``run.stage``, mirroring
+    ``view_report``'s own boundary (Story 6.1)."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 404
+    assert _export_records(db_session) == []
+
+
+def test_downloading_the_export_pdf_for_a_terminally_failed_run_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """A terminally failed run never has a ``Report`` row, so the export
+    route 404s for it too, exactly like the Report view (Story 6.1)."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 404
+
+
+def test_the_first_export_returns_a_pdf_and_advances_the_run_to_exported(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "First export" -- 200, a real PDF downloads,
+    ``run.stage`` becomes ``"exported"``, and exactly one ``ExportRecord``
+    row is written."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"] == (
+        f'attachment; filename="report-{run.id}.pdf"'
+    )
+    assert response.content.startswith(b"%PDF")
+    assert run.stage == "exported"
+    records = _export_records(db_session)
+    assert len(records) == 1
+    assert records[0].format == "pdf"
+    assert records[0].client_id == ada.id
+
+
+def test_exporting_an_already_exported_report_again_leaves_the_stage_unchanged(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Repeat export" -- ``run.stage`` stays ``"exported"``, but
+    one more ``ExportRecord`` row is written per export."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    first_response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+    second_response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert second_response.content.startswith(b"%PDF")
+    assert run.stage == "exported"
+    records = _export_records(db_session)
+    assert len(records) == 2
+    assert {record.format for record in records} == {"pdf"}
+
+
+def test_exporting_a_run_that_is_already_exported_still_returns_a_pdf(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Same as above, but the run already starts at ``"exported"`` (a fresh
+    process picking up an already-exported run) -- the stage stays put and
+    one more ``ExportRecord`` row is written."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="exported")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 200
+    assert run.stage == "exported"
+    assert len(_export_records(db_session)) == 1
+
+
+def test_the_exported_html_contains_only_the_eight_sections_and_the_clients_name(
+    authenticated_client: TestClient,
+    db_session: Session,
+    app_instance: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boundaries: "The exported PDF contains only the eight Sections and
+    the Client's name -- no chart wheel, no Payload, no Gate result, no run
+    identifier, no internal metadata." ``html_to_pdf`` is monkeypatched to
+    capture the exact HTML string the route hands to WeasyPrint, since a
+    real PDF's content streams are not plain-text-searchable -- this proves
+    what the route assembles, the one input WeasyPrint ever sees."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    captured: dict[str, str] = {}
+
+    def _fake_html_to_pdf(html: str) -> bytes:
+        captured["html"] = html
+        return b"%PDF-fake"
+
+    monkeypatch.setattr(report_runs_module, "html_to_pdf", _fake_html_to_pdf)
+
+    ada = _create_client_with_real_chart(db_session, name="Ada Lovelace")
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-fake"
+    html = captured["html"]
+    assert "Ada Lovelace" in html
+    for name in (
+        "energia_generale",
+        "amore",
+        "lavoro",
+        "denaro",
+        "benessere",
+        "giorni_favorevoli",
+        "giorni_di_attenzione",
+        "consiglio_finale",
+    ):
+        assert name in html
+    assert "Un mese equilibrato." in html
+    assert "Venere sostiene i legami." in html
+    assert "Ottimo per gli incontri." in html
+    # No chart wheel, no Payload, no Gate result, no run identifier, no
+    # internal metadata (this story's Boundaries).
+    assert str(run.id) not in html
+    assert "Gate" not in html
+    assert "Payload" not in html
+    assert "gate_passed" not in html
+    assert "regenerated" not in html
+
+
+# --- download_report_pdf's data-integrity-bug guards ---------------------------
+#
+# Once a Report row exists, download_report_pdf reads back the ReportRun,
+# ReportDraft, ReportPayload and Client rows it implies with RuntimeError
+# guards, never a 404 (mirrors view_report's own shape, Story 6.1) -- their
+# absence at that point is a data-integrity bug, not a not-ready state. Each
+# test below builds the full happy-path chain via _store_passed_report, then
+# deletes exactly the one row its own guard checks for, so only that guard
+# fires. FastAPI's TestClient (raise_server_exceptions=True, the default) lets
+# an unhandled RuntimeError from the route propagate straight out of the
+# `.get()` call rather than becoming a response, hence `pytest.raises`.
+
+
+def test_downloading_the_export_pdf_for_a_report_with_a_deleted_report_run_raises(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    run_id = run.id
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    db_session.delete(run)
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="references a missing ReportRun"):
+        authenticated_client.get(f"/report-runs/{run_id}/export/pdf")
+
+
+def test_downloading_the_export_pdf_for_a_report_with_a_deleted_report_draft_raises(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    for stored_draft in db_session.exec(
+        select(ReportDraft).where(ReportDraft.report_run_id == run.id)
+    ).all():
+        db_session.delete(stored_draft)
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="has no matching ReportDraft"):
+        authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+
+def test_downloading_the_export_pdf_for_a_report_with_a_deleted_report_payload_raises(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    for stored_payload in db_session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
+    ).all():
+        db_session.delete(stored_payload)
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="has no matching ReportPayload"):
+        authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+
+def test_downloading_the_export_pdf_for_a_report_with_a_deleted_client_raises(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    client_row = db_session.get(Client, ada.id)
+    assert client_row is not None
+    db_session.delete(client_row)
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="references a missing Client"):
+        authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+
+def test_the_report_view_links_to_the_export_pdf_route(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/export/pdf"' in response.text

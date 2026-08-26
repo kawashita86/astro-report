@@ -2,20 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Report — astro-report</title>
+    <title>Report — {{ client_name }}</title>
   </head>
   <body>
     <main>
-      <h1>Report — {{ run.month }}</h1>
-
-      <section id="gate-result">
-        <h2>Gate</h2>
-        <p>Passed (regenerated {{ gate_result.regeneration_count }} times)</p>
-        <p><a href="/report-runs/{{ run_id }}/payload">View Payload</a></p>
-        <p><a href="/report-runs/{{ run_id }}/export/pdf">Export PDF</a></p>
-      </section>
+      <h1>{{ client_name }}</h1>
 
       {% for section_name in section_order %}
       <section>
