@@ -68,6 +68,14 @@ _templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 #: submission accepted (AC1).
 _REQUIRED_FIELDS: tuple[str, ...] = ("name", "birth_date", "birth_time", "birthplace")
 
+#: Derived from ``Client.name``'s own ``Field(max_length=200)``
+#: (deferred-work item 41) rather than a second hardcoded number, so the two
+#: bounds cannot drift apart. Rejected here, before resolution or
+#: computation runs, since ``name`` is the only one of the three
+#: newly-bounded columns a caller submits as raw text
+#: (``iana_zone``/``computation_config_content_hash`` are never user-typed).
+_MAX_NAME_LENGTH: int = Client.__table__.c.name.type.length
+
 #: Errors raised while decoding a resubmitted candidate choice: malformed
 #: JSON, a missing key, or a coordinate that is not a valid Decimal. All are
 #: the same "the candidate selection is invalid" failure to the caller.
@@ -269,6 +277,14 @@ async def create_client(
             form=fields,
         )
 
+    if len(fields["name"]) > _MAX_NAME_LENGTH:
+        return _render_form(
+            request,
+            status_code=422,
+            error=f"name must be at most {_MAX_NAME_LENGTH} characters.",
+            form=fields,
+        )
+
     try:
         birth_date = date.fromisoformat(fields["birth_date"])
     except ValueError as error:
@@ -407,6 +423,15 @@ async def correct_client(
             client_id=client_id,
             status_code=422,
             error=f"Required: {', '.join(missing)}.",
+            form=fields,
+        )
+
+    if len(fields["name"]) > _MAX_NAME_LENGTH:
+        return _render_edit_form(
+            request,
+            client_id=client_id,
+            status_code=422,
+            error=f"name must be at most {_MAX_NAME_LENGTH} characters.",
             form=fields,
         )
 

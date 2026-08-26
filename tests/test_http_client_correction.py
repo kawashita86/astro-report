@@ -463,6 +463,45 @@ def test_confirmed_correction_supersedes_the_old_chart_and_updates_the_client(
     assert seeded.iana_zone == "America/New_York"
 
 
+# --- Oversized name (deferred-work item 41) -----------------------------------------
+
+
+def test_a_name_at_the_maximum_length_is_accepted(
+    authenticated_client: TestClient,
+    app_instance: FastAPI,
+    db_session: Session,
+    fake_chart_computation: NatalChart,
+) -> None:
+    seeded = _seed_client_with_chart(db_session, app_instance)
+    _use_geocoder(app_instance, _FakeGeocoder(resolve_result=_NEW_RESOLVED_PLACE))
+    form = {**_CORRECTION_FORM, "name": "A" * 200, "confirmed": "1"}
+
+    response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=form)
+
+    assert response.status_code == 200, response.text
+    db_session.refresh(seeded)
+    assert seeded.name == "A" * 200
+
+
+def test_an_oversized_name_is_refused_naming_it(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    seeded = _seed_client_with_chart(db_session, app_instance)
+    _use_geocoder(app_instance, _FakeGeocoder(resolve_result=_NEW_RESOLVED_PLACE))
+    form = {**_CORRECTION_FORM, "name": "A" * 201}
+
+    response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=form)
+
+    assert response.status_code == 422
+    assert "name" in response.text
+
+    db_session.refresh(seeded)
+    assert seeded.name == "Ada Lovelace"
+    charts = _charts_for(db_session, seeded.id)
+    assert len(charts) == 1
+    assert charts[0].superseded_at is None
+
+
 # --- Ambiguous birthplace ------------------------------------------------------------
 
 

@@ -313,6 +313,39 @@ def test_a_blank_required_field_is_refused(
     assert _clients(db_session) == []
 
 
+# --- Oversized name (deferred-work item 41) -----------------------------------------
+
+
+def test_a_name_at_the_maximum_length_is_accepted(
+    authenticated_client: TestClient,
+    app_instance: FastAPI,
+    db_session: Session,
+    fake_chart_computation: NatalChart,
+) -> None:
+    _use_geocoder(app_instance, _FakeGeocoder(resolve_result=_RESOLVED_PLACE))
+    form = {**_VALID_FORM, "name": "A" * 200}
+
+    response = authenticated_client.post("/clients", data=form)
+
+    assert response.status_code == 200, response.text
+    clients = _clients(db_session)
+    assert len(clients) == 1
+    assert clients[0].name == "A" * 200
+
+
+def test_an_oversized_name_is_refused_naming_it(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    _use_geocoder(app_instance, _FakeGeocoder(resolve_result=_RESOLVED_PLACE))
+    form = {**_VALID_FORM, "name": "A" * 201}
+
+    response = authenticated_client.post("/clients", data=form)
+
+    assert response.status_code == 422
+    assert "name" in response.text
+    assert _clients(db_session) == []
+
+
 # --- Malformed request body ----------------------------------------------------------
 
 

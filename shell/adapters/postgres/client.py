@@ -70,12 +70,22 @@ class Client(SQLModel, table=True):
     __tablename__ = "client"
 
     id: UUID = Field(default_factory=uuid7, primary_key=True)
-    name: str
+    #: Free-text, user-typed (deferred-work item 41): generous enough for any
+    #: real name, bounded so a single oversized field cannot pass the
+    #: `/clients` form's whole-body byte cap while remaining pathologically
+    #: large. Enforced again at the HTTP boundary
+    #: (`shell/http/routes/clients.py`'s `_MAX_NAME_LENGTH`) since this is the
+    #: only one of the three bounded columns a caller submits as raw text.
+    name: str = Field(max_length=200)
     birth_date: date
     birth_time: time
     latitude: Decimal
     longitude: Decimal
-    iana_zone: str
+    #: A real IANA zone id, Geocoder-resolved -- never user-typed directly
+    #: (deferred-work item 41). The longest real id is ~33 characters; 64 is
+    #: a generous bound with no HTTP-boundary check needed (not a raw form
+    #: field).
+    iana_zone: str = Field(max_length=64)
 
 
 class StoredNatalChart(SQLModel, table=True):
@@ -102,7 +112,11 @@ class StoredNatalChart(SQLModel, table=True):
     houses: list[dict[str, Any]] = Field(sa_column=Column(JSON, nullable=False))
     aspects: list[dict[str, Any]] = Field(sa_column=Column(JSON, nullable=False))
     computation_config_version: int
-    computation_config_content_hash: str
+    #: A sha256 hex digest, always exactly 64 characters (deferred-work item
+    #: 41). Derived from `computation_config.content_hash`, never a raw form
+    #: field, so no HTTP-boundary check applies -- only this schema-level
+    #: bound.
+    computation_config_content_hash: str = Field(max_length=64)
     ephemeris_files: list[dict[str, str]] = Field(sa_column=Column(JSON, nullable=False))
     # `NULL` marks the current chart for a Client; a timestamp marks one a
     # correction (Story 2.7) superseded. `sa_column=Column(...)` again bypasses
