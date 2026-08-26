@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-25-2026 00:00
+last_updated: 08-26-2026 00:00
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -418,7 +418,7 @@ action_items:
       store_gate_result call in its own try/except. Re-prioritize epic-4-retro-item-23,
       now doubled in surface area and sitting on the Gate's own write-once invariant."
     owner: "dev loop"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
   - id: "epic-5-retro-item-40-expand-core-gate-s-test-suite-tests-test"
     epic: 5

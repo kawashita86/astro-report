@@ -36,6 +36,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import shell.runner.driver as driver_module
@@ -1099,6 +1100,119 @@ def test_gate_passed_exhausting_the_regeneration_bound_marks_the_run_terminally_
         range(driver_module._MAX_REGENERATIONS + 1)
     )
     assert all(row.passed is False for row in stored_gate_results)
+
+
+# --- epic-5-retro-item-39: a partial flush inside gate_passed's two-write ------------
+# --- pattern must not poison the session drive()'s own bookkeeping needs ------------
+
+
+def test_gate_passed_pass_path_flush_failure_leaves_run_recoverable(
+    session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``_run_gate_passed``'s pass branch calls ``store_report`` then
+    ``store_gate_result``, each its own flush, with no commit between (Story
+    5.6). If ``store_gate_result``'s flush always fails, ``with_backoff``
+    retries the whole stage function, and a prior attempt's already-flushed,
+    uncommitted ``Report`` row would otherwise poison the session for every
+    later statement -- including ``drive()``'s own bookkeeping commit in its
+    generic ``except Exception`` block, which must not crash uncaught
+    (epic-5-retro-item-39, re-prioritizing epic-4-retro-item-23)."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    def _always_fail(*args, **kwargs):
+        raise RuntimeError("simulated gate_result flush failure")
+
+    monkeypatch.setattr(driver_module, "store_gate_result", _always_fail)
+
+    with caplog.at_level(logging.ERROR, logger=driver_module._logger.name):
+        result = _drive(session, run, natal_chart)
+
+    # No exception escaped drive() -- the call above completing at all is
+    # part of what this test proves.
+    assert result.stage == "draft_ready"
+    assert result.stage_failure_count == 1
+    assert result.failed_at is None
+
+    # The pass branch's own store_report() attempts were all rolled back
+    # along with the failing store_gate_result() attempts -- nothing
+    # half-written survives.
+    assert session.exec(select(Report).where(Report.report_run_id == run.id)).all() == []
+    assert (
+        session.exec(select(StoredGateResult).where(StoredGateResult.report_run_id == run.id))
+        .all()
+        == []
+    )
+
+    monkeypatch.undo()
+
+    result = _drive(session, run, natal_chart)
+
+    assert result.stage == "gate_passed"
+    assert result.stage_failure_count == 0
+    stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert len(stored_reports) == 1
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 1
+    assert stored_gate_results[0].passed is True
+
+
+def test_gate_failed_error_path_survives_a_gate_result_flush_failure(
+    session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``drive()``'s own ``except GateFailedError`` block calls
+    ``store_gate_result`` unguarded, outside ``with_backoff`` by design
+    (Story 5.6, to avoid a duplicate row on retry). If that flush fails, the
+    regeneration bookkeeping that follows (``regeneration_count`` increment,
+    ``run.stage`` rewind) must still happen and commit cleanly -- losing one
+    audit row must never crash ``drive()`` itself or block the run from
+    progressing (epic-5-retro-item-39, re-prioritizing epic-4-retro-item-23)."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    def _fail_at_the_database(*args, **kwargs):
+        # A genuine DB-level failure, not a plain Python raise -- this is
+        # what actually poisons the session's transaction (unlike a raise
+        # that never touches the DB), so it also proves `run.id` stays
+        # readable for the log line that follows, right after this
+        # exception is caught.
+        session.execute(text("SELECT * FROM this_table_does_not_exist"))
+
+    monkeypatch.setattr(driver_module, "store_gate_result", _fail_at_the_database)
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+
+    with caplog.at_level(logging.ERROR, logger=driver_module._logger.name):
+        result = _drive(session, run, natal_chart, generator=generator)
+
+    # No exception escaped drive() despite the audit write failing on every
+    # with_backoff attempt of the pure, always-failing gate_passed check.
+    assert result.stage == "payload_ready"
+    assert result.regeneration_count == 1
+    assert result.stage_failure_count == 0
+    assert result.failed_at is None
+    assert "failed to persist a failing gate_result" in caplog.text
+    assert session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all() == []
+
+    monkeypatch.undo()
+
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "payload_ready"
+    assert result.regeneration_count == 2
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 1
+    assert stored_gate_results[0].regeneration_count == 1
 
 
 # --- _deserialize_generated_draft round trip ------------------------------------------

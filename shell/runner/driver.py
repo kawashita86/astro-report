@@ -715,6 +715,18 @@ def drive(
                 **backoff_kwargs,
             )
         except GateFailedError as error:
+            # `_run_gate_passed`'s pass-path attempt (`store_report` then
+            # `store_gate_result`, each its own flush) may have partially
+            # flushed and then failed before raising whatever exception
+            # `with_backoff` ultimately exhausted on -- on a real database
+            # that failed flush aborts the underlying transaction, so any
+            # further statement on this session -- even reading `run.id`
+            # back for the log line below -- would fail too, masking the
+            # actual cause (epic-5-retro-item-39, re-prioritizing
+            # epic-4-retro-item-23). Rolling back first, before touching
+            # `run` at all, guarantees a clean transaction regardless of
+            # what came before.
+            session.rollback()
             # A pure Gate re-checking the same already-persisted draft fails
             # identically forever -- the generic stage-failure path below
             # would just retry that same draft until _MAX_STAGE_FAILURES,
@@ -725,14 +737,31 @@ def drive(
             _logger.exception(
                 "gate_passed rejected the draft, regenerating: %s", run.id
             )
-            store_gate_result(
-                session,
-                run=run,
-                passed=False,
-                regeneration_count=run.regeneration_count,
-                vocabulary_version=vocabulary.version,
-                violations=error.violations,
-            )
+            try:
+                store_gate_result(
+                    session,
+                    run=run,
+                    passed=False,
+                    regeneration_count=run.regeneration_count,
+                    vocabulary_version=vocabulary.version,
+                    violations=error.violations,
+                )
+            except Exception:
+                # This write sits outside `with_backoff` by design (Story
+                # 5.6, to avoid a duplicate row) -- so nothing else retries
+                # it. Losing one gate_result row must never crash `drive()`
+                # itself: the regeneration bookkeeping below still has to
+                # run so the run keeps making progress. Roll back first --
+                # mirroring both blocks above -- before touching `run` again
+                # (even for this log line), so a real partial flush here
+                # doesn't poison the commit that follows or the log call
+                # itself.
+                session.rollback()
+                _logger.exception(
+                    "failed to persist a failing gate_result, continuing "
+                    "regeneration bookkeeping without it: %s",
+                    run.id,
+                )
             run.regeneration_count += 1
             run.updated_at = datetime.now(UTC)
             if run.regeneration_count <= _MAX_REGENERATIONS:
@@ -758,6 +787,15 @@ def drive(
             session.commit()
             break
         except Exception as error:
+            # Mirrors the `GateFailedError` branch above: a stage function
+            # that partially flushed before failing (e.g. `_run_gate_passed`'s
+            # `store_report`+`store_gate_result` pair) can leave this
+            # session's transaction aborted, which would make even reading
+            # `run.id` back for the log line below fail too, taking the
+            # whole `drive()` call down uncaught instead of leaving the run
+            # simply un-advanced (epic-5-retro-item-39). Rolling back first,
+            # before touching `run` at all, avoids that.
+            session.rollback()
             _logger.exception("report run stage failed, left un-advanced: %s", run.id)
             run.stage_failure_count += 1
             run.updated_at = datetime.now(UTC)
