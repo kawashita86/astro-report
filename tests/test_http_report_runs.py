@@ -43,7 +43,8 @@ from core.types.transits import Station, TransitAspectEvent
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, create_client_with_chart
-from shell.adapters.postgres.gate_result import store_gate_result
+from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
+from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_draft import store_report_draft
 from shell.adapters.postgres.report_payload import store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
@@ -1054,3 +1055,328 @@ def test_getting_the_draft_for_a_passing_run_shows_no_gate_failures_block(
 
     assert response.status_code == 200
     assert "Gate failures" not in response.text
+
+
+# --- Story 6.1: GET /report-runs/{run_id}/report -----------------------------------
+
+
+def _store_passed_report(
+    db_session: Session,
+    *,
+    run: ReportRun,
+    frozen: dict,
+    draft: GeneratedDraft,
+    regeneration_count: int = 0,
+    created_at: datetime | None = None,
+) -> None:
+    """Persist the full chain a passed Gate leaves behind: a ``ReportDraft``,
+    a ``Report``, and a passing ``StoredGateResult`` -- mirrors
+    ``shell/runner/driver.py``'s own ``_run_gate_passed`` writes.
+
+    ``Report``/``StoredGateResult`` are constructed directly (bypassing
+    ``store_report``/``store_gate_result``) whenever ``created_at`` is given:
+    neither helper accepts a ``created_at`` override, and both rows are
+    immutable once persisted, so there is no way to backdate one after the
+    fact -- it must be set at construction time."""
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=regeneration_count,
+    )
+    if created_at is None:
+        store_report(
+            db_session,
+            run=run,
+            style_guide_version=1,
+            payload_schema_version=frozen["schema_version"],
+            gate_vocabulary_version=1,
+        )
+        store_gate_result(
+            db_session,
+            run=run,
+            passed=True,
+            regeneration_count=regeneration_count,
+            vocabulary_version=1,
+            violations=(),
+        )
+    else:
+        db_session.add(
+            Report(
+                client_id=run.client_id,
+                report_run_id=run.id,
+                style_guide_version=1,
+                payload_schema_version=frozen["schema_version"],
+                gate_vocabulary_version=1,
+                created_at=created_at,
+            )
+        )
+        db_session.add(
+            StoredGateResult(
+                client_id=run.client_id,
+                report_run_id=run.id,
+                passed=True,
+                regeneration_count=regeneration_count,
+                vocabulary_version=1,
+                violations=[],
+                created_at=created_at,
+            )
+        )
+    db_session.commit()
+
+
+def test_getting_the_report_without_a_session_is_401(client: TestClient) -> None:
+    response = client.get("/report-runs/01a01abf-0000-7000-8000-000000000000/report")
+
+    assert response.status_code == 401
+
+
+def test_getting_the_report_for_an_unknown_run_is_404(authenticated_client: TestClient) -> None:
+    response = authenticated_client.get(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/report"
+    )
+
+    assert response.status_code == 404
+
+
+def test_getting_the_report_for_a_run_whose_gate_has_not_passed_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Gate not yet passed" -- a ``ReportRun`` exists (even at
+    ``draft_ready``, with a real ``ReportDraft``/``ReportPayload`` already
+    persisted) but no ``Report`` row exists yet, so the route still 404s --
+    gating is on ``Report``'s existence, never on ``run.stage``."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 404
+
+
+def test_getting_the_report_for_a_terminally_failed_run_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """A terminally failed run (Story 4.8/5.4) never has a ``Report`` row --
+    a Gate failure never writes one -- so the finished-Report view stays
+    404 for it too, exactly like the Draft view's own failed-run row."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 404
+
+
+def test_getting_the_report_shows_all_eight_sections_and_the_gate_result(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """AC1: a Report that has passed the Gate shows all eight Sections in
+    their fixed order plus the Gate result, including a regeneration count
+    of 0 for a never-regenerated run. AC2: the Payload view is reachable in
+    one interaction from the Report."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    for name in (
+        "energia_generale",
+        "amore",
+        "lavoro",
+        "denaro",
+        "benessere",
+        "giorni_favorevoli",
+        "giorni_di_attenzione",
+        "consiglio_finale",
+    ):
+        assert name in response.text
+    assert "Un mese equilibrato." in response.text
+    assert "Venere sostiene i legami." in response.text
+    assert "Ottimo per gli incontri." in response.text
+    assert "Passed" in response.text
+    assert "regenerated 0 times" in response.text
+    assert f'href="/report-runs/{run.id}/payload"' in response.text
+
+
+def test_getting_the_report_shows_the_stored_regeneration_count_not_the_runs_own(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Gate passed after regenerating" -- the regeneration
+    count shown is the one persisted on the passing ``StoredGateResult`` row
+    (epic-5-retro-item-38's precedent), never read off ``run.regeneration_count``
+    directly, even when the two differ."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id, month="2026-01", stage="gate_passed", regeneration_count=5
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=2)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert "regenerated 2 times" in response.text
+    assert "regenerated 5 times" not in response.text
+
+
+def test_getting_a_report_generated_months_earlier_still_renders_fully(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Report generated months earlier" -- a ``Report``/
+    ``StoredGateResult`` pair backdated well into the past renders exactly
+    as a fresh one would; nothing about the route's behavior depends on
+    row age."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(
+        db_session,
+        run=run,
+        frozen=frozen,
+        draft=draft,
+        regeneration_count=0,
+        created_at=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert "Passed" in response.text
+    assert "regenerated 0 times" in response.text
+    assert f'href="/report-runs/{run.id}/payload"' in response.text
+    assert "Un mese equilibrato." in response.text
+
+
+def test_getting_the_report_with_multiple_gate_results_picks_the_passing_row(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Proves the ``.order_by(StoredGateResult.regeneration_count.desc())``
+    added to the passing-row query picks the actual passing row -- not an
+    arbitrary one -- even when earlier failing attempts for the same run
+    (Story 5.4 regeneration) left their own ``StoredGateResult`` rows
+    behind."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id, month="2026-01", stage="gate_passed", regeneration_count=2
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    for count in (0, 1):
+        store_gate_result(
+            db_session,
+            run=run,
+            passed=False,
+            regeneration_count=count,
+            vocabulary_version=1,
+            violations=(
+                GateViolation(
+                    kind="empty_citation",
+                    section="lavoro",
+                    sentence=f"failing attempt {count}",
+                    entry_ids=(),
+                    detail=f"detail {count}",
+                ),
+            ),
+        )
+    db_session.commit()
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=2)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert "regenerated 2 times" in response.text
+
+
+def test_getting_the_report_for_a_run_that_has_moved_past_gate_passed_into_exported(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Gating is on the persisted ``Report`` row's existence, never on
+    ``run.stage`` -- a run that has since advanced to ``exported`` (Story
+    6.2) must still show its Report exactly like one still at
+    ``gate_passed``."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="exported")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    for name in (
+        "energia_generale",
+        "amore",
+        "lavoro",
+        "denaro",
+        "benessere",
+        "giorni_favorevoli",
+        "giorni_di_attenzione",
+        "consiglio_finale",
+    ):
+        assert name in response.text
+
+
+@pytest.mark.parametrize("stage", ["gate_passed", "exported"])
+def test_the_poll_view_links_to_the_report_once_the_gate_has_passed(
+    authenticated_client: TestClient, db_session: Session, fake_drive, stage: str
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage=stage)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/report"' in response.text
+
+
+def test_the_poll_view_has_no_report_link_before_the_gate_has_passed(
+    authenticated_client: TestClient, db_session: Session, fake_drive
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert "View Report" not in response.text

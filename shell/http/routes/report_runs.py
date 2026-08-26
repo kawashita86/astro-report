@@ -32,6 +32,7 @@ from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, StoredNatalChart, deserialize_natal_chart
 from shell.adapters.postgres.gate_result import StoredGateResult
+from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
@@ -260,3 +261,83 @@ def view_report_draft(
         context["run"] = run
 
     return _templates.TemplateResponse(request, "report_draft.html", context)
+
+
+@router.get("/report-runs/{run_id}/report", include_in_schema=False)
+def view_report(
+    run_id: UUID, request: Request, session: Session = Depends(get_session)
+) -> Response:
+    """Read the finished, Gate-passed Report behind ``run_id`` (Story 6.1):
+    the same eight Sections ``view_report_draft`` renders, plus the
+    persisted Gate verdict (Story 5.6's ``StoredGateResult``) and a link to
+    the Payload view (Story 3.9) -- Francesco's one-click destination once a
+    run's Gate has passed.
+
+    Gated on a persisted ``Report`` row's mere existence, not on
+    ``run.stage`` -- mirrors ``shell/export.py::export_report()``'s own
+    boundary and ``view_report_payload``'s "row missing = not ready"
+    pattern: 404 covers both "no such ``ReportRun``" and "that run's Gate
+    hasn't passed yet" (no ``Report`` row is ever written on a failing pass
+    or before ``gate_passed`` is reached).
+
+    Once a ``Report`` row exists, the ``ReportDraft``/``ReportPayload``/
+    ``Client``/passing ``StoredGateResult`` rows it implies are read back
+    with ``RuntimeError`` guards, never a 404 -- their absence at that point
+    would be a data-integrity bug, not a not-ready state, mirroring
+    ``view_report_draft``'s own ``RuntimeError``-on-missing shape for the
+    ``ReportPayload``/``Client`` lookups above.
+
+    The regeneration count shown is read off the persisted, passing
+    ``StoredGateResult`` row, never off ``run.regeneration_count`` directly
+    -- epic-5-retro-item-38's precedent, see this story's Design Notes.
+    """
+    stored_report = session.exec(select(Report).where(Report.report_run_id == run_id)).first()
+    if stored_report is None:
+        raise HTTPException(status_code=404)
+
+    run = session.get(ReportRun, run_id)
+    if run is None:
+        raise RuntimeError(f"Report {stored_report.id} references a missing ReportRun.")
+
+    stored_draft = session.exec(
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run_id)
+        .order_by(ReportDraft.attempt.desc())
+    ).first()
+    if stored_draft is None:
+        raise RuntimeError(f"Report {stored_report.id} has no matching ReportDraft.")
+
+    stored_payload = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run_id)
+    ).first()
+    if stored_payload is None:
+        raise RuntimeError(f"Report {stored_report.id} has no matching ReportPayload.")
+
+    client = session.get(Client, stored_draft.client_id)
+    if client is None:
+        raise RuntimeError(f"Report {stored_report.id} references a missing Client.")
+
+    stored_gate_result = session.exec(
+        select(StoredGateResult)
+        .where(StoredGateResult.report_run_id == run_id)
+        .where(StoredGateResult.passed.is_(True))
+        .order_by(StoredGateResult.regeneration_count.desc())
+    ).first()
+    if stored_gate_result is None:
+        raise RuntimeError(f"Report {stored_report.id} has no matching passed StoredGateResult.")
+
+    draft = deserialize_generated_draft(stored_draft.draft)
+    rendered = render_draft(draft, stored_payload.payload, iana_zone=client.iana_zone)
+
+    return _templates.TemplateResponse(
+        request,
+        "report.html",
+        {
+            "draft": rendered,
+            "section_order": SECTION_ORDER,
+            "list_section_names": LIST_SECTION_NAMES,
+            "run_id": run_id,
+            "run": run,
+            "gate_result": stored_gate_result,
+        },
+    )

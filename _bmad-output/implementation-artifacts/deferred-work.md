@@ -489,3 +489,15 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-deferred-work-41-bound-client-and-chart-string-columns.md`
   summary: `place_cache.iana_zone` and `report_payload.computation_config_content_hash`/`.sections_config_content_hash` remain unbounded `String` columns, even though this story bounded the same two logical values (an IANA zone id, a sha256 content hash) on `Client`/`StoredNatalChart`.
   evidence: Blind Hunter review of this story's diff. Named explicitly out of scope by this story's own spec Boundaries ("Never... `PlaceCache.iana_zone`... `ReportPayload`'s two hash columns -- named out of scope by the deferred item itself; a separate follow-up if ever needed") -- logged here per that note, not a new discovery.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-1-read-a-report-with-its-facts-one-click-away.md`
+  summary: Neither the finished-Report view (`report.html`, this story) nor the pre-existing Draft view (`report_draft.html`, Story 4.6) shows each Sentence's `entry_ids` (citations) or the Gate's `vocabulary_version` -- for a page whose entire premise is Gate-verified groundedness, Francesco has no way to see what backs a given sentence from the rendered page itself.
+  evidence: Blind Hunter review of this story's diff. Pre-existing since Story 4.6 introduced `report_draft.html`'s rendering shape, which this story's `report.html` deliberately mirrors byte-for-byte per its own spec's "reuse `render_draft`" boundary; not something this read-only story's scope covers introducing.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-1-read-a-report-with-its-facts-one-click-away.md`
+  summary: `view_report_payload`, `view_report_draft`, and now `view_report` each independently repeat the same "look up a row for `run_id`, `RuntimeError` if missing" block for `ReportPayload`/`Client` -- three near-identical inline lookups in the same module with no shared helper.
+  evidence: Blind Hunter review of this story's diff. The duplication pattern predates this story (the first two occurrences already existed); this story's boundaries explicitly required `view_report_draft`/`view_report_payload` to "stay byte-for-byte unchanged," so extracting a shared helper now would mean touching routes this story was scoped to leave alone.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-1-read-a-report-with-its-facts-one-click-away.md`
+  summary: `report.html`'s per-section/list-section rendering loop is a byte-for-byte copy of `report_draft.html`'s own loop (Story 4.6), with no shared Jinja partial -- any future change to how a Section renders has to be made in both files to stay in sync.
+  evidence: Blind Hunter review of this story's diff. Deduplicating requires editing `report_draft.html`, which this story's own spec Boundaries named out of scope ("Never: ... stay byte-for-byte unchanged"); a shared `{% include %}` partial is the natural fix once that file is back in scope for another story.

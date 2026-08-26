@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Report — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>Report — {{ run.month }}</h1>
+
+      <section id="gate-result">
+        <h2>Gate</h2>
+        <p>Passed (regenerated {{ gate_result.regeneration_count }} times)</p>
+        <p><a href="/report-runs/{{ run_id }}/payload">View Payload</a></p>
+      </section>
+
+      {% for section_name in section_order %}
+      <section>
+        <h2>{{ section_name }}</h2>
+        {% if section_name in list_section_names %}
+        <ul>
+          {% for item in draft[section_name] %}
+          <li>{{ item.date }} — {{ item.text or "" }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p>{{ draft[section_name].text }}</p>
+        {% endif %}
+      </section>
+      {% endfor %}
+    </main>
+  </body>
+</html>

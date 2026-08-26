@@ -31,6 +31,9 @@
         {% if run.stage == "draft_ready" %}
         <p><a href="/report-runs/{{ run.id }}/draft">View Draft</a></p>
         {% endif %}
+        {% if run.stage == "gate_passed" or run.stage == "exported" %}
+        <p><a href="/report-runs/{{ run.id }}/report">View Report</a></p>
+        {% endif %}
       </div>
 {% if not request.headers.get("hx-request") %}
     </main>
