@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-24-2026
+last_updated: 08-25-2026 00:00
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -81,13 +81,13 @@ development_status:
   epic-4-retrospective: done
 
   epic-5: in-progress
-  5-1-define-what-counts-as-a-claim-as-versioned-data: review
-  5-2-check-every-claim-against-the-payload: review
-  5-3-make-the-gate-the-only-path-to-an-exportable-report: review
-  5-4-regenerate-a-failing-report-automatically-whole: review
-  5-5-see-exactly-what-failed-and-what-it-contradicts: review
-  5-6-keep-the-gate-s-record-so-a-regression-is-visible-early: review
-  epic-5-retrospective: optional
+  5-1-define-what-counts-as-a-claim-as-versioned-data: done
+  5-2-check-every-claim-against-the-payload: done
+  5-3-make-the-gate-the-only-path-to-an-exportable-report: done
+  5-4-regenerate-a-failing-report-automatically-whole: done
+  5-5-see-exactly-what-failed-and-what-it-contradicts: done
+  5-6-keep-the-gate-s-record-so-a-regression-is-visible-early: done
+  epic-5-retrospective: done
 
   epic-6: backlog
   6-1-read-a-report-with-its-facts-one-click-away: backlog
@@ -400,3 +400,80 @@ action_items:
     owner: "spec tooling"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
+  - id: "epic-5-retro-item-38-wire-view_report_draft-shell-http-routes"
+    epic: 5
+    action: "Wire view_report_draft (shell/http/routes/report_runs.py:249-252) to
+      read the persisted StoredGateResult row (violations, vocabulary_version) instead
+      of recomputing run_gate() against the live vocabulary -- closes the gap Story
+      5.5 named and Story 5.6 built the fix for but never wired in."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+  - id: "epic-5-retro-item-39-guard-the-two-write-stage-function-patte"
+    epic: 5
+    action: "Guard the two-write stage-function pattern (shell/runner/driver.py: _run_gate_passed
+      store_report+store_gate_result, and drive()'s unguarded except-GateFailedError
+      store_gate_result call) against a partial-flush-poisoned SQLAlchemy session
+      -- add session.rollback() in driver.py's except blocks and/or wrap the except-block
+      store_gate_result call in its own try/except. Re-prioritize epic-4-retro-item-23,
+      now doubled in surface area and sitting on the Gate's own write-once invariant."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+  - id: "epic-5-retro-item-40-expand-core-gate-s-test-suite-tests-test"
+    epic: 5
+    action: "Expand core/gate's test suite (tests/test_gate_classify.py, tests/test_gate_run.py)
+      with adversarial non-astrological Italian sentences -- a bare 1-31 number used
+      as a duration/count/age, and 'casa' + ordinal in a mundane sense -- to measure
+      the false-positive rate of these two Claim triggers before Epic 6 exposes this
+      to real client-facing reports."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+  - id: "epic-5-retro-item-41-validate-vocabulary-it-json-s-planets-si"
+    epic: 5
+    action: "Validate vocabulary.it.json's planets/signs/casa_ordinals word sets against
+      core/gate/run.py's hardcoded _BODY_MAP/_SIGN_MAP/_CASA_ORDINAL_TO_HOUSE translation
+      maps at load time (shell/gate.py), so a future vocabulary revision that adds
+      an untranslated word fails loudly instead of silently under-checking that category."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+  - id: "epic-5-retro-item-42-add-a-defensive-try-except-around-core-g"
+    epic: 5
+    action: "Add a defensive try/except around core/gate/run.py::_date_facts's datetime.fromisoformat()
+      call, mirroring the isinstance-guard pattern _body_sign_facts/_house_facts already
+      use, so a malformed Payload date degrades to a skipped fact rather than crashing
+      run_gate() and violating its own documented never-raises contract."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+  - id: "epic-5-retro-item-43-add-gate_passed-to-shell-runner-driver-p"
+    epic: 5
+    action: "Add gate_passed to shell/runner/driver.py::_STAGE_BACKOFF_OVERRIDES with
+      max_attempts=1 -- run_gate() is deterministic, so retrying an already-failed
+      check gains nothing."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+  - id: "epic-5-retro-item-44-guard-shell-runner-driver-py-_run_draft_"
+    epic: 5
+    action: "Guard shell/runner/driver.py::_run_draft_ready's attempt-tagged store_report_draft
+      write against a concurrent drive() race (start route + poll route, no locking)
+      -- catch the IntegrityError a duplicate (report_run_id, attempt) write would
+      raise and treat it as another request already advancing this attempt, matching
+      the still-open epic-4-retro-item-26's intended fix for the sibling ReportPayload
+      case."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+  - id: "epic-5-retro-item-45-propose-persisting-gatevocabulary-conten"
+    epic: 5
+    action: "Propose persisting GateVocabulary.content_hash (not just the hand-bumped
+      version int) onto Report/StoredGateResult rows, since content_hash exists specifically
+      to catch a forgotten version bump on a vocabulary content edit, which neither
+      persisted row can detect today. Spec reconciliation -- human decides whether
+      to apply."
+    owner: "human (spec owner)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
