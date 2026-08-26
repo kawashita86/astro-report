@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-26-2026 18:27
+last_updated: 08-26-2026 20:52
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -94,7 +94,7 @@ development_status:
   6-2-export-a-passed-report-to-pdf-and-markdown: review
   6-3-record-how-the-report-went-out-in-one-interaction: review
   6-4-browse-everything-i-have-produced-for-a-client: review
-  6-5-take-a-backup-i-actually-hold: backlog
+  6-5-take-a-backup-i-actually-hold: review
   6-6-be-told-when-my-backup-is-out-of-date: backlog
   epic-6-retrospective: optional
 

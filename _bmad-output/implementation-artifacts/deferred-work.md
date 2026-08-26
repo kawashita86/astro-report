@@ -573,3 +573,7 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-3-record-how-the-report-went-out-in-one-interaction.md`
   summary: No correction/undo path exists once a disposition is recorded -- `record_send_disposition`'s `WHERE disposition IS NULL` clause makes the write deliberately permanent, so a misclick between "Sent as generated" and "Sent, edited first" cannot be corrected through any route, UI affordance, or even an admin/CLI escape hatch.
   evidence: Blind Hunter review of this story's diff. Deliberate by design -- matches this codebase's existing write-once philosophy for `Report`/`StoredGateResult`/`ExportRecord` -- but a real, user-facing gap worth a conscious product decision (e.g. a narrow "undo within N minutes" affordance) rather than silently accepting permanent misclicks.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-5-take-a-backup-i-actually-hold.md`
+  summary: Nothing addresses what happens to a downloaded backup file after it leaves the browser -- encryption at rest, secure storage, retention, or rotation of old backups, even though the file is a full, unencrypted plaintext dump of every Client's PII (names, birth dates/times, precise coordinates).
+  evidence: Blind Hunter review of this story's diff. Out of scope for a backend route -- this is an operational/procedural decision for how Francesco actually holds the file once downloaded, not a code change, but real given the export's sensitivity and worth a conscious decision before this route sees regular use.

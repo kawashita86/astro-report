@@ -111,6 +111,7 @@ def create_app(settings: Settings) -> FastAPI:
     # once `get_session` (defined above) already exists in this module's
     # namespace -- guaranteed by the time `create_app()` is actually called,
     # never by the time this module merely starts executing.
+    from shell.http.routes.backup import router as backup_router
     from shell.http.routes.chart import router as chart_router
     from shell.http.routes.clients import router as clients_router
     from shell.http.routes.report_runs import router as report_runs_router
@@ -137,6 +138,7 @@ def create_app(settings: Settings) -> FastAPI:
     application.include_router(chart_router)
     application.include_router(report_runs_router)
     application.include_router(style_guide_router)
+    application.include_router(backup_router)
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
