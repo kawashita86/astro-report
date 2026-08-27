@@ -12,7 +12,7 @@ cascade (``shell/adapters/postgres/client.py``'s
 ``_CLIENT_CASCADE_TABLES``).
 
 Revision ID: 0015_export_record
-Revises: 0014_bound_client_and_chart_string_columns
+Revises: 0014_bound_string_columns
 Create Date: 2026-08-26
 
 """
@@ -26,7 +26,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0015_export_record"
-down_revision: str | None = "0014_bound_client_and_chart_string_columns"
+down_revision: str | None = "0014_bound_string_columns"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

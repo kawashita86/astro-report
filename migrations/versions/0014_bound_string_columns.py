@@ -18,7 +18,7 @@ Out of scope (named out of scope by the deferred item itself):
 ``place_cache.iana_zone`` and ``report_payload.computation_config_content_hash``/
 ``.sections_config_content_hash`` -- a separate follow-up if ever needed.
 
-Revision ID: 0014_bound_client_and_chart_string_columns
+Revision ID: 0014_bound_string_columns
 Revises: 0013_gate_result
 Create Date: 2026-08-26
 
@@ -31,7 +31,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0014_bound_client_and_chart_string_columns"
+revision: str = "0014_bound_string_columns"
 down_revision: str | None = "0013_gate_result"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

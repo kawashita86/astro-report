@@ -9,8 +9,13 @@
 # integration), logged in deferred-work.md (story 1.6 entry) rather than
 # defaulted into as a side effect of adding CI.
 #
-# No Postgres service container: tests/test_migration_chain.py already runs
-# Alembic in offline mode against a fake host nothing connects to.
+# A Postgres service container backs tests/test_migration_chain_on_postgres.py:
+# `alembic upgrade head` had never actually run against Postgres from a clean
+# database (offline `--sql` emission executes nothing; SQLite ignores
+# VARCHAR(n)), which let a revision id longer than alembic_version.version_num
+# ship green for three epics. That test resets the service DB's public schema
+# and runs the real online upgrade against it. MIGRATION_TEST_DATABASE_URL
+# points at it here; unset elsewhere, the test skips.
 #
 # No extra `apt-get install` step: GitHub's `ubuntu-latest` runner image
 # ships `build-essential` by default, unlike the bare `ubuntu:latest` Docker
@@ -29,6 +34,24 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    # Same image tag as compose.yaml's local Postgres. A throwaway database:
+    # tests/test_migration_chain_on_postgres.py drops and recreates its schema.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: migrationtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d migrationtest"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
@@ -45,3 +68,5 @@ jobs:
 
       - name: Test
         run: uv run pytest
+        env:
+          MIGRATION_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/migrationtest

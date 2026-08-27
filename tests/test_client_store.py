@@ -135,7 +135,7 @@ def test_two_clients_with_the_same_name_persist_as_distinct_rows(session: Sessio
 def test_client_and_chart_string_columns_are_bounded() -> None:
     """Deferred-work item 41: each column's ``Field(max_length=...)``
     becomes an explicit ``VARCHAR(n)`` at the schema level, matching
-    ``migrations/versions/0014_bound_client_and_chart_string_columns.py``."""
+    ``migrations/versions/0014_bound_string_columns.py``."""
     assert Client.__table__.c.name.type.length == 200
     assert Client.__table__.c.iana_zone.type.length == 64
     assert StoredNatalChart.__table__.c.computation_config_content_hash.type.length == 64

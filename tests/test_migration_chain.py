@@ -98,6 +98,30 @@ def test_the_baseline_is_the_base(script_directory: ScriptDirectory) -> None:
     assert list(script_directory.get_bases()) == ["0001_baseline"]
 
 
+def test_no_revision_id_exceeds_the_alembic_version_column_width(
+    script_directory: ScriptDirectory,
+) -> None:
+    """Alembic stores the current revision id in ``alembic_version.version_num``,
+    a ``VARCHAR(32)`` it creates and never widens. A longer id is accepted on
+    SQLite (which ignores the length) but throws ``StringDataRightTruncation`` on
+    Postgres the moment ``alembic upgrade`` tries to stamp it -- so every
+    migration behind it is unreachable on a real deploy. ``0014`` was 42 chars
+    and blocked the entire Epic 6-8 chain; this guard keeps it from recurring.
+    """
+    over_long = {
+        revision.revision
+        for revision in script_directory.walk_revisions()
+        if len(revision.revision) > 32
+    }
+
+    assert not over_long, (
+        f"revision id(s) longer than 32 chars: {sorted(over_long)}. "
+        "alembic_version.version_num is VARCHAR(32); a longer id fails at "
+        "`alembic upgrade head` against Postgres. Shorten the id (and re-point "
+        "its child's down_revision)."
+    )
+
+
 # --- env.py actually runs -----------------------------------------------------
 
 
