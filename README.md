@@ -101,6 +101,11 @@ backed by one Neon Postgres project (free plan, Europe/Frankfurt). All durable
 state is in Postgres; the container filesystem is ephemeral and nothing written
 at runtime is read back after a restart.
 
+Gemini's EEA data terms are re-verified in
+`docs/release-validation/gemini-data-terms.md` (NFR-17); when the provider,
+model, or terms change, follow that file's *Next re-verification trigger*
+section.
+
 `render.yaml` is the blueprint. `docker-entrypoint.sh` applies migrations and
 only then `exec`s the server, so:
 

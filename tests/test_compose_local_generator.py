@@ -8,6 +8,7 @@ file, no Docker/compose invoked, no containers started.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -49,8 +50,16 @@ def test_app_service_declares_gemini_api_key(compose_text: str) -> None:
 def test_app_service_declares_gemini_data_terms_verified_at(compose_text: str) -> None:
     block = _app_service_block(compose_text)
 
-    assert 'GEMINI_DATA_TERMS_VERIFIED_AT: "2026-01-15"' in block, (
-        "load_settings() requires GEMINI_DATA_TERMS_VERIFIED_AT unconditionally; "
-        "without it here, `docker compose up` fails validation before the "
-        "server starts"
+    # Assert on structure, not the raw date: load_settings() requires the key,
+    # and it must be an ISO date. The exact value is bound to the release-
+    # validation record by tests/test_data_terms_record.py, so pinning the
+    # literal here too would be a third hand-edit point on every re-verification.
+    assert re.search(
+        r'^\s*GEMINI_DATA_TERMS_VERIFIED_AT:\s*"\d{4}-\d{2}-\d{2}"\s*$',
+        block,
+        re.MULTILINE,
+    ), (
+        "load_settings() requires GEMINI_DATA_TERMS_VERIFIED_AT unconditionally "
+        "and as an ISO date; without it here, `docker compose up` fails "
+        "validation before the server starts"
     )
