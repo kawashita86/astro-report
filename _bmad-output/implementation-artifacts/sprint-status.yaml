@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-27-2026 17:33
+last_updated: 08-27-2026
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -108,7 +108,7 @@ development_status:
   8-1-pass-conformance-across-the-full-adversarial-fixture-set: review
   8-2-re-verify-the-generation-provider-s-data-terms-and-record-it: review
   8-3-measure-the-latency-the-prd-only-assumed: review
-  8-4-project-storage-growth-against-the-free-tier-ceiling: backlog
+  8-4-project-storage-growth-against-the-free-tier-ceiling: review
   8-5-restore-from-a-backup-for-real: backlog
   epic-8-retrospective: optional
 action_items:
