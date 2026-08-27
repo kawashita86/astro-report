@@ -114,6 +114,7 @@ def create_app(settings: Settings) -> FastAPI:
     from shell.http.routes.backup import router as backup_router
     from shell.http.routes.chart import router as chart_router
     from shell.http.routes.clients import router as clients_router
+    from shell.http.routes.corpus import router as corpus_router
     from shell.http.routes.report_runs import router as report_runs_router
     from shell.http.routes.style_guide import router as style_guide_router
 
@@ -139,6 +140,7 @@ def create_app(settings: Settings) -> FastAPI:
     application.include_router(report_runs_router)
     application.include_router(style_guide_router)
     application.include_router(backup_router)
+    application.include_router(corpus_router)
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 

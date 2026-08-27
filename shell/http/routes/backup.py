@@ -6,7 +6,8 @@ backups) does not satisfy the durability requirement on its own.
 Reads and serializes every row of every durability-relevant table, in one
 downloadable JSON file, in an order a future restore (Story 8.5) can insert
 without ever violating a foreign key: ``client`` first (no dependencies),
-then ``natal_chart``/``report_run`` (depend only on ``client``), then
+then ``corpus_entry`` and ``natal_chart``/``report_run`` (depend only on
+``client``), then
 ``report``/``report_payload``/``report_draft``/``report_theme``/
 ``gate_result`` (depend on ``report_run``, and transitively on ``client``),
 then ``export_record`` (depends on ``report``), and finally ``style_guide``
@@ -41,6 +42,7 @@ from sqlmodel import Session, select
 
 from shell.adapters.postgres.backup_record import store_backup_record
 from shell.adapters.postgres.client import Client, StoredNatalChart
+from shell.adapters.postgres.corpus_entry import CorpusEntry
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
@@ -61,6 +63,7 @@ router = APIRouter()
 #: without ever hitting a foreign key that doesn't exist yet.
 _BACKUP_MODELS = (
     Client,
+    CorpusEntry,
     StoredNatalChart,
     ReportRun,
     Report,
@@ -82,12 +85,13 @@ def download_backup(session: Session = Depends(get_session)) -> Response:
     ``Response(...)`` shape (``shell/http/routes/report_runs.py``) -- no
     streaming, no pagination, plus a ``Cache-Control: no-store`` header this
     route adds beyond that mirror, since every response here carries every
-    Client's PII unfiltered. Each of the ten tables in ``_BACKUP_MODELS`` is
-    read with ``select(Model).order_by(Model.id)`` (every row, no filtering,
-    ordered for a reproducible/diffable export rather than incidental DB row
-    order) and each row serialized with ``.model_dump(mode="json")``, keyed
-    by the model's own ``__tablename__`` so the file's top-level keys are
-    the ten real table names, in FK-safe order.
+    Client's PII unfiltered. Each of the eleven tables in ``_BACKUP_MODELS``
+    is read with ``select(Model).order_by(Model.id)`` (every row, no
+    filtering, ordered for a reproducible/diffable export rather than
+    incidental DB row order) and each row serialized with
+    ``.model_dump(mode="json")``, keyed by the model's own ``__tablename__``
+    so the file's top-level keys are the eleven real table names, in FK-safe
+    order.
     """
     backup: dict[str, list[dict[str, object]]] = {
         model.__tablename__: [

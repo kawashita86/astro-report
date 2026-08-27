@@ -585,3 +585,11 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-6-be-told-when-my-backup-is-out-of-date.md`
   summary: This app has no CSS anywhere (no stylesheet, no `<style>` block, no shared layout) across any of its 13 templates, so the new "Backup out of date" warning -- like every other status message in the app -- renders as a plain, unstyled paragraph indistinguishable from ordinary text, undercutting its purpose as a warning worth noticing during a batch.
   evidence: Blind Hunter review of this story's diff. Pre-existing and systemic across the whole app, not introduced by this story -- worth a deliberate, app-wide minimal-styling pass rather than a one-off fix scoped to this single banner.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-1-add-a-past-report-to-the-corpus.md`
+  summary: The hand-rolled urlencoded form parser (`_parse_form`, `_FormTooLarge`, `_FormNotUtf8`, `_MAX_*_FORM_BODY_BYTES`) is now copy-pasted across `shell/http/app.py`, `shell/http/routes/clients.py`, `shell/http/routes/style_guide.py` and `shell/http/routes/corpus.py`; likewise `_UTCDateTime` is imported as a private symbol from `shell/adapters/postgres/report_run` by `style_guide.py`, `backup_record.py` and now `corpus_entry.py`.
+  evidence: Blind Hunter review of this story's diff. Both are pre-existing cross-module smells that Story 7.1 adds another instance to per its own spec instruction ("mirror style_guide.py::_parse_form"). Consolidating the form parser into one shared module and promoting `_UTCDateTime` to a public shared column-types module is a focused refactor touching several call sites, not a trivial patch.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-1-add-a-past-report-to-the-corpus.md`
+  summary: `GET /corpus` returns every entry with each report's full `content` rendered in a `<pre>` block, with no pagination, no preview/truncation, and no single-entry view route (`GET /corpus/{id}`).
+  evidence: Blind Hunter review of this story's diff. Fine at Story 7.1's expected volume, but epic-7-context.md states Francesco has "hundreds of existing hand-written reports" to load, so the unbounded full-content list will become unwieldy. Worth a pagination/preview pass, most naturally alongside Story 7.3's composition view.

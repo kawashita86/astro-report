@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Corpus — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>Corpus</h1>
+      <p><a href="/corpus/new">Add a past report</a></p>
+
+      {% if entries %}
+      <ul>
+        {% for entry in entries %}
+        <li>
+          <p>{{ entry.created_at }}</p>
+          <pre>{{ entry.content }}</pre>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>No past reports have been added yet. <a href="/corpus/new">Add the first one</a>.</p>
+      {% endif %}
+    </main>
+  </body>
+</html>

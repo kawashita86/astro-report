@@ -27,6 +27,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from shell.adapters.postgres import client as client_module
 from shell.adapters.postgres.backup_record import BackupRecord
 from shell.adapters.postgres.client import Client, StoredNatalChart
+from shell.adapters.postgres.corpus_entry import CorpusEntry
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
@@ -61,6 +62,7 @@ LOCAL = Settings(
 #: output against.
 _TABLE_ORDER = [
     "client",
+    "corpus_entry",
     "natal_chart",
     "report_run",
     "report",
@@ -228,6 +230,15 @@ def _make_export_record(db_session: Session, *, report: Report) -> ExportRecord:
     return export_record
 
 
+def _make_corpus_entry(
+    db_session: Session, *, client_id=None, content: str = "A past report."
+) -> CorpusEntry:
+    entry = CorpusEntry(client_id=client_id, content=content)
+    db_session.add(entry)
+    db_session.flush()
+    return entry
+
+
 def _make_style_guide(db_session: Session, *, version: int, content: str) -> StyleGuide:
     style_guide = StyleGuide(version=version, content=content)
     db_session.add(style_guide)
@@ -270,7 +281,7 @@ def test_anonymous_request_is_rejected(client: TestClient) -> None:
     assert response.status_code == 401
 
 
-def test_empty_database_downloads_all_ten_keys_as_empty_lists(
+def test_empty_database_downloads_all_eleven_keys_as_empty_lists(
     authenticated_client: TestClient,
 ) -> None:
     response = authenticated_client.get("/backup")
@@ -341,8 +352,10 @@ def test_populated_pipeline_includes_every_row_exactly_once_in_fk_safe_order(
     }
 
     # Every row appears exactly once: no duplication across the two chains.
+    # `style_guide` and `corpus_entry` are global/independent of the Client
+    # pipeline `_full_chain` builds, so neither has a row here.
     for table_name in _TABLE_ORDER:
-        if table_name == "style_guide":
+        if table_name in {"style_guide", "corpus_entry"}:
             continue
         assert len(body[table_name]) == 2
 
@@ -365,6 +378,51 @@ def test_a_pre_story_6_4_report_run_with_no_natal_chart_id_is_included(
     rows = [row for row in body["report_run"] if row["id"] == str(run.id)]
     assert len(rows) == 1
     assert rows[0]["natal_chart_id"] is None
+
+
+def test_a_paired_corpus_entry_appears_once_under_corpus_entry(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 7.1: a ``corpus_entry`` row paired to a Client (``client_id``
+    set) is one of the eleven ``_BACKUP_MODELS`` tables and appears exactly
+    once in the export, keyed by ``corpus_entry``, with its ``client_id``
+    serialized."""
+    ada = _make_client(db_session)
+    entry = _make_corpus_entry(db_session, client_id=ada.id, content="Cara cliente...")
+    db_session.commit()
+
+    response = authenticated_client.get("/backup")
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert list(body.keys()) == _TABLE_ORDER
+    rows = [row for row in body["corpus_entry"] if row["id"] == str(entry.id)]
+    assert len(rows) == 1
+    assert rows[0]["client_id"] == str(ada.id)
+    assert rows[0]["content"] == "Cara cliente..."
+
+
+def test_an_unpaired_corpus_entry_appears_once_with_a_null_client_id(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """After Story 7.1 the only kind of ``corpus_entry`` that can exist is
+    unpaired (``client_id`` NULL, no linking UI yet) -- it is still one of
+    the eleven ``_BACKUP_MODELS`` tables and is serialized into the export
+    exactly once, with ``client_id: null``."""
+    entry = _make_corpus_entry(db_session, client_id=None, content="An unpaired past report.")
+    db_session.commit()
+
+    response = authenticated_client.get("/backup")
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert list(body.keys()) == _TABLE_ORDER
+    rows = [row for row in body["corpus_entry"] if row["id"] == str(entry.id)]
+    assert len(rows) == 1
+    assert rows[0]["client_id"] is None
+    assert rows[0]["content"] == "An unpaired past report."
 
 
 def test_multiple_style_guide_versions_are_all_included(

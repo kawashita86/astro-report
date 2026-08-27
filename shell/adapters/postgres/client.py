@@ -24,6 +24,7 @@ from core.ephemeris.identity import EphemerisIdentity
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.computation import ComputationConfig
 from core.types.place import ResolvedPlace
+from shell.adapters.postgres.corpus_entry import CorpusEntry
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
@@ -56,6 +57,7 @@ _CLIENT_CASCADE_TABLES: frozenset[str] = frozenset(
         "report",
         "gate_result",
         "export_record",
+        "corpus_entry",
     }
 )
 
@@ -293,11 +295,19 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     """Delete ``client`` and every row derived from it, in one flush (Story 2.8;
     ``ReportRun`` joined the cascade in Story 3.5; ``StoredReportTheme`` in
     Story 4.3; ``ReportDraft`` in Story 4.6; ``Report`` in Story 5.3;
-    ``StoredGateResult`` in Story 5.6; ``ExportRecord`` in Story 6.2).
+    ``StoredGateResult`` in Story 5.6; ``ExportRecord`` in Story 6.2;
+    ``CorpusEntry`` in Story 7.1).
 
-    Every ``ReportPayload`` row, every ``StoredReportTheme`` row, every
-    ``ReportDraft`` row, every ``ExportRecord`` row, every ``Report`` row,
-    every ``StoredGateResult`` row and every ``ReportRun`` row for ``client``
+    Every ``CorpusEntry`` row *paired* to ``client`` (``client_id == client.id``)
+    is deleted in the first batch, before the ``client`` row. A ``CorpusEntry``
+    with ``client_id IS NULL`` -- every entry added in Story 7.1, which has no
+    linking UI yet -- is never matched by this cascade and is intentionally
+    left untouched.
+
+    Every ``CorpusEntry`` row paired to ``client``, every ``ReportPayload``
+    row, every ``StoredReportTheme`` row, every ``ReportDraft`` row, every
+    ``ExportRecord`` row, every ``Report`` row, every ``StoredGateResult``
+    row and every ``ReportRun`` row for ``client``
     are deleted first, then every ``StoredNatalChart`` row for ``client`` --
     current and superseded -- and only then the ``Client`` row itself:
     children before parent, matching how no foreign key in this codebase
@@ -332,6 +342,12 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     transaction boundary. The caller commits only once every deletion here has
     succeeded.
     """
+    corpus_entries = session.exec(
+        select(CorpusEntry).where(CorpusEntry.client_id == client.id)
+    ).all()
+    for corpus_entry in corpus_entries:
+        session.delete(corpus_entry)
+
     payloads = session.exec(
         select(ReportPayload).where(ReportPayload.client_id == client.id)
     ).all()

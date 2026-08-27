@@ -325,6 +325,16 @@ def test_the_cascade_constant_includes_export_record() -> None:
     assert "export_record" in client_module._CLIENT_CASCADE_TABLES
 
 
+def test_the_cascade_constant_includes_corpus_entry() -> None:
+    """Story 7.1: ``corpus_entry`` must join ``_CLIENT_CASCADE_TABLES`` -- a
+    regression on top of the general invariant test below, naming the table
+    this story added explicitly. ``tests/test_corpus_store.py`` covers the
+    actual deletion behavior end to end (paired entry gone, unpaired entry
+    left untouched), mirroring ``tests/test_export_record_store.py``'s own
+    cascade tests."""
+    assert "corpus_entry" in client_module._CLIENT_CASCADE_TABLES
+
+
 def test_delete_client_and_derived_leaves_backup_record_untouched(session: Session) -> None:
     """Story 6.6: ``backup_record`` has no ``client_id`` -- it is global,
     not per-Client -- so it must be correctly excluded from the FR-29

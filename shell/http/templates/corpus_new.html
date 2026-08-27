@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Add a past report — astro-report</title>
+  </head>
+  <body>
+    <main>
+      <h1>Add a past report</h1>
+      {% if error %}
+      <p role="alert">{{ error }}</p>
+      {% endif %}
+      <p>
+        Paste one past report as plain text. Where it came from — email, messaging or a
+        folder — does not matter.
+      </p>
+      <form method="post" action="/corpus">
+        <label for="content">Report text</label>
+        <textarea id="content" name="content" required rows="30" cols="100">{{ content }}</textarea>
+
+        <button type="submit">Add to corpus</button>
+      </form>
+    </main>
+  </body>
+</html>
