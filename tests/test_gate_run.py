@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+import pytest
+
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.gate.run import _DATE_TOKEN_PATTERN as _GATE_DATE_TOKEN_PATTERN
 from core.gate.run import _index_entries, run_gate
@@ -408,6 +410,118 @@ def test_an_uncited_date_token_sentence_fails_both_empty_citation_and_date_token
     assert result.passed is False
     assert _kinds(result) == ["empty_citation", "date_token_in_day_list"]
     assert all(violation.entry_ids == () for violation in result.violations)
+
+
+@pytest.mark.parametrize(
+    "sentence_text",
+    [
+        "Occasione il 15.01 di prima mattina.",
+        "Occasione il 15.01.2026 di prima mattina.",
+        "Occasione il 15 gen di prima mattina.",
+        "Occasione il 15 gen. di prima mattina.",
+        "Occasione il 1° feb di prima mattina.",
+    ],
+)
+def test_abbreviated_and_dotted_date_tokens_fail_in_a_day_list(sentence_text: str) -> None:
+    draft = _draft(giorni_favorevoli=(Sentence(text=sentence_text, entry_ids=()),))
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert "date_token_in_day_list" in _kinds(result)
+
+
+@pytest.mark.parametrize(
+    "sentence_text",
+    [
+        "Ci sono 3 mare da attraversare.",
+        "Analizziamo 3 set di dati distinti.",
+        "Buon momento soprattutto verso le 15.30.",
+        "Buon momento alle 9.45 del mattino.",
+        "Le probabilità aumentano di 1.5 volte.",
+    ],
+)
+def test_a_non_date_lookalike_is_not_a_date_token_in_a_day_list(sentence_text: str) -> None:
+    draft = _draft(giorni_favorevoli=(Sentence(text=sentence_text, entry_ids=()),))
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert "date_token_in_day_list" not in _kinds(result)
+
+
+@pytest.mark.parametrize("malformed", ["not-a-date", ""])
+def test_a_cited_entry_with_a_malformed_date_field_contributes_no_day_fact(
+    malformed: str,
+) -> None:
+    """Item 42: a malformed ISO date on a cited Payload entry is skipped by
+    ``_date_facts`` rather than raising out of ``run_gate``."""
+    aspect = TransitAspectEvent(
+        transiting_body="jupiter",
+        natal_point="moon",
+        aspect="sextile",
+        perfected_at=datetime(2026, 1, 15, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 10, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    frozen_aspects = frozen["sections"]["energia_generale"]["aspects"]
+    aspect_id = _find_id(frozen_aspects, kind="aspect")
+    for entry in frozen_aspects:
+        if entry["id"] == aspect_id:
+            entry["perfected_at"] = malformed
+
+    draft = _draft(
+        amore=(Sentence(text="Il 15 porta una svolta.", entry_ids=(aspect_id,)),),
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert isinstance(result, GateResult)
+    # The day-15 claim cannot be grounded once the date field is unparseable.
+    assert _kinds(result) == ["invented_fact"]
+
+
+def test_a_malformed_cited_entry_does_not_suppress_a_well_formed_ones_day_fact() -> None:
+    """Item 42: when a sentence cites one entry with a malformed date field
+    and one with a valid one, ``_date_facts`` skips only the malformed entry
+    -- the valid entry's day still grounds a claim for that day."""
+    valid = TransitAspectEvent(
+        transiting_body="jupiter",
+        natal_point="moon",
+        aspect="sextile",
+        perfected_at=datetime(2026, 1, 15, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 10, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    broken = TransitAspectEvent(
+        transiting_body="saturn",
+        natal_point="sun",
+        aspect="square",
+        perfected_at=datetime(2026, 1, 20, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 10, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(valid, broken))
+    frozen_aspects = frozen["sections"]["energia_generale"]["aspects"]
+    valid_id = _find_id(frozen_aspects, transiting_body="jupiter")
+    broken_id = _find_id(frozen_aspects, transiting_body="saturn")
+    for entry in frozen_aspects:
+        if entry["id"] == broken_id:
+            entry["perfected_at"] = "not-a-date"
+
+    draft = _draft(
+        amore=(
+            Sentence(text="Il 15 porta una svolta.", entry_ids=(broken_id, valid_id)),
+        ),
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert isinstance(result, GateResult)
+    assert result.passed is True
+    assert _kinds(result) == []
 
 
 # --- Matrix row: well-grounded Claim -----------------------------------------------

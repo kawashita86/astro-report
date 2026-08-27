@@ -52,14 +52,39 @@ _ITALIAN_MONTHS = (
     "dicembre",
 )
 
+#: Mirrors ``shell/adapters/gemini/generator.py``'s own
+#: ``_ITALIAN_MONTH_ABBREVIATIONS`` -- ``set`` deliberately omitted so
+#: "set di dati" is not flagged; ``sett`` for settembre is kept.
+_ITALIAN_MONTH_ABBREVIATIONS = (
+    "gen",
+    "feb",
+    "mar",
+    "apr",
+    "mag",
+    "giu",
+    "lug",
+    "ago",
+    "sett",
+    "ott",
+    "nov",
+    "dic",
+)
+
 #: Mirrors ``shell/adapters/gemini/generator.py``'s own ``_DATE_TOKEN_PATTERN``
 #: byte-for-byte (AD-1 forbids importing it): an ISO date, a day-of-month
-#: (optionally with a degree-sign ordinal) followed by an Italian month name,
-#: or a numeric ``DD/MM``/``DD-MM`` pair.
+#: (optionally with a degree-sign ordinal) followed by an Italian month name or
+#: common abbreviation, or a numeric ``DD/MM``/``DD.MM``/``DD-MM`` pair
+#: (optionally with a ``/YY(YY)`` year). The numeric branch requires a 1-12
+#: month and pairs a single-digit day with a zero-padded month, so clock times
+#: ("15.30", "9.45") and decimals ("1.5") are not matched.
 _DATE_TOKEN_PATTERN = re.compile(
     r"\b\d{4}-\d{2}-\d{2}\b"  # ISO date, e.g. "2026-01-15"
-    r"|\b\d{1,2}°?\s+(?:" + "|".join(_ITALIAN_MONTHS) + r")\b"  # "15 gennaio" / "1° gennaio"
-    r"|\b\d{1,2}[/-]\d{1,2}\b",  # "15/01" / "15-01"
+    r"|\b\d{1,2}°?\s+(?:"
+    + "|".join(_ITALIAN_MONTHS + _ITALIAN_MONTH_ABBREVIATIONS)
+    + r")\b"  # "15 gennaio" / "1° gen" / "15 gen."
+    r"|\b(?:\d{2}[/.\-](?:0?[1-9]|1[0-2])|\d[/.\-](?:0[1-9]|1[0-2]))(?:[/.\-]\d{2,4})?\b",
+    # numeric "DD/MM" / "DD.MM" / "DD-MM" (+ optional "/YY(YY)"): "15.01",
+    # "15.1", "15/01/2026" match; "15.30", "9.45", "1.5", "13/45" do not
     re.IGNORECASE,
 )
 
@@ -248,7 +273,12 @@ def _date_facts(entries: list[dict[str, Any]]) -> frozenset[int]:
             continue
         value = entry.get(field)
         if isinstance(value, str):
-            facts.add(datetime.fromisoformat(value).day)
+            try:
+                facts.add(datetime.fromisoformat(value).day)
+            except ValueError:
+                # A malformed date field in a cited Payload entry contributes
+                # no day fact rather than crashing the whole Gate run.
+                continue
     return frozenset(facts)
 
 

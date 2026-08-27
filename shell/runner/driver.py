@@ -110,17 +110,33 @@ _STAGE_SEQUENCE: tuple[str, ...] = (
 )
 
 #: Per-stage overrides for `with_backoff`'s keyword arguments, keyed by
-#: stage name -- only a stage with a real rate-limited network call needs
-#: one (Story 4.8). `draft_ready` is the only such stage today (the module's
-#: own Design Notes): 3 attempts, 6-second base delay, doubling to a second
-#: retry at 12s -- three Gemini attempts inside one `drive()` call span
-#: 0s/6s/18s, comfortably inside the provider's 10 requests-per-minute
-#: ceiling even if a poll lands right after a prior `drive()` call's own
-#: attempts. A stage absent from this mapping keeps `with_backoff`'s plain
-#: defaults (today's fast, generic schedule) -- this story does not change
-#: any other stage's behavior.
+#: stage name. `draft_ready` is the only stage with a real rate-limited
+#: network call (the module's own Design Notes): 3 attempts, 6-second base
+#: delay, doubling to a second retry at 12s -- three Gemini attempts inside
+#: one `drive()` call span 0s/6s/18s, comfortably inside the provider's 10
+#: requests-per-minute ceiling even if a poll lands right after a prior
+#: `drive()` call's own attempts.
+#:
+#: `gate_passed` (`_run_gate_passed`) is capped at a single attempt. Its
+#: dominant failure mode is a deterministic `GateFailedError`: the stage
+#: re-checks the *same* already-persisted draft with the pure `run_gate()`
+#: (`core/gate/run.py`), so an in-process `with_backoff` retry only re-runs
+#: an identical failing check -- wasted work that delays the real recovery,
+#: `drive()`'s `except GateFailedError` regeneration path, which produces a
+#: genuinely new draft on the *next* `drive()` call. `max_attempts=1` lets
+#: that `GateFailedError` propagate on the first attempt.
+#:
+#: Tradeoff: `_run_gate_passed` also reads `ReportDraft`/`ReportPayload`
+#: back and, on a pass, writes `Report` + `StoredGateResult`. A *transient*
+#: DB error in any of those is no longer retried within one `drive()` call;
+#: it surfaces through `drive()`'s generic `except Exception` branch, which
+#: increments `stage_failure_count` from its first occurrence, so a flaky
+#: database now recovers across poll cycles (`_MAX_STAGE_FAILURES`) rather
+#: than inside a single call. A stage absent from this mapping keeps
+#: `with_backoff`'s plain defaults (`max_attempts=3`, `shell/runner/backoff.py`).
 _STAGE_BACKOFF_OVERRIDES: dict[str, dict[str, object]] = {
     "draft_ready": {"max_attempts": 3, "base_delay_seconds": 6.0},
+    "gate_passed": {"max_attempts": 1},
 }
 
 #: Consecutive `with_backoff` exhaustions on a run's current stage, across
@@ -550,10 +566,12 @@ def _run_gate_passed(
     pass persist a new immutable ``Report`` row -- never on failure
     (Story 5.3) -- alongside a ``StoredGateResult`` row recording the pass
     (Story 5.6). The mirror write for a *failing* check lives in ``drive()``'s
-    ``except GateFailedError`` block instead, not here: ``with_backoff``
-    retries any exception -- including this stage raising
-    ``GateFailedError`` -- up to 3 times, so a write here would persist
-    duplicate rows for one logical failure (this story's Design Notes).
+    ``except GateFailedError`` block instead, not here: this stage's
+    ``with_backoff`` wrapper is capped at ``max_attempts=1``
+    (:data:`_STAGE_BACKOFF_OVERRIDES`), so a raised ``GateFailedError``
+    propagates on the first attempt straight to that handler, which owns the
+    failing ``StoredGateResult`` write and the regeneration bookkeeping (this
+    story's Design Notes, as amended by epic-6-retro item 43).
 
     ``stored_draft``/``stored_payload`` are both read back -- from
     ``ReportDraft``/``ReportPayload`` respectively, via

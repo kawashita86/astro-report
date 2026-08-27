@@ -377,6 +377,47 @@ def test_most_recent_prior_report_theme_picks_the_later_of_two_prior_runs(
     assert found.report_run_id == run_feb.id
 
 
+def test_most_recent_prior_report_theme_breaks_a_same_month_tie_deterministically(
+    session: Session,
+) -> None:
+    """Item 28: two ``StoredReportTheme`` rows for one Client and the same
+    month are ordered by ``created_at`` then ``id`` descending, so the later
+    row wins regardless of insertion order."""
+    client = _create_client(session)
+    run_older = _create_run(session, client, month="2026-01")
+    run_newer = _create_run(session, client, month="2026-01")
+
+    def _tagged_theme(natal_house: int) -> dict[str, object]:
+        return {
+            "dominant_aspects": [],
+            "lunations": [{"kind": "new_moon", "natal_house": natal_house}],
+            "standing_retrogrades": [],
+        }
+
+    newer = StoredReportTheme(
+        client_id=client.id,
+        report_run_id=run_newer.id,
+        theme=_tagged_theme(9),
+        created_at=datetime(2026, 2, 1, 12, 0, tzinfo=UTC),
+    )
+    older = StoredReportTheme(
+        client_id=client.id,
+        report_run_id=run_older.id,
+        theme=_tagged_theme(1),
+        created_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+    )
+    # Insert the newer row first: the result must not depend on insert order.
+    session.add(newer)
+    session.add(older)
+    session.commit()
+
+    found = most_recent_prior_report_theme(session, client.id, before_month="2026-02")
+
+    assert found is not None
+    assert found.report_run_id == run_newer.id
+    assert found.theme["lunations"] == [{"kind": "new_moon", "natal_house": 9}]
+
+
 # --- FR-29 cascade ---------------------------------------------------------------
 
 

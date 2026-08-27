@@ -266,3 +266,65 @@ def test_separated_aspects_sort_by_orb_exit_at_descending() -> None:
     theme = derive_theme(payload, _COMPUTATION_CONFIG)
 
     assert [aspect.natal_point for aspect in theme.dominant_aspects] == ["moon", "sun"]
+
+
+def test_aspects_that_tie_on_tightness_sort_by_their_identity_triple() -> None:
+    """Item 33: two aspects identical on group/perfected_at/orb_exit_at are
+    ordered by ``(transiting_body, natal_point, aspect)`` ascending, and that
+    order does not depend on the order the events were collected in."""
+    first = _slow_aspect(
+        transiting_body=_A_SLOW_BODY,
+        natal_point="moon",
+        aspect="square",
+        perfected_at=_T1,
+        orb_exit_at=None,
+    )
+    second = _slow_aspect(
+        transiting_body=_A_SLOW_BODY,
+        natal_point="sun",
+        aspect="square",
+        perfected_at=_T1,
+        orb_exit_at=None,
+    )
+
+    forward = derive_theme(_payload(amore_aspects=(first, second)), _COMPUTATION_CONFIG)
+    reversed_ = derive_theme(_payload(amore_aspects=(second, first)), _COMPUTATION_CONFIG)
+
+    assert [a.natal_point for a in forward.dominant_aspects] == ["moon", "sun"]
+    assert forward.dominant_aspects == reversed_.dominant_aspects
+
+
+def test_separated_aspects_that_tie_on_orb_exit_sort_by_their_identity_triple() -> None:
+    """Item 33: the tiebreak also covers the ``orb_exit_at is not None``
+    (group 1) return path -- two separated aspects with an identical, non-None
+    ``orb_exit_at`` are ordered by their identity triple, stably across a
+    reversal of the input tuple."""
+    first = _slow_aspect(natal_point="moon", perfected_at=_T0, orb_exit_at=_T2)
+    second = _slow_aspect(natal_point="sun", perfected_at=_T0, orb_exit_at=_T2)
+
+    forward = derive_theme(_payload(amore_aspects=(first, second)), _COMPUTATION_CONFIG)
+    reversed_ = derive_theme(_payload(amore_aspects=(second, first)), _COMPUTATION_CONFIG)
+
+    assert [a.natal_point for a in forward.dominant_aspects] == ["moon", "sun"]
+    assert forward.dominant_aspects == reversed_.dominant_aspects
+
+
+def test_a_tightness_tie_is_broken_by_aspect_then_by_transiting_body() -> None:
+    """Item 33: a tie decided by ``aspect`` alone (same body + natal_point),
+    and one decided by ``transiting_body`` alone (same natal_point + aspect)."""
+    trine = _slow_aspect(aspect="trine", perfected_at=_T1, orb_exit_at=None)
+    square = _slow_aspect(aspect="square", perfected_at=_T1, orb_exit_at=None)
+    by_aspect = derive_theme(
+        _payload(amore_aspects=(trine, square)), _COMPUTATION_CONFIG
+    )
+    assert [a.aspect for a in by_aspect.dominant_aspects] == ["square", "trine"]
+
+    body_a = _slow_aspect(transiting_body=_A_SLOW_BODY, perfected_at=_T1, orb_exit_at=None)
+    body_b = _slow_aspect(
+        transiting_body=_ANOTHER_SLOW_BODY, perfected_at=_T1, orb_exit_at=None
+    )
+    lower, higher = sorted((_A_SLOW_BODY, _ANOTHER_SLOW_BODY))
+    by_body = derive_theme(
+        _payload(amore_aspects=(body_b, body_a)), _COMPUTATION_CONFIG
+    )
+    assert [a.transiting_body for a in by_body.dominant_aspects] == [lower, higher]

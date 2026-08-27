@@ -33,10 +33,15 @@ class ReportPayload(SQLModel, table=True):
     traceability shape.
 
     ``payload`` stores ``freeze_payload()``'s whole return dict verbatim
-    (canonical JSON: sorted keys, no insignificant whitespace, ``Decimal`` as
-    a fixed-precision string) -- every field this table also carries as its
-    own typed column is present again inside it, so the row is
-    self-describing even read outside this table's own columns.
+    through the ``JSON`` column. With no custom ``json_serializer`` on the
+    engine that is ``json.dumps``'s default output -- unsorted keys, default
+    ``", "``/``": "`` whitespace -- *not* the sorted, whitespace-free form of
+    ``core/payload/freeze.py::canonical_json_bytes`` (which is used only for
+    the content hashes and the Generator prompt). ``Decimal`` values are
+    already fixed-precision strings by the time they arrive, because
+    ``freeze_payload``'s ``_json_safe`` converts them. Every field this table
+    also carries as its own typed column is present again inside it, so the
+    row is self-describing even read outside this table's own columns.
     """
 
     __tablename__ = "report_payload"

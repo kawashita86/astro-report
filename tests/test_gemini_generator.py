@@ -496,6 +496,11 @@ def test_citation_validation_finds_ids_in_a_real_freeze_payload_shaped_payload()
         "Il 15 gennaio è una buona giornata per agire.",
         "Il 3 marzo porta chiarezza.",
         "La data 2026-01-15 è favorevole.",
+        "Occasione il 15.01.",
+        "Occasione il 15.01.2026.",
+        "Occasione il 15 gen.",
+        "Occasione il 15 gen più tardi.",
+        "Occasione il 1° feb.",
     ],
 )
 def test_a_date_token_in_giorni_favorevoli_raises_at_the_date_token_step(
@@ -527,6 +532,36 @@ def test_a_date_token_in_giorni_di_attenzione_raises_at_the_date_token_step() ->
         generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
 
     assert caught.value.step == "date_token_validation"
+
+
+@pytest.mark.parametrize(
+    "sentence_text",
+    [
+        "Ci sono 3 mare da attraversare.",
+        "Analizziamo 3 set di dati distinti.",
+        "Buon momento soprattutto verso le 15.30.",
+        "Buon momento alle 9.45 del mattino.",
+        "Le probabilità aumentano di 1.5 volte.",
+    ],
+)
+def test_a_non_date_lookalike_in_giorni_favorevoli_is_not_flagged(
+    sentence_text: str,
+) -> None:
+    """``\\b`` after the month alternation terminates an abbreviation, and
+    ``set`` is deliberately not an abbreviation -- ``3 mare`` / ``3 set di
+    dati`` are not date tokens. The numeric branch's month/zero-padding
+    constraint also keeps clock times (``15.30``, ``9.45``) and decimals
+    (``1.5``) from being flagged."""
+    payload = _payload_with_ids(_KNOWN_ID)
+    response = _draft_response(
+        giorni_favorevoli=[{"text": sentence_text, "entry_ids": []}]
+    )
+    client = _FakeGeminiClient(response=response)
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert draft.giorni_favorevoli[0].text == sentence_text
 
 
 def test_a_date_shaped_word_elsewhere_is_not_flagged_as_a_date_token() -> None:

@@ -32,7 +32,9 @@ _OS_ENVIRONMENT_MEMBERS = frozenset(
 )
 
 #: Modules whose whole purpose is reading the environment from a file.
-_ENVIRONMENT_MODULES = frozenset({"dotenv", "environ", "decouple", "pydantic_settings"})
+_ENVIRONMENT_MODULES = frozenset(
+    {"dotenv", "environ", "environs", "decouple", "pydantic_settings"}
+)
 
 
 def files_under(root: str) -> list[Path]:
@@ -149,6 +151,8 @@ def test_the_guard_detects_a_new_reader(tmp_path: Path) -> None:
         "from_import.py": "from os import environ\nvalue = environ.get('X')\n",
         "renamed.py": "from os import getenv as read\nvalue = read('X')\n",
         "dotenv.py": "from dotenv import load_dotenv\nload_dotenv()\n",
+        "environs.py": "from environs import Env\nenv = Env()\n",
+        "import_environs.py": "import environs\nenv = environs.Env()\n",
     }
     for name, source in offenders.items():
         path = tmp_path / name

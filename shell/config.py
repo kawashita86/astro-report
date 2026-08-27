@@ -294,11 +294,16 @@ def _read_gemini_data_terms_verified_at(
         return None, error
     assert raw is not None
     try:
-        date.fromisoformat(raw)
+        parsed = date.fromisoformat(raw)
     except ValueError:
         return None, (
             f"GEMINI_DATA_TERMS_VERIFIED_AT is invalid: {raw!r} is not an "
             "ISO date (YYYY-MM-DD)."
+        )
+    if parsed > date.today():
+        return None, (
+            f"GEMINI_DATA_TERMS_VERIFIED_AT is invalid: {raw!r} is a future date; "
+            "the Gemini data terms cannot have been verified after today."
         )
     return raw, None
 

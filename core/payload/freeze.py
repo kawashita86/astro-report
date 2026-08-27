@@ -50,8 +50,16 @@ PAYLOAD_SCHEMA_VERSION: int = 1
 
 def canonical_json_bytes(value: Any) -> bytes:
     """Sorted keys, no insignificant whitespace -- the one serialization every
-    entry id is hashed from and every persisted ``ReportPayload`` is written
-    as, so two byte-identical inputs always produce byte-identical output."""
+    entry ``id`` is hashed from and the Generator prompt is built from, so two
+    byte-identical inputs always produce byte-identical output.
+
+    A ``ReportPayload`` row's ``payload`` column is *not* written this way:
+    with no custom ``json_serializer`` on the engine, SQLAlchemy's ``JSON``
+    type stores it through ``json.dumps``'s defaults -- unsorted keys and the
+    default ``", "``/``": "`` separators, unlike this function's sorted,
+    whitespace-free form. That on-disk text is still deterministic for a
+    stably-built dict; nothing downstream depends on its exact byte shape,
+    because the content-hashed entry ids are computed here, before persistence."""
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 

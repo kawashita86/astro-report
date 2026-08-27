@@ -1051,6 +1051,36 @@ def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
     assert caught.value.violations[0].kind == "empty_citation"
 
 
+def test_a_failing_gate_passed_stage_runs_exactly_once_per_drive_call(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Epic-6-retro item 43: ``gate_passed`` is capped at ``max_attempts=1``,
+    so a failing Gate does not retry the stage function inside one ``drive()``
+    call -- it runs once, then ``drive()``'s ``GateFailedError`` regeneration
+    handling takes over."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    real_gate_passed = _STAGE_FUNCTIONS["gate_passed"]
+    calls = 0
+
+    def _counting_gate_passed(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_gate_passed(*args, **kwargs)
+
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "gate_passed", _counting_gate_passed)
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+    result = _drive(session, run, natal_chart, generator=generator)
+
+    assert calls == 1, "gate_passed must not be retried within a single drive() call"
+    assert result.stage == "payload_ready"
+    assert result.regeneration_count == 1
+
+
 def test_gate_passed_regenerates_and_advances_once_a_later_attempt_passes(
     session: Session,
 ) -> None:

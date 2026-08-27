@@ -243,6 +243,27 @@ def test_a_well_formed_gemini_data_terms_verified_at_is_accepted() -> None:
     assert settings.gemini_data_terms_verified_at == "2026-01-15"
 
 
+def test_a_future_gemini_data_terms_verified_at_aborts() -> None:
+    from datetime import date, timedelta
+
+    future = (date.today() + timedelta(days=1)).isoformat()
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_with(GEMINI_DATA_TERMS_VERIFIED_AT=future))
+
+    message = str(raised.value)
+    assert "GEMINI_DATA_TERMS_VERIFIED_AT" in message
+    assert "future" in message
+
+
+def test_a_gemini_data_terms_verified_at_of_today_is_accepted() -> None:
+    from datetime import date
+
+    today = date.today().isoformat()
+    settings = load_settings(environment_with(GEMINI_DATA_TERMS_VERIFIED_AT=today))
+
+    assert settings.gemini_data_terms_verified_at == today
+
+
 def test_gemini_api_key_is_required() -> None:
     with pytest.raises(ConfigError) as raised:
         load_settings(environment_without("GEMINI_API_KEY"))

@@ -62,15 +62,42 @@ _ITALIAN_MONTHS = (
     "dicembre",
 )
 
+#: Common abbreviated forms of the twelve months. Terminated by ``\b`` in the
+#: pattern, so ``3 mar`` matches but ``3 mare`` (sea) does not. ``set`` is
+#: deliberately omitted -- "set di dati" is too common a phrase to flag -- while
+#: ``sett`` for settembre is kept.
+_ITALIAN_MONTH_ABBREVIATIONS = (
+    "gen",
+    "feb",
+    "mar",
+    "apr",
+    "mag",
+    "giu",
+    "lug",
+    "ago",
+    "sett",
+    "ott",
+    "nov",
+    "dic",
+)
+
 #: Best-effort regex heuristic (Design Notes), not a completeness guarantee:
 #: an ISO date, a day-of-month (optionally with a degree-sign ordinal, e.g.
-#: "1°") followed by an Italian month name, or a numeric ``DD/MM``/``DD-MM``
-#: pair. Deliberately does not attempt spelled-out ordinals ("il primo
-#: gennaio") -- genuinely out of scope for a regex.
+#: "1°") followed by an Italian month name or common abbreviation, or a numeric
+#: ``DD/MM``/``DD.MM``/``DD-MM`` pair (optionally with a ``/YY(YY)`` year). The
+#: numeric branch requires the month field to be 1-12, and a single-digit day
+#: to be paired with a zero-padded month, so Italian clock times ("15.30",
+#: "9.45") and decimals ("1.5") are not mistaken for dates. Deliberately does
+#: not attempt spelled-out ordinals ("il primo gennaio") -- out of scope for a
+#: regex.
 _DATE_TOKEN_PATTERN = re.compile(
     r"\b\d{4}-\d{2}-\d{2}\b"  # ISO date, e.g. "2026-01-15"
-    r"|\b\d{1,2}°?\s+(?:" + "|".join(_ITALIAN_MONTHS) + r")\b"  # "15 gennaio" / "1° gennaio"
-    r"|\b\d{1,2}[/-]\d{1,2}\b",  # "15/01" / "15-01"
+    r"|\b\d{1,2}°?\s+(?:"
+    + "|".join(_ITALIAN_MONTHS + _ITALIAN_MONTH_ABBREVIATIONS)
+    + r")\b"  # "15 gennaio" / "1° gen" / "15 gen."
+    r"|\b(?:\d{2}[/.\-](?:0?[1-9]|1[0-2])|\d[/.\-](?:0[1-9]|1[0-2]))(?:[/.\-]\d{2,4})?\b",
+    # numeric "DD/MM" / "DD.MM" / "DD-MM" (+ optional "/YY(YY)"): "15.01",
+    # "15.1", "15/01/2026" match; "15.30", "9.45", "1.5", "13/45" do not
     re.IGNORECASE,
 )
 

@@ -646,7 +646,9 @@ def list_client_reports(
     """List every Gate-passed Report for ``client_id``, by month, most
     recent first (Story 6.4, FR-27) -- Francesco's way into a Client's
     history when a month is only known by having already been generated,
-    not by an already-known ``run_id``.
+    not by an already-known ``run_id``. Two passed ``Report`` rows for the
+    same month are broken by ``Report.created_at`` then ``Report.id``, both
+    descending, so the listing order is deterministic.
 
     404s if ``client_id`` names no ``Client`` -- mirrors every other route
     in this module. A ``Client`` with no passed Report simply renders an
@@ -676,7 +678,7 @@ def list_client_reports(
         select(Report, ReportRun)
         .join(ReportRun, Report.report_run_id == ReportRun.id)
         .where(Report.client_id == client_id)
-        .order_by(ReportRun.month.desc())
+        .order_by(ReportRun.month.desc(), Report.created_at.desc(), Report.id.desc())
     ).all()
 
     chart_ids = {

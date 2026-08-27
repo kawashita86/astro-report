@@ -46,23 +46,34 @@ def _to_theme_aspect(event: TransitAspectEvent) -> ThemeAspect:
     )
 
 
-def _aspect_tightness_key(event: TransitAspectEvent) -> tuple[int, bool, float]:
+def _aspect_tightness_key(
+    event: TransitAspectEvent,
+) -> tuple[int, bool, float, str, str, str]:
     """Ask First's default tightness order: still-in-orb-at-month-end
     Aspects (``orb_exit_at is None``) first, by ``perfected_at`` descending
     (``None`` last); separated ones follow, by ``orb_exit_at`` descending.
 
     No event carries a numeric orb-degree, so ``perfected_at``/
-    ``orb_exit_at`` are the only signals available. Returns an ascending sort
-    key: group 0 (still open) before group 1 (separated); within a group, a
-    negated timestamp sorts a later instant first (descending), and a
-    boolean ``True`` (a missing ``perfected_at``) sorts after ``False``
-    (``None`` last).
+    ``orb_exit_at`` are the only signals available. Returns a 6-tuple
+    ascending sort key: group 0 (still open) before group 1 (separated);
+    within a group, a negated timestamp sorts a later instant first
+    (descending), and a boolean ``True`` (a missing ``perfected_at``) sorts
+    after ``False`` (``None`` last). The ``(transiting_body, natal_point,
+    aspect)`` identity triple -- computed unconditionally and appended to
+    both return paths -- is a deterministic tiebreak: events that tie on
+    every preceding component keep a fixed relative order no matter which
+    order the six Sections were walked in. It is not a full total order:
+    two genuinely distinct events that share the same body/point/aspect
+    (a retrograde loop's re-approach) and also tie on the timestamp key are
+    left in whatever order ``sorted`` gives them -- still stable for a given
+    input, just not further separated by this key.
     """
+    identity = (event.transiting_body, event.natal_point, event.aspect)
     if event.orb_exit_at is None:
         perfected_at_missing = event.perfected_at is None
         timestamp = 0.0 if perfected_at_missing else -event.perfected_at.timestamp()
-        return (0, perfected_at_missing, timestamp)
-    return (1, False, -event.orb_exit_at.timestamp())
+        return (0, perfected_at_missing, timestamp, *identity)
+    return (1, False, -event.orb_exit_at.timestamp(), *identity)
 
 
 def derive_theme(payload: Payload, config: ComputationConfig) -> ReportTheme:

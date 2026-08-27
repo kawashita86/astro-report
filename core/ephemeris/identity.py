@@ -134,7 +134,16 @@ def _sha256(path: Path) -> str:
 def _check_for_unlisted_files(ephemeris_dir: Path, manifest: dict[str, str]) -> None:
     """Anything in the directory that isn't the manifest or a manifest-listed
     file is unverified -- and ``swe.set_ephe_path()`` grants pyswisseph access
-    to the whole directory, not just the files this check named."""
+    to the whole directory, not just the files this check named.
+
+    ``ephemeris_dir.iterdir()`` is non-recursive and only ``path.is_file()``
+    entries are considered, so a subdirectory is silently passed over. That is
+    deliberate, not a gap: pyswisseph reads only files that sit directly in the
+    ephe path it is handed, so a nested directory is not something it could load,
+    and the vendored ephemeris is a flat directory by construction.
+    ``path.is_file()`` follows symlinks, so a symlink pointing at a directory
+    is skipped exactly like a real subdirectory -- the same non-recursion
+    rationale covers it."""
     allowed = set(manifest) | {_MANIFEST_FILENAME}
     unlisted = sorted(
         path.name

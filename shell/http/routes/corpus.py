@@ -48,10 +48,13 @@ _templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 #: (65536), while still rejecting a garbage-sized body before reading it.
 _MAX_CORPUS_FORM_BODY_BYTES = 1_048_576
 
-#: "YYYY-MM", zero-padded -- the same shape ``shell/runner/month.py`` is
-#: contracted to accept, re-declared here (per this story's Code Map: do not
-#: import the route module that also defines it) so a malformed month on a
-#: paired entry is a plain 422 at submission time.
+#: "YYYY-MM", zero-padded. Copied from
+#: ``shell/http/routes/report_runs.py``'s own ``_MONTH_PATTERN`` (per this
+#: story's Code Map: do not import the route module that also defines it) so
+#: a malformed month on a paired entry is a plain 422 at submission time. It
+#: is deliberately stricter than ``shell/runner/month.py``'s parse, which
+#: uses ``datetime.strptime(month, "%Y-%m")`` and would also accept an
+#: unpadded month such as ``2026-1``.
 _MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 

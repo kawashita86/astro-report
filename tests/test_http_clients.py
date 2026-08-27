@@ -606,6 +606,26 @@ def test_a_client_with_several_reports_lists_them_by_month_most_recent_first(
     assert positions == sorted(positions), "months must be listed most recent first"
 
 
+def test_two_reports_for_the_same_month_are_listed_newest_first_deterministically(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Item 48: two passed Reports for one Client and the same month are
+    broken by ``Report.created_at`` then ``Report.id`` descending, so the
+    later-created run is listed first."""
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    first = _create_passed_report(
+        db_session, client_id=ada.id, month="2026-01", natal_chart_id=chart.id
+    )
+    second = _create_passed_report(
+        db_session, client_id=ada.id, month="2026-01", natal_chart_id=chart.id
+    )
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert response.text.index(str(second.id)) < response.text.index(str(first.id))
+
+
 def test_reopening_a_listed_report_reaches_the_existing_report_route(
     authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
 ) -> None:

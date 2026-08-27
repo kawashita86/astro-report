@@ -111,15 +111,21 @@ def most_recent_prior_report_theme(
     Ordered by ``ReportRun.month`` (string comparison, correct because the
     format is always zero-padded ``"YYYY-MM"``), not by row-creation order --
     multiple ``ReportRun``s can be persisted out of creation order (this
-    story's own I/O & Edge-Case Matrix). Returns ``None`` when no such row
-    exists (the Client's first Report, or no prior run ever reached
-    ``payload_ready``).
+    story's own I/O & Edge-Case Matrix). Two ``StoredReportTheme`` rows for the
+    same Client and the same month are broken by ``created_at`` then ``id``,
+    both descending, so the row returned is deterministic regardless of
+    insertion order. Returns ``None`` when no such row exists (the Client's
+    first Report, or no prior run ever reached ``payload_ready``).
     """
     return session.exec(
         select(StoredReportTheme)
         .join(ReportRun, StoredReportTheme.report_run_id == ReportRun.id)
         .where(ReportRun.client_id == client_id, ReportRun.month < before_month)
-        .order_by(ReportRun.month.desc())
+        .order_by(
+            ReportRun.month.desc(),
+            StoredReportTheme.created_at.desc(),
+            StoredReportTheme.id.desc(),
+        )
         .limit(1)
     ).first()
 
