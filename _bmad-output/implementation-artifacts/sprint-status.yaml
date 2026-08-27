@@ -105,11 +105,11 @@ development_status:
   epic-7-retrospective: done
 
   epic-8: in-progress
-  8-1-pass-conformance-across-the-full-adversarial-fixture-set: review
-  8-2-re-verify-the-generation-provider-s-data-terms-and-record-it: review
-  8-3-measure-the-latency-the-prd-only-assumed: review
-  8-4-project-storage-growth-against-the-free-tier-ceiling: review
-  8-5-restore-from-a-backup-for-real: backlog
+  8-1-pass-conformance-across-the-full-adversarial-fixture-set: done
+  8-2-re-verify-the-generation-provider-s-data-terms-and-record-it: done
+  8-3-measure-the-latency-the-prd-only-assumed: done
+  8-4-project-storage-growth-against-the-free-tier-ceiling: done
+  8-5-restore-from-a-backup-for-real: review
   epic-8-retrospective: optional
 action_items:
   - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"
