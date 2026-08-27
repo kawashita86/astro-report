@@ -40,6 +40,7 @@ __all__ = [
     "create_client_with_chart",
     "delete_client_and_derived",
     "deserialize_natal_chart",
+    "list_clients",
 ]
 
 #: The single source of truth for every table carrying a foreign key to
@@ -186,6 +187,17 @@ def deserialize_natal_chart(stored: StoredNatalChart) -> NatalChart:
             for aspect in stored.aspects
         ),
     )
+
+
+def list_clients(session: Session) -> list[Client]:
+    """Every Client, ordered by ``name`` then ``id`` (Story 7.2).
+
+    What ``/corpus/new``'s Client picker offers: the picker only links an
+    entry to a Client that already exists -- it never creates one. ``id`` is
+    the tie-breaker so two Clients sharing a name (allowed -- ``Client`` has
+    no uniqueness constraint on ``name``) still order deterministically.
+    """
+    return list(session.exec(select(Client).order_by(Client.name, Client.id)))
 
 
 def create_client_with_chart(

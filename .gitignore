@@ -21,3 +21,6 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Claude Code per-job scratch space
+.claude/jobs/

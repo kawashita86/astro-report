@@ -14,8 +14,14 @@ Story 7.1 code path sets it, so every entry added in 7.1 is unpaired
 Client-deletion cascade (``shell/adapters/postgres/client.py``) and the
 durable
 ``test_every_table_with_a_client_id_foreign_key_is_covered_by_the_cascade_constant``
-invariant exercises it. Story 7.2 adds the linking UI and the
-paired/unpaired marking on top of a table and cascade already correct.
+invariant exercises it.
+
+Story 7.2 adds ``paired`` (a stored boolean, backfilled ``False`` for every
+Story 7.1 row by ``0020_corpus_entry_pairing``) and ``month`` (nullable
+``YYYY-MM``), plus the ``/corpus/new`` form fields that set ``paired``,
+``client_id`` and ``month`` at record time. Pairing is Francesco's assertion
+that he knows the chart; ``client_id``/``month`` are an optional link, so a
+paired entry may still have both ``NULL``.
 
 Written by :func:`add_corpus_entry`, called from
 ``shell/http/routes/corpus.py``'s ``POST /corpus``. That writer only
@@ -55,23 +61,50 @@ class CorpusEntry(SQLModel, table=True):
     #: from creation so this table joins the FR-29 cascade (this module's
     #: docstring). Story 7.2 adds the UI that sets it.
     client_id: UUID | None = Field(default=None, foreign_key="client.id", index=True)
+    #: Francesco's assertion that he knows the chart behind this entry (Story
+    #: 7.2), stored, not derived from ``client_id``/``month``: a paired entry
+    #: may have both link fields ``NULL`` when the application does not hold
+    #: the Client. ``0020_corpus_entry_pairing`` carries the ``server_default``
+    #: that backfills every Story 7.1 row to ``False``; the model declares
+    #: only ``default`` -- matching ``ReportRun.stage_failure_count``.
+    paired: bool = Field(default=False)
+    #: Optional ``YYYY-MM`` the entry belongs to (Story 7.2). Only ever set
+    #: for a paired entry; validated at the HTTP boundary
+    #: (``shell/http/routes/corpus.py``'s ``_MONTH_PATTERN``).
+    month: str | None = Field(default=None)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(_UTCDateTime, nullable=False),
     )
 
 
-def add_corpus_entry(session: Session, *, content: str) -> CorpusEntry:
+def add_corpus_entry(
+    session: Session,
+    *,
+    content: str,
+    paired: bool = False,
+    client_id: UUID | None = None,
+    month: str | None = None,
+) -> CorpusEntry:
     """Store one past report, in one flush.
 
     Only ``add()``s and ``flush()``es, never commits or rolls back --
     mirrors ``create_style_guide_version()``
     (``shell/adapters/postgres/style_guide.py``), so it never decides the
     caller's transaction boundary. ``POST /corpus`` commits immediately
-    after calling this. ``client_id`` is left ``NULL``: Story 7.1 stores
-    prose only, source-agnostic and unpaired.
+    after calling this.
+
+    ``paired`` records Francesco's knowledge of the chart (Story 7.2);
+    ``client_id`` and ``month`` are the optional link, either or both of
+    which may stay ``NULL`` even for a paired entry when the application
+    does not hold the Client. All three are passed straight to the
+    ``CorpusEntry`` constructor -- the route
+    (``shell/http/routes/corpus.py``) owns their validation. Defaults
+    reproduce Story 7.1's behaviour: an unpaired entry with no link.
     """
-    entry = CorpusEntry(content=content)
+    entry = CorpusEntry(
+        content=content, paired=paired, client_id=client_id, month=month
+    )
     session.add(entry)
     session.flush()
     return entry

@@ -593,3 +593,7 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-7-1-add-a-past-report-to-the-corpus.md`
   summary: `GET /corpus` returns every entry with each report's full `content` rendered in a `<pre>` block, with no pagination, no preview/truncation, and no single-entry view route (`GET /corpus/{id}`).
   evidence: Blind Hunter review of this story's diff. Fine at Story 7.1's expected volume, but epic-7-context.md states Francesco has "hundreds of existing hand-written reports" to load, so the unbounded full-content list will become unwieldy. Worth a pagination/preview pass, most naturally alongside Story 7.3's composition view.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-2-mark-an-entry-paired-or-unpaired.md`
+  summary: `_render_new_form` runs `list_clients` (a full `client` table load) even on the `_FormTooLarge` / `_FormNotUtf8` body-rejection paths, which exist to reject an abusive body cheaply.
+  evidence: Story 7.2 routed the two body-level 422 handlers in `shell/http/routes/corpus.py` through `_render_new_form`, which unconditionally calls `list_clients(session)` to populate the Client picker; the oversized/non-UTF-8 branches have no submitted values to echo and do not need the picker, so the query is pure overhead on the exact requests that path is meant to shed.

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -70,6 +71,20 @@ def _seed_entry(db_session: Session, *, content: str, created_at: datetime) -> C
     db_session.add(entry)
     db_session.commit()
     return entry
+
+
+def _seed_client(db_session: Session, *, name: str = "Ada Lovelace") -> Client:
+    client = Client(
+        name=name,
+        birth_date=datetime(2026, 1, 1).date(),
+        birth_time=datetime(2026, 1, 1, 0, 0).time(),
+        latitude=0,
+        longitude=0,
+        iana_zone="UTC",
+    )
+    db_session.add(client)
+    db_session.commit()
+    return client
 
 
 # --- Authentication -----------------------------------------------------------
@@ -213,6 +228,245 @@ def test_a_non_utf8_body_is_rejected_and_inserts_nothing(
 
     assert response.status_code == 422
     assert db_session.exec(select(CorpusEntry)).all() == []
+
+
+# --- Pairing marking (Story 7.2 I/O & Edge-Case Matrix) --------------------
+
+
+def test_unpaired_entry_stores_paired_false_and_no_link(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    response = authenticated_client.post(
+        "/corpus",
+        data={"content": "An unpaired report.", "paired": "unpaired"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    rows = db_session.exec(select(CorpusEntry)).all()
+    assert len(rows) == 1
+    assert rows[0].paired is False
+    assert rows[0].client_id is None
+    assert rows[0].month is None
+
+
+def test_paired_and_linked_entry_persists_client_id_and_month(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _seed_client(db_session)
+
+    response = authenticated_client.post(
+        "/corpus",
+        data={
+            "content": "Paired and linked.",
+            "paired": "paired",
+            "client_id": str(ada.id),
+            "month": "2026-05",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    rows = db_session.exec(select(CorpusEntry)).all()
+    assert len(rows) == 1
+    assert rows[0].paired is True
+    assert rows[0].client_id == ada.id
+    assert rows[0].month == "2026-05"
+
+
+def test_paired_entry_with_no_client_and_no_month_persists_with_nulls(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    response = authenticated_client.post(
+        "/corpus",
+        data={
+            "content": "Chart known, not in the app.",
+            "paired": "paired",
+            "client_id": "",
+            "month": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    rows = db_session.exec(select(CorpusEntry)).all()
+    assert len(rows) == 1
+    assert rows[0].paired is True
+    assert rows[0].client_id is None
+    assert rows[0].month is None
+
+
+def test_paired_entry_with_unknown_client_is_rejected_and_inserts_nothing(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    response = authenticated_client.post(
+        "/corpus",
+        data={"content": "Paired.", "paired": "paired", "client_id": str(uuid4())},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert 'role="alert"' in response.text
+    assert db_session.exec(select(CorpusEntry)).all() == []
+
+
+def test_paired_entry_with_malformed_client_id_is_rejected_and_inserts_nothing(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    response = authenticated_client.post(
+        "/corpus",
+        data={"content": "Paired.", "paired": "paired", "client_id": "not-a-uuid"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert 'role="alert"' in response.text
+    assert db_session.exec(select(CorpusEntry)).all() == []
+
+
+@pytest.mark.parametrize("bad_month", ["2026-13", "may", "2026-5"])
+def test_paired_entry_with_a_bad_month_is_rejected_and_inserts_nothing(
+    authenticated_client: TestClient, db_session: Session, bad_month: str
+) -> None:
+    response = authenticated_client.post(
+        "/corpus",
+        data={"content": "Paired.", "paired": "paired", "month": bad_month},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert 'role="alert"' in response.text
+    assert db_session.exec(select(CorpusEntry)).all() == []
+
+
+def test_unpaired_entry_ignores_submitted_link_fields(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _seed_client(db_session)
+
+    response = authenticated_client.post(
+        "/corpus",
+        data={
+            "content": "Unpaired, but link fields sent.",
+            "paired": "unpaired",
+            "client_id": str(ada.id),
+            "month": "2026-05",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    rows = db_session.exec(select(CorpusEntry)).all()
+    assert len(rows) == 1
+    assert rows[0].paired is False
+    assert rows[0].client_id is None
+    assert rows[0].month is None
+
+
+def test_blank_content_with_paired_is_rejected_and_inserts_nothing(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    response = authenticated_client.post(
+        "/corpus",
+        data={"content": "   \n\t  ", "paired": "paired"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert 'role="alert"' in response.text
+    assert db_session.exec(select(CorpusEntry)).all() == []
+
+
+def test_a_422_re_render_echoes_the_submitted_input_back(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """``_render_new_form`` preserves ``content`` and the submitted marking
+    fields on every rejection: a distinctive prose body and the bad month
+    both survive the round trip into the re-rendered form."""
+    response = authenticated_client.post(
+        "/corpus",
+        data={"content": "KEEP-THIS-PROSE", "paired": "paired", "month": "2026-13"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert "KEEP-THIS-PROSE" in response.text
+    assert "2026-13" in response.text
+    assert db_session.exec(select(CorpusEntry)).all() == []
+
+
+def test_paired_entry_with_only_a_valid_month_persists(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    response = authenticated_client.post(
+        "/corpus",
+        data={
+            "content": "Paired, month only.",
+            "paired": "paired",
+            "client_id": "",
+            "month": "2026-05",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    rows = db_session.exec(select(CorpusEntry)).all()
+    assert len(rows) == 1
+    assert rows[0].paired is True
+    assert rows[0].client_id is None
+    assert rows[0].month == "2026-05"
+
+
+def test_list_shows_paired_client_and_month_and_unpaired_state(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _seed_client(db_session, name="Ada Lovelace")
+    db_session.add(
+        CorpusEntry(
+            content="PAIRED-BLOCK-MARKER",
+            paired=True,
+            client_id=ada.id,
+            month="2026-05",
+            created_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+    )
+    db_session.add(
+        CorpusEntry(
+            content="UNPAIRED-BLOCK-MARKER",
+            # A created_at month deliberately unlike the paired entry's linked
+            # month ("2026-05") so "2026-05" appearing in the unpaired block
+            # would only ever be a template bug, not this timestamp.
+            created_at=datetime(2026, 3, 1, tzinfo=UTC),
+        )
+    )
+    db_session.commit()
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    blocks = response.text.split("<li>")
+    paired_block = next(block for block in blocks if "PAIRED-BLOCK-MARKER" in block)
+    unpaired_block = next(block for block in blocks if "UNPAIRED-BLOCK-MARKER" in block)
+
+    assert "Ada Lovelace" in paired_block
+    assert "2026-05" in paired_block
+    assert "Paired" in paired_block
+
+    assert "Unpaired" in unpaired_block
+    assert "Ada Lovelace" not in unpaired_block
+    assert "2026-05" not in unpaired_block
+
+
+def test_new_form_offers_the_existing_clients_in_the_picker(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    _seed_client(db_session, name="Grace Hopper")
+
+    response = authenticated_client.get("/corpus/new")
+
+    assert response.status_code == 200
+    assert "Grace Hopper" in response.text
+    assert 'name="paired"' in response.text
 
 
 # --- FR-29 cascade (matrix rows 8 & 9) --------------------------------------

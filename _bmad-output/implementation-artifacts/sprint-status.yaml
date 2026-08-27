@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-27-2026 09:59
+last_updated: 08-27-2026
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -100,7 +100,7 @@ development_status:
 
   epic-7: in-progress
   7-1-add-a-past-report-to-the-corpus: review
-  7-2-mark-an-entry-paired-or-unpaired: backlog
+  7-2-mark-an-entry-paired-or-unpaired: review
   7-3-see-how-much-corpus-i-actually-have: backlog
   epic-7-retrospective: optional
 

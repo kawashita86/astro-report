@@ -13,9 +13,16 @@
 
       {% if entries %}
       <ul>
-        {% for entry in entries %}
+        {% for entry, client in entries %}
         <li>
           <p>{{ entry.created_at }}</p>
+          {% if entry.paired %}
+          <p>
+            Paired{% if client %} — {{ client.name }}{% endif %}{% if entry.month %} — {{ entry.month }}{% endif %}
+          </p>
+          {% else %}
+          <p>Unpaired</p>
+          {% endif %}
           <pre>{{ entry.content }}</pre>
         </li>
         {% endfor %}

@@ -20,6 +20,54 @@
         <label for="content">Report text</label>
         <textarea id="content" name="content" required rows="30" cols="100">{{ content }}</textarea>
 
+        <fieldset>
+          <legend>Do you know the chart behind this report?</legend>
+          <label>
+            <input
+              type="radio"
+              name="paired"
+              value="unpaired"
+              {% if paired != "paired" %}checked{% endif %}
+            />
+            No — unpaired
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="paired"
+              value="paired"
+              {% if paired == "paired" %}checked{% endif %}
+            />
+            Yes — paired
+          </label>
+        </fieldset>
+
+        <label for="client_id">Client (optional — only if the application holds it)</label>
+        <select id="client_id" name="client_id">
+          <option value="" {% if not client_id %}selected{% endif %}>
+            — not in the application —
+          </option>
+          {% for client in clients %}
+          <option
+            value="{{ client.id }}"
+            {% if client_id == client.id|string %}selected{% endif %}
+          >
+            {{ client.name }}
+          </option>
+          {% endfor %}
+        </select>
+
+        <label for="month">Month (optional — YYYY-MM)</label>
+        <input
+          type="text"
+          id="month"
+          name="month"
+          value="{{ month }}"
+          pattern="\d{4}-(0[1-9]|1[0-2])"
+          placeholder="2026-05"
+          title="Use the format YYYY-MM, e.g. 2026-05"
+        />
+
         <button type="submit">Add to corpus</button>
       </form>
     </main>

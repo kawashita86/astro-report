@@ -17,7 +17,11 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 from shell.adapters.postgres import client as client_module
-from shell.adapters.postgres.client import Client, delete_client_and_derived
+from shell.adapters.postgres.client import (
+    Client,
+    delete_client_and_derived,
+    list_clients,
+)
 from shell.adapters.postgres.corpus_entry import (
     CorpusEntry,
     add_corpus_entry,
@@ -91,6 +95,65 @@ def test_list_corpus_entries_is_most_recent_first(session: Session) -> None:
         "middle",
         "older",
     ]
+
+
+# --- Pairing / month (Story 7.2) ------------------------------------------------
+
+
+def test_add_corpus_entry_persists_paired_client_id_and_month(session: Session) -> None:
+    client = _make_client(session)
+    session.commit()
+
+    entry = add_corpus_entry(
+        session,
+        content="Paired and linked.",
+        paired=True,
+        client_id=client.id,
+        month="2026-05",
+    )
+    session.commit()
+
+    reloaded = session.get(CorpusEntry, entry.id)
+    assert reloaded is not None
+    assert reloaded.paired is True
+    assert reloaded.client_id == client.id
+    assert reloaded.month == "2026-05"
+
+
+def test_add_corpus_entry_defaults_to_unpaired_with_no_link(session: Session) -> None:
+    entry = add_corpus_entry(session, content="Just prose.")
+    session.commit()
+
+    reloaded = session.get(CorpusEntry, entry.id)
+    assert reloaded is not None
+    assert reloaded.paired is False
+    assert reloaded.client_id is None
+    assert reloaded.month is None
+
+
+def test_a_paired_entry_may_have_both_link_fields_unset(session: Session) -> None:
+    entry = add_corpus_entry(session, content="Chart known, not in the app.", paired=True)
+    session.commit()
+
+    reloaded = session.get(CorpusEntry, entry.id)
+    assert reloaded is not None
+    assert reloaded.paired is True
+    assert reloaded.client_id is None
+    assert reloaded.month is None
+
+
+def test_list_clients_orders_by_name_then_id(session: Session) -> None:
+    zoe = _make_client(session, name="Zoe")
+    ada_1 = _make_client(session, name="Ada")
+    ada_2 = _make_client(session, name="Ada")
+    session.commit()
+
+    listed = list_clients(session)
+
+    assert [c.name for c in listed] == ["Ada", "Ada", "Zoe"]
+    ada_ids = [c.id for c in listed[:2]]
+    assert ada_ids == sorted([ada_1.id, ada_2.id])
+    assert listed[2].id == zoe.id
 
 
 # --- FR-29 cascade ---------------------------------------------------------------
