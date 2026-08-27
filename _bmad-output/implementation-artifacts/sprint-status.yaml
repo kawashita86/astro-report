@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-26-2026
+last_updated: 08-27-2026 08:14
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -90,13 +90,13 @@ development_status:
   epic-5-retrospective: done
 
   epic-6: in-progress
-  6-1-read-a-report-with-its-facts-one-click-away: review
-  6-2-export-a-passed-report-to-pdf-and-markdown: review
-  6-3-record-how-the-report-went-out-in-one-interaction: review
-  6-4-browse-everything-i-have-produced-for-a-client: review
-  6-5-take-a-backup-i-actually-hold: review
-  6-6-be-told-when-my-backup-is-out-of-date: review
-  epic-6-retrospective: optional
+  6-1-read-a-report-with-its-facts-one-click-away: done
+  6-2-export-a-passed-report-to-pdf-and-markdown: done
+  6-3-record-how-the-report-went-out-in-one-interaction: done
+  6-4-browse-everything-i-have-produced-for-a-client: done
+  6-5-take-a-backup-i-actually-hold: done
+  6-6-be-told-when-my-backup-is-out-of-date: done
+  epic-6-retrospective: done
 
   epic-7: backlog
   7-1-add-a-past-report-to-the-corpus: backlog
@@ -477,3 +477,77 @@ action_items:
     owner: "human (spec owner)"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+  - id: "epic-6-retro-item-46-make-the-alembic-migration-chain-reachab"
+    epic: 6
+    action: "Make the Alembic migration chain reachable on a real Postgres: revision
+      id 0014_bound_client_and_chart_string_columns (42 chars) exceeds the default
+      alembic_version.version_num VARCHAR(32), so alembic upgrade head fails at 0014
+      and all of Epic 6 (0015-0018) is unreachable behind it. Shorten the id or override
+      the version table in migrations/env.py, add a test that runs alembic upgrade
+      head against a real throwaway Postgres, and check whether the deployed Render
+      DB has been receiving migrations at all."
+    owner: "dev loop + Francesco (deploy check)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
+  - id: "epic-6-retro-item-47-decide-the-markdown-export-scope-gap-epi"
+    epic: 6
+    action: "Decide the Markdown-export scope gap: epic-6-context.md requires \"Both
+      PDF and Markdown must be produced\" but only PDF shipped (deferred at planning
+      time, deferred-work.md:525). Either formally accept the descope and amend epic-6-context.md,
+      or schedule the Markdown follow-up spec."
+    owner: "Francesco (spec owner)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
+  - id: "epic-6-retro-item-48-add-a-deterministic-same-month-tiebreak"
+    epic: 6
+    action: "Add a deterministic same-month tiebreak to list_client_reports ordering
+      and decide on (client_id, month) uniqueness in start_report_run -- two passed
+      Reports for one client+month (the superseded-chart case Story 6.4 targets) render
+      in undefined order. Bundle with epic-4-retro-item-28."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
+  - id: "epic-6-retro-item-49-decide-get-with-side-effects-for-get-bac"
+    epic: 6
+    action: "Decide GET-with-side-effects for GET /backup and GET /report-runs/{id}/export/pdf:
+      at minimum make /backups backup_record INSERT resilient to non-deliberate hits
+      (or move behind a POST) so a prefetch/retry cannot silently clear the Story
+      6.6 staleness warning."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
+  - id: "epic-6-retro-item-50-give-the-client-facing-export-pdf-human"
+    epic: 6
+    action: "Give the client-facing export PDF human-readable section headings (a
+      shared snake_case -> Italian-title map, also improving report.html/report_draft.html)
+      and minimal print CSS in report_export.html -- it currently shows raw keys like
+      energia_generale with no styling."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
+  - id: "epic-6-retro-item-51-extract-a-shared-_load_passed_report_bun"
+    epic: 6
+    action: "Extract a shared _load_passed_report_bundle(session, run_id) helper in
+      shell/http/routes/report_runs.py to collapse the 4x duplicated Report -> ReportRun
+      -> ReportDraft -> ReportPayload -> Client + render_draft block (view_report_payload/view_report_draft/view_report/download_report_pdf).
+      Bundle with epic-2-retro-item-13."
+    owner: "whoever next touches report_runs.py"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
+  - id: "epic-6-retro-item-52-broaden-real-foreign-key-enforcement-acr"
+    epic: 6
+    action: "Broaden real foreign-key enforcement across the cascade test suite (PRAGMA
+      foreign_keys=ON for every delete_client_and_derived test, not just the one Story
+      6.4 regression), and promote shell/adapters/postgres/report_run.py::_UTCDateTime
+      to an explicit shared module now that 3 adapter modules import it."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
+  - id: "epic-6-retro-item-53-document-operator-handling-of-the-get-ba"
+    epic: 6
+    action: "Document operator handling of the GET /backup file (encryption at rest,
+      retention, rotation) before the route sees regular use -- it is a full unencrypted
+      plaintext dump of every Clients PII."
+    owner: "Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
