@@ -597,3 +597,15 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-7-2-mark-an-entry-paired-or-unpaired.md`
   summary: `_render_new_form` runs `list_clients` (a full `client` table load) even on the `_FormTooLarge` / `_FormNotUtf8` body-rejection paths, which exist to reject an abusive body cheaply.
   evidence: Story 7.2 routed the two body-level 422 handlers in `shell/http/routes/corpus.py` through `_render_new_form`, which unconditionally calls `list_clients(session)` to populate the Client picker; the oversized/non-UTF-8 branches have no submitted values to echo and do not need the picker, so the query is pure overhead on the exact requests that path is meant to shed.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-1-pass-conformance-across-the-full-adversarial-fixture-set.md`
+  summary: Month-fixture `expected.transit_positions` rows only ever assert `retrograde` where it is `true`; a body that is direct is indistinguishable from a body whose direction was never transcribed, so `_calc_body`'s speed sign is unchecked for most bodies.
+  evidence: `compare()` walks only the keys present in `expected`, and the three month fixtures carry `retrograde = true` on a handful of rows and nothing on the rest. Requiring an explicit `retrograde` bool on all ten rows of every month fixture would turn every row into a positive direction assertion. Fixture-transcription scope (Francesco's), broader than Story 8.1's wiring.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-1-pass-conformance-across-the-full-adversarial-fixture-set.md`
+  summary: The three `correction_2026_08_27` fixture values still need a live Astro.com re-verification (Story 8.1 AC4), and that obligation currently lives only in a TOML comment that a green build never surfaces.
+  evidence: Both edited fixtures end their `correction_2026_08_27` note with "PENDING: Francesco to re-verify ... and record the outcome here". Nothing in CI or the test suite flags an unresolved PENDING. A durable tracker (issue, checklist, or sprint action item) is needed so the merge gate is not forgotten.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-1-pass-conformance-across-the-full-adversarial-fixture-set.md`
+  summary: The per-fixture `correction_*` / `reverify_*` metadata log in the conformance fixtures is now five-plus entries deep and out of chronological order (`reverify_2026_08_20` precedes `correction_2026_08_19`), becoming a changelog-in-a-fixture that is its own maintenance burden.
+  evidence: `tests/conformance/fixtures/no-lunations-month.toml` header carries `correction_2026_08_18`, `reverify_2026_08_20`, `correction_2026_08_19`, `correction_2026_08_27` in that file order. Pre-existing ordering drift, not introduced by Story 8.1; consider consolidating into a single ordered `history` array or a sidecar file.

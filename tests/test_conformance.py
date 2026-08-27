@@ -71,6 +71,22 @@ Two tests, matching the story's own AC2/AC3 split:
   at all (``_fixture_params``) -- ``retrograde-station-month`` carries no
   such section and stays untouched by this story.
 
+  Story 8.1 wires the last stubbed section, ``expected.transit_positions``,
+  in for real: ``_transit_positions_for_month_fixture()`` recomputes each of
+  the ten bodies sun..pluto (``_PLANET_BODIES`` with ``true_node`` filtered)
+  at the fixture's ``transit_snapshot_utc`` via the same
+  ``_calc_body()``/``_julian_day_ut()`` helpers the other test-shaping
+  functions already use -- geocentric, anchor-chart-independent -- and emits
+  ``{name, longitude, retrograde}`` rows in ``_PLANET_BODIES`` order.
+  ``retrograde`` is ``speed < 0`` on every row; ``compare()`` only checks it
+  where a fixture asserts it. With that wired, the ``"remainder"`` case no
+  longer stands for an unimplemented section: it is demoted from an
+  ``xfail(raises=NotImplementedError)`` to a plain guard comparing ``{}``
+  against ``{}`` (``compute_output_for()`` now returns ``{}`` for it), so a
+  future adversarial fixture that grows an ``expected.<section>`` the
+  harness does not recognize trips a loud failure naming that section
+  instead of slipping through.
+
 Reading ``data/computation.toml`` and asserting the ephemeris identity here,
 rather than in ``core/``, mirrors ``shell/http/app.py``'s own eager-load
 shape (AD-1/AD-18): this test module -- like the rest of ``tests/`` -- is
@@ -88,7 +104,7 @@ from typing import Any
 
 import pytest
 
-from core.ephemeris.chart import _ASPECTS, compute_natal_chart
+from core.ephemeris.chart import _ASPECTS, _PLANET_BODIES, compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.ephemeris.positions import QUANTUM, _angular_separation, _calc_body, _julian_day_ut
 from core.transits.aspects import _TRANSIT_BODY_IDS, _natal_targets, find_transit_aspects
@@ -377,6 +393,29 @@ _INGRESSES_KEY = "ingresses"
 #: same way ``_STATIONS_KEY``/``_INGRESSES_KEY`` are.
 _LUNATIONS_SCOPE = "lunations"
 
+#: A month fixture's ``expected.transit_positions`` section (Story 8.1) --
+#: the transiting bodies' geocentric longitudes and retrograde flags at the
+#: fixture's own ``transit_snapshot_utc``. Checked for real through this
+#: module's generic ``compute_output_for()``/``compare()`` scope machinery,
+#: exactly like ``_LUNATIONS_SCOPE`` (full dict/list equality within the
+#: runner's numeric tolerance). This was the last section still stubbed
+#: behind ``compute_output_for()``'s ``raise NotImplementedError``; wiring
+#: it lets the ``"remainder"`` case drop its ``xfail`` and become a plain
+#: unknown-section tripwire. Excluded from ``"remainder"``'s own
+#: expected-dict slice (``_expected_for_scope``) the same way the other
+#: section keys are.
+_TRANSIT_POSITIONS_SCOPE = "transit_positions"
+
+#: The catch-all parametrized case per month fixture (Story 1.6, demoted by
+#: Story 8.1). Every ``expected.*`` section a month fixture can carry is now
+#: computed for real, so ``"remainder"`` no longer stands for anything
+#: unimplemented -- it is a release-gate tripwire: its ``_expected_for_scope``
+#: slice is the fixture's ``expected`` table minus every section the harness
+#: already checks, so it is ``{}`` today and ``compare({}, {})`` passes, but
+#: a future fixture that grows an unrecognized ``expected.<section>`` leaves
+#: that section in the slice and fails the compare, naming it.
+_REMAINDER_SCOPE = "remainder"
+
 
 def _truncated_to_the_minute(instant: datetime) -> datetime:
     """``instant`` with its seconds/microseconds dropped -- see
@@ -432,6 +471,49 @@ def _lunations_for_month_fixture(fixture: Fixture) -> list[dict[str, Any]]:
     return rows
 
 
+def _transit_positions_for_month_fixture(fixture: Fixture) -> list[dict[str, Any]]:
+    """The ten transiting bodies' geocentric longitudes and retrograde flags
+    at ``fixture``'s ``transit_snapshot_utc``, shaped to the fixture's own
+    ``name``/``longitude``/``retrograde`` dict format.
+
+    This is a conformance cross-check -- "does our ephemeris agree with
+    Astro.com at an arbitrary non-birth instant" -- not a Report artifact,
+    so it stays in the test-shaping layer exactly like
+    ``_transit_events_for_month_fixture`` / ``_lunations_for_month_fixture``
+    (which already recompute against ``_calc_body``), never a second
+    ephemeris path in ``core/``.
+
+    Bodies are ``_PLANET_BODIES`` with ``true_node`` filtered out (the ten
+    sun..pluto), emitted in that order so ``compare()``'s positional list
+    walk aligns with each fixture's own ``transit_positions`` order. Unlike
+    ``_transit_events_for_month_fixture``'s ``_TRANSIT_BODY_IDS`` (which
+    omits the Moon per FR-9), this keeps the Moon: FR-9 only bars the Moon
+    as an *aspect* partner, and a raw position snapshot legitimately lists
+    it. ``true_node`` is dropped because a lunar node is not a transiting
+    body in the snapshot and no fixture's ``transit_positions`` lists one.
+    ``retrograde`` is ``speed < 0`` -- matching
+    ``core/ephemeris/chart._planet_position`` -- and is emitted on every row;
+    ``compare()`` only checks it where a fixture asserts it. Longitudes come
+    back from ``_calc_body`` already normalized to ``[0, 360)`` and
+    quantized to ``0.0001``.
+    """
+    jd_ut = _julian_day_ut(_transit_snapshot_utc(fixture))
+
+    rows: list[dict[str, Any]] = []
+    for name, body_id in _PLANET_BODIES:
+        if name == "true_node":
+            continue
+        longitude, speed = _calc_body(jd_ut, body_id)
+        rows.append(
+            {
+                "name": name,
+                "longitude": str(longitude),
+                "retrograde": speed < 0,
+            }
+        )
+    return rows
+
+
 def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, Any]:
     """Compute the output a real chart/transit engine produces for
     ``fixture``, shaped to match ``fixture.expected``'s dict/list format.
@@ -441,9 +523,13 @@ def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, 
     ``compute_natal_chart()`` for natal fixtures (``scope`` is always
     ``None`` there -- a natal fixture is never split into sections). Story
     3.1 wires in ``find_transit_aspects()`` for a month fixture's
-    ``scope="transit_events"`` only; any other ``scope`` for a month fixture
-    (``"remainder"``, standing in for lunations/positions) still raises,
-    exactly as the whole fixture used to before this story. Story 3.2 wires
+    ``scope="transit_events"``, Story 3.4 ``find_lunations()`` for
+    ``scope="lunations"``, and Story 8.1 the transiting-body position
+    snapshot for ``scope="transit_positions"`` -- every ``expected.*``
+    section a month fixture can carry is now computed for real. ``scope=
+    "remainder"`` no longer stands for anything unimplemented: it returns
+    ``{}`` and acts as a release-gate tripwire for an unrecognized future
+    ``expected.<section>`` (see the module docstring). Story 3.2 wires
     ``find_stations()`` in for real too, but not through this function --
     see the module docstring and
     ``test_stations_fall_within_conformance_fixture_brackets``.
@@ -463,16 +549,28 @@ def compute_output_for(fixture: Fixture, scope: str | None = None) -> dict[str, 
     if scope == _LUNATIONS_SCOPE:
         return {_LUNATIONS_SCOPE: _lunations_for_month_fixture(fixture)}
 
+    if scope == _TRANSIT_POSITIONS_SCOPE:
+        return {_TRANSIT_POSITIONS_SCOPE: _transit_positions_for_month_fixture(fixture)}
+
+    if scope == _REMAINDER_SCOPE:
+        # Every ``expected.*`` section a month fixture can carry is now
+        # computed for real above. ``remainder`` no longer stands for an
+        # unimplemented section -- it is a release-gate tripwire (Story 8.1):
+        # ``_expected_for_scope`` hands it ``{}``, so returning ``{}`` here
+        # passes; a future unrecognized ``expected.<section>`` would make its
+        # slice non-empty and fail the compare, naming that section.
+        return {}
+
     raise NotImplementedError(
-        "real position computation is not wired in yet "
-        f"(Story 3.4 wired Lunations in): fixture {fixture.name!r}, scope {scope!r}"
+        f"compute_output_for: unrecognized scope {scope!r} for fixture {fixture.name!r}"
     )
 
 
 def _expected_for_scope(fixture: Fixture, scope: str | None) -> dict[str, Any]:
     """The slice of ``fixture.expected`` a given parametrized test case
     checks. ``scope=None`` (every natal fixture) is the whole table,
-    unchanged. A month fixture is checked in two disjoint slices -- see
+    unchanged. A month fixture is checked in several disjoint slices, one
+    per ``expected.*`` section plus the ``"remainder"`` catch-all -- see
     ``_fixture_params()``."""
     if scope is None:
         return fixture.expected
@@ -480,11 +578,38 @@ def _expected_for_scope(fixture: Fixture, scope: str | None) -> dict[str, Any]:
         return {_IMPLEMENTED_MONTH_SCOPE: fixture.expected.get(_IMPLEMENTED_MONTH_SCOPE, [])}
     if scope == _LUNATIONS_SCOPE:
         return {_LUNATIONS_SCOPE: fixture.expected.get(_LUNATIONS_SCOPE, [])}
-    return {
-        key: value
-        for key, value in fixture.expected.items()
-        if key not in (_IMPLEMENTED_MONTH_SCOPE, _STATIONS_KEY, _INGRESSES_KEY, _LUNATIONS_SCOPE)
-    }
+    if scope == _TRANSIT_POSITIONS_SCOPE:
+        return {
+            _TRANSIT_POSITIONS_SCOPE: fixture.expected.get(_TRANSIT_POSITIONS_SCOPE, [])
+        }
+    if scope == _REMAINDER_SCOPE:
+        # The tripwire slice: the fixture's ``expected`` table minus every
+        # section the harness already checks. Two rationales for the
+        # exclusions:
+        #  - ``_IMPLEMENTED_MONTH_SCOPE`` / ``_LUNATIONS_SCOPE`` /
+        #    ``_TRANSIT_POSITIONS_SCOPE`` each have their own parametrized
+        #    scope above, checked through this same compare() machinery.
+        #  - ``_STATIONS_KEY`` / ``_INGRESSES_KEY`` are checked for real too,
+        #    but by the dedicated bracket tests
+        #    (``test_stations_fall_within_conformance_fixture_brackets`` /
+        #    ``test_ingresses_fall_within_conformance_fixture_brackets``),
+        #    not here -- Astro.com publishes no exact Station/Ingress instant.
+        # Anything left is a section the harness does not recognize.
+        return {
+            key: value
+            for key, value in fixture.expected.items()
+            if key
+            not in (
+                _IMPLEMENTED_MONTH_SCOPE,
+                _STATIONS_KEY,
+                _INGRESSES_KEY,
+                _LUNATIONS_SCOPE,
+                _TRANSIT_POSITIONS_SCOPE,
+            )
+        }
+    raise NotImplementedError(
+        f"_expected_for_scope: unrecognized scope {scope!r} for fixture {fixture.name!r}"
+    )
 
 
 def test_reports_zero_fixtures_without_failing() -> None:
@@ -501,15 +626,16 @@ def test_reports_zero_fixtures_without_failing() -> None:
 
 def _fixture_params() -> list[Any]:
     """One ``pytest.param`` per discovered natal fixture (real, Story 2.2)
-    and *two or three* per discovered month fixture: ``transit_events``
-    (real, Story 3.1), ``lunations`` (real, Story 3.4 -- only emitted when
-    the fixture's own ``expected`` table carries a ``"lunations"`` key,
-    since only ``two-lunations-month``/``no-lunations-month`` do) and
-    ``remainder`` -- ``transit_positions``, still behind the same
-    ``xfail(raises=NotImplementedError)`` shape Story 1.6 gave every
-    fixture, now scoped to only the section actually still unimplemented
-    (``stations``/``ingresses`` are real too, Stories 3.2/3.3, but checked
-    outside this parametrization -- see
+    and *three or four* per discovered month fixture, all real: ``transit_events``
+    (Story 3.1), ``lunations`` (Story 3.4 -- only emitted when the fixture's
+    own ``expected`` table carries a ``"lunations"`` key, since only
+    ``two-lunations-month``/``no-lunations-month`` do), ``transit_positions``
+    (Story 8.1) and ``remainder``. ``remainder`` is no longer an
+    ``xfail(raises=NotImplementedError)`` -- Story 8.1 wired the last stubbed
+    section, so it is now a plain case comparing ``{}`` against ``{}`` that
+    trips only if a future adversarial fixture grows an ``expected.<section>``
+    the harness does not recognize (``stations``/``ingresses`` are real too,
+    Stories 3.2/3.3, but checked outside this parametrization -- see
     ``test_stations_fall_within_conformance_fixture_brackets``/
     ``test_ingresses_fall_within_conformance_fixture_brackets``).
     Each ``pytest.param`` carries ``(fixture_path, scope)``."""
@@ -524,20 +650,17 @@ def _fixture_params() -> list[Any]:
         )
         if _LUNATIONS_SCOPE in fixture.expected:
             params.append(pytest.param(path, _LUNATIONS_SCOPE, id=f"{path.stem}-lunations"))
+        # Unconditional, unlike ``-lunations`` above: every month fixture
+        # must transcribe a full ten-body ``expected.transit_positions``, so
+        # this scope is mandatory -- a future month fixture that omits it
+        # *should* fail loudly. ``lunations`` is genuinely optional
+        # (``retrograde-station-month`` carries none).
         params.append(
             pytest.param(
-                path,
-                "remainder",
-                id=f"{path.stem}-remainder",
-                marks=pytest.mark.xfail(
-                    raises=NotImplementedError,
-                    reason=(
-                        "real position computation is not wired in yet "
-                        "(Story 3.4 wired Lunations in) -- see compute_output_for()"
-                    ),
-                ),
+                path, _TRANSIT_POSITIONS_SCOPE, id=f"{path.stem}-transit_positions"
             )
         )
+        params.append(pytest.param(path, _REMAINDER_SCOPE, id=f"{path.stem}-{_REMAINDER_SCOPE}"))
     return params
 
 
@@ -553,6 +676,140 @@ def test_computed_output_matches_conformance_fixture(fixture_path: Path, scope: 
         f"{mismatch.field}: expected {mismatch.expected!r}, computed {mismatch.computed!r}"
         for mismatch in mismatches
     )
+
+
+def _synthetic_month_fixture(
+    *, expected: dict[str, Any], birth_data: dict[str, Any] | None = None
+) -> Fixture:
+    """A month-shaped :class:`Fixture` built in-memory (no file on disk).
+
+    ``anchor_natal_fixture`` in ``birth_data`` is what makes
+    ``_is_natal_fixture`` return ``False`` -- these tests never touch real
+    astronomy, they exercise the scope-routing / guard logic only.
+    """
+    return Fixture(
+        name="synthetic-month",
+        path=Path("synthetic-month.toml"),
+        metadata={"name": "synthetic-month"},
+        birth_data=birth_data
+        if birth_data is not None
+        else {
+            "anchor_natal_fixture": "near-midnight-birth",
+            "month": "2023-08",
+            "transit_snapshot_utc": "2023-08-01T00:00:00Z",
+        },
+        expected=expected,
+    )
+
+
+def test_remainder_scope_trips_on_an_unrecognized_expected_section() -> None:
+    """Story 8.1: with every known ``expected.*`` section computed for real,
+    ``"remainder"`` is a release-gate tripwire -- a fixture that grows a
+    section the harness does not recognize fails the compare, naming it,
+    rather than slipping through unchecked."""
+    fixture = _synthetic_month_fixture(
+        expected={"mystery_section": [{"foo": "bar"}], "transit_positions": []}
+    )
+
+    computed = compute_output_for(fixture, _REMAINDER_SCOPE)
+    expected = _expected_for_scope(fixture, _REMAINDER_SCOPE)
+
+    assert computed == {}
+    assert "mystery_section" in expected
+    assert "transit_positions" not in expected
+
+    mismatches = compare(fixture.name, expected, computed)
+
+    assert [mismatch.field for mismatch in mismatches] == ["expected.mystery_section"]
+
+
+def test_remainder_scope_passes_when_only_recognized_sections_are_present() -> None:
+    """The complement of the tripwire test: a fixture carrying only the
+    sections the harness already computes leaves ``"remainder"`` with an
+    empty slice on both sides, so it passes. The synthetic fixture carries
+    one section of each exclusion rationale -- ``transit_events`` /
+    ``transit_positions`` (own scope) and ``stations`` / ``ingresses``
+    (dedicated bracket test) -- so both branches of the exclusion tuple are
+    exercised, not just ``stations``."""
+    fixture = _synthetic_month_fixture(
+        expected={
+            "transit_events": [{"transiting": "sun"}],
+            "transit_positions": [{"name": "sun"}],
+            "stations": [{"body": "mercury"}],
+            "ingresses": [{"body": "mercury"}],
+        }
+    )
+
+    assert _expected_for_scope(fixture, _REMAINDER_SCOPE) == {}
+    assert compute_output_for(fixture, _REMAINDER_SCOPE) == {}
+    assert (
+        compare(
+            fixture.name,
+            _expected_for_scope(fixture, _REMAINDER_SCOPE),
+            compute_output_for(fixture, _REMAINDER_SCOPE),
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "birth_data, match",
+    [
+        (
+            {"anchor_natal_fixture": "near-midnight-birth", "month": "2023-08"},
+            "transit_snapshot_utc is required",
+        ),
+        (
+            {
+                "anchor_natal_fixture": "near-midnight-birth",
+                "month": "2023-08",
+                "transit_snapshot_utc": "2023-08-01T00:00:00",
+            },
+            "must be timezone-aware",
+        ),
+    ],
+    ids=["missing", "naive"],
+)
+def test_transit_snapshot_utc_rejects_a_missing_or_naive_value(
+    birth_data: dict[str, Any], match: str
+) -> None:
+    """``_transit_snapshot_utc`` is the shared validation both
+    ``_transit_positions_for_month_fixture`` and
+    ``_transit_events_for_month_fixture`` route through, so a month fixture
+    whose ``transit_snapshot_utc`` is absent or not timezone-aware UTC fails
+    loudly with a ``FixtureFormatError`` naming the fixture -- never a
+    silently-wrong position computed against a misinterpreted instant."""
+    fixture = _synthetic_month_fixture(expected={"transit_positions": []}, birth_data=birth_data)
+
+    with pytest.raises(FixtureFormatError, match=match):
+        _transit_snapshot_utc(fixture)
+
+
+def test_transit_positions_row_shape_is_ten_bodies_in_planet_order() -> None:
+    """Oracle-independent structural check on
+    ``_transit_positions_for_month_fixture`` -- asserts the row *shape*, not
+    any ephemeris value: exactly the ten ``_PLANET_BODIES`` bodies
+    (``true_node`` excluded) in that order, each row a ``str`` longitude and
+    a ``bool`` retrograde flag."""
+    fixture = load_fixture(FIXTURES_DIR / "retrograde-station-month.toml")
+
+    rows = _transit_positions_for_month_fixture(fixture)
+
+    assert len(rows) == 10
+    assert [row["name"] for row in rows] == [
+        "sun",
+        "moon",
+        "mercury",
+        "venus",
+        "mars",
+        "jupiter",
+        "saturn",
+        "uranus",
+        "neptune",
+        "pluto",
+    ]
+    assert all(isinstance(row["longitude"], str) for row in rows)
+    assert all(isinstance(row["retrograde"], bool) for row in rows)
 
 
 # --- Story 3.2: find_stations() against the bracketed fixtures ------------------

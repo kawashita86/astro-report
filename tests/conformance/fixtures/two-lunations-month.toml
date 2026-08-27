@@ -4,6 +4,7 @@ adversarial_case = "a calendar month containing two full moons of the same kind 
 source = "August 2023: full moons on 2023-08-01 at 18:31 UTC and 2023-08-31 at 01:35 UTC (the second widely reported as a 'super blue moon'). Lunation timestamps corroborated independently across NASA (science.nasa.gov), Space.com, timeanddate.com and Star Walk -- not sourced from astro.com. Transit snapshot (all bodies except the Moon) computed via astro.com's 'Natal chart and transits' tool at 2023-08-01 00:00 UT against the near-midnight-birth.toml natal chart as anchor. Logged in against an Astro.com account on 2026-08-15."
 note = "The transit snapshot is a single moment (month start, 00:00 UT), not a walk of the whole month -- it exists to give the future computation a real, checkable reference point, not to enumerate every aspect that forms and separates across August. The two full-moon timestamps are the actual adversarial fact under test here."
 correction_2026_08_19 = "expected.lunations originally listed only the two full moons (the adversarial fact this fixture's name is about) and omitted August 2023's own new moon, which falls squarely inside the same calendar month (2023-08-16 09:38 UTC), independently corroborated across NASA (moon.nasa.gov), timeanddate.com and lunaf.com. Story 3.4's real find_lunations() computation -- which walks the whole month, not just the two full-moon instants -- correctly locates all three, so the missing entry is added below (chronologically, between the two full moons) rather than narrowing the computation to only the kinds this fixture happened to transcribe first."
+correction_2026_08_27 = "expected.transit_positions carried retrograde = true for jupiter and uranus; both were false positives. Story 8.1's real transit-position snapshot computation (speed < 0 from _calc_body at 2023-08-01 00:00 UT) shows both bodies still in direct motion on that date: Jupiter's 2023 retrograde station was 2023-09-05 and Uranus's was 2023-08-30, so on 2023-08-01 both were decelerating toward those stations but not yet retrograde (Jupiter speed roughly +0.106 deg/day, Uranus roughly +0.023 deg/day). Both flags are corrected from true to false (not removed) so the direct-motion state is now positively asserted and checked by compare(), rather than silently unchecked. Every other transit_positions entry (including the still-retrograde venus/saturn/neptune/pluto and both longitudes) reproduces unchanged within the runner's 0.01 deg tolerance. Retrograde flags do not feed the aspect/orb derivation, so expected.transit_events for this fixture is unaffected. PENDING: Francesco to re-verify against a live Astro.com 'Natal chart and transits' session for 2023-08-01 00:00 UT against the near-midnight-birth anchor -- confirm no 'r' marker on Jupiter or Uranus -- and record the outcome here."
 
 [birth_data]
 anchor_natal_fixture = "near-midnight-birth"
@@ -51,7 +52,7 @@ longitude = "163.2333"
 [[expected.transit_positions]]
 name = "jupiter"
 longitude = "43.6833"
-retrograde = true
+retrograde = false
 
 [[expected.transit_positions]]
 name = "saturn"
@@ -61,7 +62,7 @@ retrograde = true
 [[expected.transit_positions]]
 name = "uranus"
 longitude = "52.7500"
-retrograde = true
+retrograde = false
 
 [[expected.transit_positions]]
 name = "neptune"
