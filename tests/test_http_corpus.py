@@ -66,8 +66,14 @@ def authenticated_client(client: TestClient) -> TestClient:
     return client
 
 
-def _seed_entry(db_session: Session, *, content: str, created_at: datetime) -> CorpusEntry:
-    entry = CorpusEntry(content=content, created_at=created_at)
+def _seed_entry(
+    db_session: Session,
+    *,
+    content: str,
+    created_at: datetime,
+    paired: bool = False,
+) -> CorpusEntry:
+    entry = CorpusEntry(content=content, created_at=created_at, paired=paired)
     db_session.add(entry)
     db_session.commit()
     return entry
@@ -467,6 +473,130 @@ def test_new_form_offers_the_existing_clients_in_the_picker(
     assert response.status_code == 200
     assert "Grace Hopper" in response.text
     assert 'name="paired"' in response.text
+
+
+# --- Corpus composition line (Story 7.3 I/O & Edge-Case Matrix) -----------
+
+
+def test_empty_corpus_composition_reads_all_zero_and_keeps_the_empty_state(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    assert "0 total · 0 paired · 0 unpaired" in response.text
+    assert "No past reports" in response.text
+    assert "/corpus/new" in response.text
+
+
+def test_mixed_corpus_composition_counts_and_still_lists_every_entry(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    _seed_entry(
+        db_session, content="P-1", created_at=datetime(2026, 1, 1, tzinfo=UTC), paired=True
+    )
+    _seed_entry(
+        db_session, content="P-2", created_at=datetime(2026, 2, 1, tzinfo=UTC), paired=True
+    )
+    _seed_entry(db_session, content="U-1", created_at=datetime(2026, 3, 1, tzinfo=UTC))
+    _seed_entry(db_session, content="U-2", created_at=datetime(2026, 4, 1, tzinfo=UTC))
+    _seed_entry(db_session, content="U-3", created_at=datetime(2026, 5, 1, tzinfo=UTC))
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "5 total · 2 paired · 3 unpaired" in body
+    for marker in ("P-1", "P-2", "U-1", "U-2", "U-3"):
+        assert marker in body
+    assert body.index("U-3") < body.index("U-2") < body.index("U-1") < body.index(
+        "P-2"
+    ) < body.index("P-1")
+
+
+def test_all_unpaired_corpus_composition_counts(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    for n in range(4):
+        _seed_entry(
+            db_session, content=f"U-{n}", created_at=datetime(2026, 1, n + 1, tzinfo=UTC)
+        )
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    assert "4 total · 0 paired · 4 unpaired" in response.text
+
+
+def test_paired_entry_without_a_link_still_counts_as_paired(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    _seed_entry(
+        db_session,
+        content="Chart known, not in the app.",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        paired=True,
+    )
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    assert "1 total · 1 paired · 0 unpaired" in response.text
+
+
+def test_composition_line_precedes_the_first_entry_in_the_html(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    _seed_entry(
+        db_session, content="ONLY-ENTRY-MARKER", created_at=datetime(2026, 1, 1, tzinfo=UTC)
+    )
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    body = response.text
+    assert body.index("Corpus composition:") < body.index("ONLY-ENTRY-MARKER")
+
+
+def test_composition_counts_change_when_entries_are_added_between_requests(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    first = authenticated_client.get("/corpus")
+    assert "0 total · 0 paired · 0 unpaired" in first.text
+
+    _seed_entry(
+        db_session, content="NEW-ROW", created_at=datetime(2026, 1, 1, tzinfo=UTC), paired=True
+    )
+
+    second = authenticated_client.get("/corpus")
+    assert "1 total · 1 paired · 0 unpaired" in second.text
+
+
+def test_composition_line_after_the_real_post_then_get_user_path(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _seed_client(db_session)
+
+    authenticated_client.post(
+        "/corpus",
+        data={"content": "An unpaired past report.", "paired": "unpaired"},
+        follow_redirects=False,
+    )
+    authenticated_client.post(
+        "/corpus",
+        data={
+            "content": "A paired past report.",
+            "paired": "paired",
+            "client_id": str(ada.id),
+            "month": "2026-05",
+        },
+        follow_redirects=False,
+    )
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    assert "Corpus composition: 2 total · 1 paired · 1 unpaired" in response.text
 
 
 # --- FR-29 cascade (matrix rows 8 & 9) --------------------------------------

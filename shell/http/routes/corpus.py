@@ -126,8 +126,16 @@ def corpus_list(request: Request, session: Session = Depends(get_session)) -> Re
 
     The linked Clients are fetched in one ``IN`` query, not one ``get()`` per
     entry -- a paste-heavy corpus would otherwise issue N round trips to
-    render one page."""
+    render one page.
+
+    Story 7.3: the corpus composition -- ``total`` / ``paired_count`` /
+    ``unpaired_count`` -- is derived in Python from ``stored_entries`` (the
+    list already loaded here) and added to the template context, so the
+    summary line costs zero extra queries and no new route."""
     stored_entries = list_corpus_entries(session)
+    total = len(stored_entries)
+    paired_count = sum(1 for entry in stored_entries if entry.paired)
+    unpaired_count = total - paired_count
     linked_ids = {entry.client_id for entry in stored_entries if entry.client_id}
     clients_by_id = (
         {
@@ -144,7 +152,14 @@ def corpus_list(request: Request, session: Session = Depends(get_session)) -> Re
         for entry in stored_entries
     ]
     return _templates.TemplateResponse(
-        request, "corpus_list.html", {"entries": entries}
+        request,
+        "corpus_list.html",
+        {
+            "entries": entries,
+            "total": total,
+            "paired_count": paired_count,
+            "unpaired_count": unpaired_count,
+        },
     )
 
 
