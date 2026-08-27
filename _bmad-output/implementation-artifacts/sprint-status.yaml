@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-27-2026
+last_updated: 08-27-2026 22:30
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -109,8 +109,8 @@ development_status:
   8-2-re-verify-the-generation-provider-s-data-terms-and-record-it: done
   8-3-measure-the-latency-the-prd-only-assumed: done
   8-4-project-storage-growth-against-the-free-tier-ceiling: done
-  8-5-restore-from-a-backup-for-real: review
-  epic-8-retrospective: optional
+  8-5-restore-from-a-backup-for-real: done
+  epic-8-retrospective: done
 action_items:
   - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"
     epic: 1
@@ -595,3 +595,80 @@ action_items:
     owner: "dev loop"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-59-run-the-story-8-5-operator-restore-rehea"
+    epic: 8
+    action: "Run the Story 8.5 operator restore rehearsal against a real Neon Postgres
+      branch (empty Europe/Frankfurt branch, live GET /backup, alembic upgrade head,
+      python -m shell.restore, reopen a known Report) and fill restore-rehearsal.md
+      real values incl ratified_by=Francesco. Blocked by epic-6-retro-item-46."
+    owner: "Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-60-fix-epic-6-retro-item-46-alembic_version"
+    epic: 8
+    action: "Fix epic-6-retro-item-46 (alembic_version VARCHAR(32) vs 42-char revision
+      id 0014) - it now gates the epic-8 restore runbook. Shorten the id or override
+      the version table in migrations/env.py; add a real-throwaway-Postgres alembic
+      upgrade head test; check the deployed Render DB migration state. Folds in epic-7-retro-item-55."
+    owner: "dev loop + Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-61-do-the-story-8-3-ac-4-human-sitting-one"
+    epic: 8
+    action: "Do the Story 8.3 AC-4 human sitting: one real produce->review->export
+      of 40 Reports through the UI in one session; replace the PENDING block in docs/release-validation/latency.md
+      Throughput section."
+    owner: "Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-62-extract-tests-_release_validation-py-for"
+    epic: 8
+    action: "Extract tests/_release_validation.py for the tomllib record-guard scaffolding
+      (_TOML_BLOCK, _extract_toml_block, _meta fixture, REPO_ROOT) copied across test_data_terms_record.py
+      / test_latency_record.py / test_storage_growth_record.py / test_restore.py;
+      add a shared checked max-age staleness assertion."
+    owner: "whoever next adds a release-validation record"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-63-give-the-opt-in-measurement-harnesses-te"
+    epic: 8
+    action: "Give the opt-in measurement harnesses (test_measure_latency, test_measure_payload_size)
+      a periodic non-blocking exercise (scheduled job or a 1-run smoke) so a test_runner_driver.py
+      refactor cannot rot them behind the green record-guards."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-64-tighten-or-explicitly-accept-the-storage"
+    epic: 8
+    action: "Tighten or explicitly accept the storage-growth projection basis: re-measure
+      payload_p90_bytes against Story 8.1 adversarial fixtures (retrograde-station,
+      double-lunation) and a second birth chart, or record an accepted-deviation note
+      in storage-growth.md that Fort Worth typical-month + 1.5x factor is the deliberate
+      basis."
+    owner: "dev loop / Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-65-harden-the-outcome-pass-guard-against-pa"
+    epic: 8
+    action: "Harden the outcome==pass guard against passing on a placeholder: add
+      a field the guard cannot satisfy from in-process evidence alone (e.g. rehearsed_against=real-postgres
+      for restore-rehearsal.md, sitting_confirmed for latency.md)."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-66-start-a-docs-decisions-index-for-ratifie"
+    epic: 8
+    action: "Start a docs/decisions/ index for ratified release-gate decisions (8.2
+      benign data-terms change, 8.3 record-regeneration-risk, 8.4 storage-growth policy),
+      each linking its release-validation file and ratifying context."
+    owner: "Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
+  - id: "epic-8-retro-item-67-reconcile-the-canonical-json-docstrings"
+    epic: 8
+    action: "Reconcile the canonical-JSON docstrings with the write path: correct
+      core/payload/freeze.py::canonical_json_bytes and ReportPayload class docstring,
+      or install a canonical json_serializer on the engine in shell/http/app.py."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
