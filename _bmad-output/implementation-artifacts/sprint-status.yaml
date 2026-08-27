@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-27-2026
+last_updated: 08-27-2026 12:26
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -99,10 +99,10 @@ development_status:
   epic-6-retrospective: done
 
   epic-7: in-progress
-  7-1-add-a-past-report-to-the-corpus: review
-  7-2-mark-an-entry-paired-or-unpaired: review
-  7-3-see-how-much-corpus-i-actually-have: review
-  epic-7-retrospective: optional
+  7-1-add-a-past-report-to-the-corpus: done
+  7-2-mark-an-entry-paired-or-unpaired: done
+  7-3-see-how-much-corpus-i-actually-have: done
+  epic-7-retrospective: done
 
   epic-8: backlog
   8-1-pass-conformance-across-the-full-adversarial-fixture-set: backlog
@@ -551,3 +551,47 @@ action_items:
     owner: "Francesco"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
+  - id: "epic-7-retro-item-54-add-a-pragma-foreign_keys-on-connect-eve"
+    epic: 7
+    action: "Add a PRAGMA foreign_keys=ON connect event listener to tests/test_corpus_store.py's
+      engine fixture so the FR-29 corpus_entry cascade tests exercise real DB-level
+      FK enforcement (client_id FK has no ON DELETE clause). Fold into epic-6-retro-item-52."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
+  - id: "epic-7-retro-item-55-re-prioritise-epic-6-retro-item-46-as-ga"
+    epic: 7
+    action: "Re-prioritise epic-6-retro-item-46 as gating epic 8: epic 7 added migrations
+      0019/0020 behind the 0014 VARCHAR(32) alembic_version ceiling, so the online-migration
+      path is two revisions more unverified. Add the real-Postgres alembic upgrade
+      head test item 46 asks for and check the deployed DB migration state."
+    owner: "dev loop + Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
+  - id: "epic-7-retro-item-56-correct-the-_month_pattern-provenance-co"
+    epic: 7
+    action: "Correct the _MONTH_PATTERN provenance comment at shell/http/routes/corpus.py:51-54
+      (copied from report_runs.py:69, not shell/runner/month.py which uses strptime
+      and accepts unpadded months). Optionally lift the shared YYYY-MM regex into
+      one module."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
+  - id: "epic-7-retro-item-57-settle-the-anonymization-position-on-cor"
+    epic: 7
+    action: "Settle the anonymization position on Corpus content: recorded as an open
+      question in all three epic 7 story specs and epic-7-context.md, gates no v1
+      story but must be decided before any phase-2 exemplar-selection work is planned,
+      since the Corpus stores identifiable client prose."
+    owner: "Francesco"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
+  - id: "epic-7-retro-item-58-extract-a-shared-shell-http-form-py-for"
+    epic: 7
+    action: "Extract a shared shell/http/form.py for the hand-rolled urlencoded-body
+      parser (_FormTooLarge, _FormNotUtf8, _parse_form, _MAX_*_FORM_BODY_BYTES) now
+      copied verbatim across clients.py, style_guide.py and corpus.py, before a 4th
+      form route needs it. Bundle with epic-2-retro-item-13 / epic-6-retro-item-51."
+    owner: "dev loop"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
