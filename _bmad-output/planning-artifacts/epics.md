@@ -116,7 +116,7 @@ NFR-3: **Claim-level determinism.** Report prose may vary between generations. C
 
 NFR-4: **Traceability.** Every Claim in every delivered Report remains traceable to a stored Report Payload entry for as long as the Report is retained.
 
-NFR-5: **Throughput and latency.** One Report goes from "Client selected" to "Report on screen" — transit scan, Payload assembly, generation, Gate and any bounded regeneration included — in **under 3 minutes at p90**. The system sustains forty Reports in a single working session and 100–200 per month. *(PRD Assumption 3: budget derived, not validated.)*
+NFR-5: **Throughput and latency.** One Report goes from "Client selected" to "Report on screen" — transit scan, Payload assembly, generation, Gate and any bounded regeneration included — in **under 3 minutes at p90**. The system sustains forty Reports in a single working session and 100–200 per month. *(PRD Assumption 3: budget derived, not validated.)* *(measured 2026-08-27: single-generation-call p90 119 s = 118 s gemini-2.5-flash generation + 1 s local; within budget. Regenerating case not modelled — see docs/release-validation/latency.md.)*
 
 NFR-6: **Time budget.** End-to-end Francesco involvement per Report — entering or selecting a Client, generating, reviewing, exporting — stays under 15 minutes (SM-1).
 
@@ -126,7 +126,7 @@ NFR-8: **Availability.** Best-effort. No SLA; an hour of downtime is an inconven
 
 NFR-9: **Data durability.** Client records, Natal Charts, Reports and Report Payloads survive host restarts and redeploys. Loss of a Natal Chart is recoverable by recomputation; **loss of a Report Payload permanently breaks the traceability guarantee for that Report and is not acceptable.**
 
-NFR-10: **Transit scan latency.** The full month scan for one Client completes in under 10 seconds. *(PRD Assumption 4: inferred from the forty-reports-in-an-afternoon target; not measured.)*
+NFR-10: **Transit scan latency.** The full month scan for one Client completes in under 10 seconds. *(PRD Assumption 4: inferred from the forty-reports-in-an-afternoon target; not measured.)* *(measured 2026-08-27: p90 under 1 s across 40 scans; within budget. See docs/release-validation/latency.md.)*
 
 NFR-11: **Gate is terminal and unbypassable.** The Gate is the last step before Francesco sees a Report. No path exists from Generator to export that bypasses it.
 

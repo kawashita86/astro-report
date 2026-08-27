@@ -1036,10 +1036,15 @@ them by number remain resolvable.
    the architecture (AD-5) and the build order (E6) both cite "PRD Assumption 1".
 2. **§4.5 / FR-16** — Sections 6 and 7 may use list form while Sections 1–5 and 8 must be continuous
    prose. Inferred from the speakability constraint and the dated nature of those two Sections.
-3. **§5 — the 3-minute per-Report latency budget.** Derived from UJ-1 and SM-1, not validated against
-   real generation latency; may need loosening once the Gate's regeneration rate is known.
-4. **§4.3** — Full-month transit scan completes in under 10 seconds. Bound inferred from the
-   forty-reports-in-an-afternoon target; not measured or stated.
+3. ~~**§5 — the 3-minute per-Report latency budget.**~~ **RESOLVED 2026-08-27** — measured against
+   real `gemini-2.5-flash` latency (n=10 live calls, Story 8.3): single-generation-call p90 119 s
+   (118 s generation + 1 s local pipeline), within the 3-minute budget. Budget unchanged. Open
+   caveat: a Report needing a citation- or Gate-driven regeneration can exceed 3 minutes; recorded
+   as a Known limitation in `docs/release-validation/latency.md` for re-measurement against real
+   post-launch traffic.
+4. ~~**§4.3** — Full-month transit scan completes in under 10 seconds.~~ **RESOLVED 2026-08-27** —
+   measured p90 ≈ 0.2 s across 40 scans (Story 8.3), far inside the 10-second bound
+   (`docs/release-validation/latency.md`). Bound unchanged.
 5. **§9.2** — The chart wheel adequately replaces the four-date snapshot as Francesco's verification
    habit. He chose the continuous scan without requesting the snapshot view, but did not confirm the
    substitution.
