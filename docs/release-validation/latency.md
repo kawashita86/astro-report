@@ -14,6 +14,10 @@ also refuses `outcome = "pass"` unless `sitting_confirmed = true` — AC-4's
 human half (Francesco's forty-report one-sitting produce → review → export)
 must actually have happened, not just the machine half.
 
+The ratified "record the regeneration risk, do not revise the budget" decision
+is indexed as **RGD-2** in
+[`docs/decisions/README.md`](../decisions/README.md).
+
 ```toml
 checked = 2026-08-27
 ratified_by = "Francesco"

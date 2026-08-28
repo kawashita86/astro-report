@@ -122,6 +122,9 @@ def download_backup(
     the warning, not that every non-human hit is filtered out. Moving the
     route behind ``POST`` would exclude those too but was declined: it would
     break the plain-link download Francesco actually uses.
+
+    This accepted GET-with-side-effects deviation is recorded in
+    ``docs/decisions/`` as RGD-4, together with the ``/export/pdf`` half.
     """
     backup: dict[str, list[dict[str, object]]] = {
         model.__tablename__: [

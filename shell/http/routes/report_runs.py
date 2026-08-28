@@ -480,8 +480,7 @@ def download_report_pdf(
     advance is monotonic and idempotent, so there is no analogue here of the
     staleness-warning-clearing risk that motivated gating ``/backup``'s
     ``backup_record`` write behind ``?record=1``. ``download_report_markdown``
-    below carries the same deviation. To be folded into ``docs/decisions/``
-    once retro item 66 (start that index) lands.
+    below carries the same deviation. Recorded in ``docs/decisions/`` as RGD-4.
     """
     bundle = _load_passed_report_bundle(session, run_id)
 

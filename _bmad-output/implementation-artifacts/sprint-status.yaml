@@ -548,8 +548,8 @@ action_items:
     decided_on: 2026-08-28
     decision: "Accept + document as deviation. /export/pdf incidental hit writes a
       harmless extra ExportRecord; run.stage advance is monotonic; no PII risk
-      (unlike the /backup staleness-warning case that motivated the guard). Record
-      in docs/decisions/ once item 66 lands."
+      (unlike the /backup staleness-warning case that motivated the guard). Recorded
+      in docs/decisions/ as RGD-4 (2026-08-28, when the index landed)."
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-50-give-the-client-facing-export-pdf-human"
     epic: 6
@@ -713,7 +713,14 @@ action_items:
       benign data-terms change, 8.3 record-regeneration-risk, 8.4 storage-growth policy),
       each linking its release-validation file and ratifying context."
     owner: "Francesco"
-    status: open
+    status: done
+    decided_on: 2026-08-28
+    decision: "docs/decisions/README.md created: a single index log, one row + prose
+      section per decision. RGD-1 (8.2 data-terms benign change), RGD-2 (8.3
+      regeneration-risk recorded, budget not revised), RGD-3 (8.4 storage-growth
+      50%-ceiling policy), plus items 49 (RGD-4, GET-with-side-effects) and 57 (RGD-5,
+      Corpus anonymization) folded in per sprint-change-proposal-2026-08-28 §5. Each
+      row links its source doc and ratifying context; the source stays authoritative."
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
   - id: "epic-8-retro-item-67-reconcile-the-canonical-json-docstrings"
     epic: 8

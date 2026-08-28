@@ -214,6 +214,9 @@ noise of a 1.5× overhead estimate and does not change the decision.
 
 ## Storage-growth policy (decision)
 
+Indexed as **RGD-3** in [`docs/decisions/README.md`](../decisions/README.md).
+
+
 Half the 0.5 GB ceiling is projected to be reached in **~10 months** (full
 footprint, 200/month) to ~13 months (payload-only, 200/month) — inside any
 reasonable planning horizon — so this is raised as a decision, not absorbed:

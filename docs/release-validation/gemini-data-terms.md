@@ -7,6 +7,9 @@ the durable, dated record of that check. The machine-readable block below is
 parsed by `tests/test_data_terms_record.py`; the guard suite stays red while
 `outcome` is anything other than `"pass"`.
 
+The ratified outcome is indexed as **RGD-1** in
+[`docs/decisions/README.md`](../decisions/README.md).
+
 ```toml
 provider = "Google"
 model = "gemini-2.5-flash"
