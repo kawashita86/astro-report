@@ -21,7 +21,7 @@ This epic gives Francesco a place to gather his hundreds of existing hand-writte
 - The `CORPUS_ENTRY` table joins the Client-deletion cascade: deleting a Client removes every Corpus entry (pairing) that referenced them.
 - A composition view shows the total entry count split into paired and unpaired, available at any time without a batch job or a manual query.
 - Corpus routes carry the same authentication as every other route (single-principal auth; there is exactly one account).
-- Corpus entries contain identifiable client material. A position on anonymization is required before any Corpus content is used as phase-2 conditioning data. It is an open question that gates no v1 story, but it shapes how the Corpus is collected now — do not build phase-2 consumption here.
+- Corpus entries contain identifiable client material. **Anonymization position — settled 2026-08-28 (retro item 57):** Corpus content is stored **verbatim**, access is **operator-only** (single-principal auth). No anonymization is applied at ingest — it would break the paired-Client linkage the composition view depends on. **Binding requirement:** any phase-2 use of Corpus content as conditioning / exemplar data MUST anonymize (strip client name, birth date, birth place, and any other direct identifiers) before that content leaves the operator-only boundary. This gates no v1 story; do not build phase-2 consumption here.
 - Corpus entries are part of the logical backup export and the restore rehearsal in later epics, so the `CORPUS_ENTRY` schema must be cleanly exportable and reconstructable.
 
 ## Technical Decisions
@@ -45,4 +45,4 @@ This epic gives Francesco a place to gather his hundreds of existing hand-writte
 - Story 7.1's `CORPUS_ENTRY` table must be wired into the Client-deletion cascade built in the Client-deletion story of an earlier epic.
 - Corpus entries must be included in the logical backup export (review/export/history epic) and in the restore-from-export rehearsal (release-validation epic).
 - The FR-24 composition count feeds phase-2 planning, which is out of scope for v1 — no v1 story consumes the count.
-- The anonymization position must be settled before any phase-2 use of Corpus content; it is not a blocker for any story in this epic.
+- The anonymization position is settled (see Requirements & Constraints, 2026-08-28): verbatim storage now, operator-only access, mandatory anonymization before any phase-2 use. Not a blocker for any story in this epic.

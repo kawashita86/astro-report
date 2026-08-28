@@ -153,7 +153,12 @@ action_items:
     action: "Decide whether ComputationConfig/Rulers should be hashable before Epic
       2+ code caches or dict-keys on a ComputationConfig"
     owner: "epic-2"
-    status: open
+    status: done
+    decided_on: 2026-08-28
+    decision: "No. Do not add hashability. No consumer needs it (confirmed: only
+      type-hint uses, nothing dict-keys or caches on a ComputationConfig), and
+      content_hash is already the identity/cache key. Residual doc work carried by
+      item 17. Ruling recorded in sprint-change-proposal-2026-08-28.md."
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-08-16.md"
   - id: "epic-1-retro-item-7-document-or-close-the-non-recursive-assu"
     epic: 1
@@ -189,11 +194,16 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/spec-retro-f-test-coverage-hardening.md"
   - id: "epic-2-retro-item-11-have-chart_wheel_view-compare-the-stored"
     epic: 2
-    action: "Have chart_wheel_view compare the stored chart's computation_config_content_hash
-      against the running config's hash before recomputing aspects, and warn or refuse
-      on mismatch instead of silently rendering with today's orb"
-    owner: "dev"
+    action: "In chart_wheel_view (shell/http/routes/chart.py), compare stored_chart.
+      computation_config_content_hash against request.app.state.computation_config.
+      content_hash; on mismatch render a NON-BLOCKING warning banner in
+      chart_wheel.html (do not refuse). The wheel stays a verification aid; the
+      frozen Report has its own hash in ReportPayload."
+    owner: "dev loop"
     status: open
+    decided_on: 2026-08-28
+    decision: "Warn, do not refuse, do not defer. Non-blocking banner on hash
+      mismatch."
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-2-retro-item-12-add-a-test-exercising-the-superseded-cha"
     epic: 2
@@ -213,8 +223,11 @@ action_items:
   - id: "epic-2-retro-item-14-link-create_client-s-and-correct_client"
     epic: 2
     action: "Link create_client's and correct_client's success response to GET /clients/{id}/chart"
-    owner: "dev"
+    owner: "dev loop"
     status: open
+    decided_on: 2026-08-28
+    decision: "Do it. Trivial UX link, directly serves epic 2's stated purpose
+      (get a natal chart I can verify). Unblocked for the dev loop."
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-2-retro-item-15-re-verify-the-two-self-corrected-conform"
     epic: 2
@@ -234,11 +247,15 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-2-retro-item-17-decide-computationconfig-rulers-hashabil"
     epic: 2
-    action: "Decide ComputationConfig/Rulers hashability and fix the misleading docstring
-      at core/types/computation.py:63-65 implying MappingProxyType alone makes the
-      type hashable (confirmed false by execution)"
-    owner: "whoever adds the first cache/dict-key on a ComputationConfig"
+    action: "Fix the Rulers docstring at core/types/computation.py:60-68: state it is
+      deliberately NOT hashable (MappingProxyType fields make hash() raise TypeError
+      despite frozen=True) and that content_hash is the identity/cache key to use.
+      No hashability is added -- see item 6."
+    owner: "dev loop"
     status: open
+    decided_on: 2026-08-28
+    decision: "Do not add hashability (item 6). Residual: correct the docstring so it
+      no longer implies the type is hashable, and point readers at content_hash."
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-2-retro-item-18-run-the-manual-browser-checks-stories-2"
     epic: 2
@@ -469,13 +486,17 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
   - id: "epic-5-retro-item-45-propose-persisting-gatevocabulary-conten"
     epic: 5
-    action: "Propose persisting GateVocabulary.content_hash (not just the hand-bumped
-      version int) onto Report/StoredGateResult rows, since content_hash exists specifically
-      to catch a forgotten version bump on a vocabulary content edit, which neither
-      persisted row can detect today. Spec reconciliation -- human decides whether
-      to apply."
-    owner: "human (spec owner)"
+    action: "Persist GateVocabulary.content_hash alongside the existing vocabulary_version
+      int on StoredGateResult (and Report where it carries the gate result). One
+      added column + one write-site. NOT a standalone story -- fold into the next
+      change that legitimately touches StoredGateResult or the Gate write path."
+    owner: "dev loop (opportunistic)"
     status: open
+    decided_on: 2026-08-28
+    decision: "Accept the addition, fold into the next Gate-touching change. Cheap
+      insurance that a forgotten version bump on a vocabulary content edit is
+      detectable after the fact; not urgent, and adding a column now while the
+      migration chain is still fragile (item 46) argues against rushing it."
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
   - id: "epic-6-retro-item-46-make-the-alembic-migration-chain-reachab"
     epic: 6
@@ -491,12 +512,16 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-47-decide-the-markdown-export-scope-gap-epi"
     epic: 6
-    action: "Decide the Markdown-export scope gap: epic-6-context.md requires \"Both
-      PDF and Markdown must be produced\" but only PDF shipped (deferred at planning
-      time, deferred-work.md:525). Either formally accept the descope and amend epic-6-context.md,
-      or schedule the Markdown follow-up spec."
-    owner: "Francesco (spec owner)"
-    status: open
+    action: "Build the Markdown export follow-up. Spec:
+      _bmad-output/implementation-artifacts/spec-6-2b-markdown-export.md.
+      GET /report-runs/{run_id}/export/markdown -- same structural gate, same
+      eight-Sections-plus-client-name content model as the PDF route, text/markdown
+      body, writes an ExportRecord with format=\"markdown\"."
+    owner: "dev loop"
+    status: ready-for-dev
+    decided_on: 2026-08-28
+    decision: "Schedule the Markdown follow-up spec (requirement kept, not descoped).
+      epic-6-context.md annotated to note Markdown ships post-epic as spec-6-2b."
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-48-add-a-deterministic-same-month-tiebreak"
     epic: 6
@@ -509,12 +534,18 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-49-decide-get-with-side-effects-for-get-bac"
     epic: 6
-    action: "Decide GET-with-side-effects for GET /backup and GET /report-runs/{id}/export/pdf:
-      at minimum make /backups backup_record INSERT resilient to non-deliberate hits
-      (or move behind a POST) so a prefetch/retry cannot silently clear the Story
-      6.6 staleness warning."
+    action: "Add a docstring note to download_report_pdf (shell/http/routes/report_runs.py)
+      recording that GET /report-runs/{id}/export/pdf is a GET-with-side-effects by
+      accepted deviation, same rationale already ratified for GET /backup (plain-link
+      download; POST declined). No behavior change. The /backup half is already done
+      (retro-C item 49: backup_record write gated behind ?record=1)."
     owner: "dev loop"
     status: open
+    decided_on: 2026-08-28
+    decision: "Accept + document as deviation. /export/pdf incidental hit writes a
+      harmless extra ExportRecord; run.stage advance is monotonic; no PII risk
+      (unlike the /backup staleness-warning case that motivated the guard). Record
+      in docs/decisions/ once item 66 lands."
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-50-give-the-client-facing-export-pdf-human"
     epic: 6
@@ -524,6 +555,9 @@ action_items:
       energia_generale with no styling."
     owner: "dev loop"
     status: open
+    decided_on: 2026-08-28
+    decision: "Do both now (title map + minimal print CSS), one small change. The
+      shared snake_case -> Italian-title map is the reusable part."
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-51-extract-a-shared-_load_passed_report_bun"
     epic: 6
@@ -579,12 +613,19 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
   - id: "epic-7-retro-item-57-settle-the-anonymization-position-on-cor"
     epic: 7
-    action: "Settle the anonymization position on Corpus content: recorded as an open
-      question in all three epic 7 story specs and epic-7-context.md, gates no v1
-      story but must be decided before any phase-2 exemplar-selection work is planned,
-      since the Corpus stores identifiable client prose."
+    action: "Anonymization position settled -- see decision. epic-7-context.md,
+      spec-7-2, spec-7-3 amended 2026-08-28 to replace the open-question language
+      with the ruling."
     owner: "Francesco"
-    status: open
+    status: done
+    decided_on: 2026-08-28
+    decision: "Store Corpus content VERBATIM. Access is operator-only (single-principal
+      auth). No anonymization at ingest -- it would break paired-Client linkage the
+      composition view depends on. BINDING REQUIREMENT recorded: any phase-2 use of
+      Corpus content as conditioning / exemplar data MUST anonymize (strip client
+      name, birth date, birth place, and any other direct identifiers) before that
+      content leaves the operator-only boundary. Logging stays identifiers-only as
+      today."
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
   - id: "epic-7-retro-item-58-extract-a-shared-shell-http-form-py-for"
     epic: 7
@@ -650,11 +691,17 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
   - id: "epic-8-retro-item-65-harden-the-outcome-pass-guard-against-pa"
     epic: 8
-    action: "Harden the outcome==pass guard against passing on a placeholder: add
-      a field the guard cannot satisfy from in-process evidence alone (e.g. rehearsed_against=real-postgres
-      for restore-rehearsal.md, sitting_confirmed for latency.md)."
+    action: "Harden the release-validation outcome==\"pass\" guard: restore-rehearsal.md
+      must carry rehearsed_against == \"real-postgres\"; latency.md must carry
+      sitting_confirmed == true; the guard rejects outcome==\"pass\" when the record's
+      required field is absent or not the required value. Bundle with the item-62
+      _release_validation.py follow-up."
     owner: "dev loop"
     status: open
+    decided_on: 2026-08-28
+    decision: "Confirmed the per-record field design: rehearsed_against=\"real-postgres\"
+      for restore-rehearsal.md, sitting_confirmed=true for latency.md (bespoke field
+      names, not one generic field). Bundle with item 62."
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
   - id: "epic-8-retro-item-66-start-a-docs-decisions-index-for-ratifie"
     epic: 8

@@ -39,7 +39,7 @@ baseline_commit: '33c5fd810810db1af60b6a343954a53c0d852a37'
 - No change to the FR-29 cascade (`delete_client_and_derived`, `_CLIENT_CASCADE_TABLES`) or to `_BACKUP_MODELS` — Story 7.1 already wired `corpus_entry` into both; the cascade matches on `client_id` and is indifferent to `paired`/`month`, and the backup serializes whole rows so the two columns export automatically.
 - No `core/` changes; nothing durable on the container filesystem.
 - No entry content and no client identifiers in logs or telemetry — structured identifiers only.
-- No phase-2 exemplar selection or anonymization machinery — the anonymization position is an open question recorded here that gates no v1 story.
+- No phase-2 exemplar selection or anonymization machinery. Anonymization position settled 2026-08-28 (retro item 57): store verbatim, operator-only access, mandatory anonymization before any phase-2 use — see `epic-7-context.md`. Gates no v1 story.
 
 ## I/O & Edge-Case Matrix
 
@@ -104,7 +104,7 @@ The migration's `server_default=sa.false()` exists only to backfill Story 7.1's 
 
 Marking is record-time only, per the epic's UX ("Paired/unpaired is chosen when the entry is recorded"). Consequently Story 7.1's existing rows stay unpaired with no path to change that; a retroactive marking route is an explicit Ask First, not silent scope.
 
-The anonymization position is the epic's recorded open question. It gates no v1 story and nothing here consumes Corpus content — logging stays identifiers-only, consistent with 7.1.
+The anonymization position was settled 2026-08-28 (retro item 57): Corpus content is stored verbatim with operator-only access, and anonymization is mandatory before any phase-2 use — full ruling in `epic-7-context.md`. It gates no v1 story and nothing here consumes Corpus content — logging stays identifiers-only, consistent with 7.1.
 
 ## Verification
 
