@@ -90,6 +90,8 @@ Env-var-gated test + CI service, not `testcontainers`: zero new dependencies, `u
 
 Deployed-DB check is Francesco's manual follow-up. After merge the next auto-deploy rolls the fixed chain forward from wherever the Neon DB sits; no manual `alembic stamp` is needed because the new `0014` id was never applied anywhere. Confirm post-deploy with `SELECT version_num FROM alembic_version;`.
 
+- 2026-08-28: the Render deploy ran `alembic upgrade head` against Neon and it completed cleanly — no `StringDataRightTruncation` at `0014`, migrations applied past `0014` with no truncation. This is the first real evidence that b6649cc's `alembic_version VARCHAR(32)` fix carries the chain into production Postgres. The deploy then crashed *after* migrations, on WeasyPrint's native libraries at app import (`OSError: cannot load library 'libgobject-2.0-0'`), fixed in the sibling spec `spec-epic-6-retro-item-46-render-weasyprint-native-deps.md`. The only residue of this item is a one-line `SELECT version_num FROM alembic_version;` spot-check on Neon once that deploy goes green.
+
 ## Verification
 
 **Commands:**

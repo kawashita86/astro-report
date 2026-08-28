@@ -18,14 +18,29 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv==0.10.0
 
-# build-essential (gcc/g++/make) only -- deliberately not pkg-config or
+# One apt transaction, two rationales, one list purge.
+#
+# build-essential (gcc/g++/make) -- deliberately not pkg-config or
 # libsqlite3-dev. Without a compiler, pyswisseph's setup.py fails cleanly on a
 # missing gcc; with only build-essential, it falls back deterministically to
 # its own bundled libswe+sqlite3 sources. Adding pkg-config would make the
 # build depend on whatever system libraries happen to be present -- strictly
 # worse than the deterministic bundled path.
+#
+# libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-liberation --
+# WeasyPrint 69 dlopen's the Pango / GLib / HarfBuzz stack at *import* time, and
+# shell/http/routes/report_runs.py imports html_to_pdf at module top level, so a
+# missing native lib kills create_app() (uvicorn never serves), not just the PDF
+# route. This is WeasyPrint's own Debian >=11 runtime list: libgobject-2.0-0
+# (the symbol in the crash) comes in via libglib2.0-0 pulled by libpango-1.0-0;
+# fontconfig + FreeType via libpangoft2-1.0-0; libharfbuzz-subset0 is a separate
+# package doing PDF font subsetting. No cairo / gdk-pixbuf -- WeasyPrint >=53
+# dropped the cairo backend and raster images go through Pillow's bundled libs.
+# fonts-liberation because shell/http/templates/report_export.html asks for
+# `Georgia, "Times New Roman", serif` and slim ships no fonts; Liberation Serif
+# is metric-compatible with Times New Roman.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y build-essential \
+    && apt-get install --no-install-recommends -y build-essential libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependencies first, from the committed lockfile only: --locked fails rather

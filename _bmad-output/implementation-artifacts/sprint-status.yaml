@@ -512,7 +512,17 @@ action_items:
       head against a real throwaway Postgres, and check whether the deployed Render
       DB has been receiving migrations at all."
     owner: "dev loop + Francesco (deploy check)"
-    status: open
+    status: done
+    decided_on: 2026-08-28
+    done_note: "b6649cc shortened revision id 0014 to 0014_bound_string_columns
+      (25 chars, under the alembic_version VARCHAR(32) ceiling), re-pointed 0015's
+      down_revision, added a >32-char id guard plus a real-throwaway-Postgres
+      alembic upgrade head test wired to a postgres:18-alpine CI service. The
+      2026-08-28 Render deploy then ran alembic upgrade head against Neon with no
+      StringDataRightTruncation at 0014 -- the chain reaches production Postgres.
+      Residue: a one-line SELECT version_num FROM alembic_version; spot-check on
+      Neon after the WeasyPrint-native-libs deploy fix (spec-epic-6-retro-item-46-render-weasyprint-native-deps.md)
+      goes green -- tracked on item 59."
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-47-decide-the-markdown-export-scope-gap-epi"
     epic: 6
@@ -614,7 +624,13 @@ action_items:
       path is two revisions more unverified. Add the real-Postgres alembic upgrade
       head test item 46 asks for and check the deployed DB migration state."
     owner: "dev loop + Francesco"
-    status: open
+    status: done
+    decided_on: 2026-08-28
+    done_note: "Subsumed by item 46's fix (b6649cc): id shortened to
+      0014_bound_string_columns, real-Postgres alembic upgrade head test + CI
+      postgres service added, so 0019/0020 are no longer unverified behind the
+      VARCHAR(32) ceiling. The 2026-08-28 Render deploy applied the chain to Neon
+      with no truncation."
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
   - id: "epic-7-retro-item-56-correct-the-_month_pattern-provenance-co"
     epic: 7
@@ -658,6 +674,12 @@ action_items:
       real values incl ratified_by=Francesco. Blocked by epic-6-retro-item-46."
     owner: "Francesco"
     status: open
+    note: "2026-08-28: the epic-6-retro-item-46 blocker is cleared -- b6649cc's
+      migration-chain fix applied to Neon with no truncation on the 2026-08-28
+      Render deploy. This rehearsal is still an open manual task for Francesco
+      (needs a live Neon branch + operator run-through), and its alembic upgrade
+      head step now doubles as the SELECT version_num FROM alembic_version;
+      spot-check item 46 asks for."
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
   - id: "epic-8-retro-item-60-fix-epic-6-retro-item-46-alembic_version"
     epic: 8
@@ -666,7 +688,14 @@ action_items:
       the version table in migrations/env.py; add a real-throwaway-Postgres alembic
       upgrade head test; check the deployed Render DB migration state. Folds in epic-7-retro-item-55."
     owner: "dev loop + Francesco"
-    status: open
+    status: done
+    decided_on: 2026-08-28
+    done_note: "Same fix as item 46 (b6649cc): revision id 0014 shortened to
+      0014_bound_string_columns, real-throwaway-Postgres alembic upgrade head
+      test added and run for real in CI against a postgres:18-alpine service. The
+      2026-08-28 Render deploy ran the chain against Neon past 0014 with no
+      truncation, so the epic-8 restore runbook is no longer gated here. The live
+      SELECT version_num spot-check remains as item 59's rehearsal step."
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
   - id: "epic-8-retro-item-61-do-the-story-8-3-ac-4-human-sitting-one"
     epic: 8
