@@ -162,7 +162,9 @@ forbids reclaiming — the number that must hold no matter what else is pruned.
   a *typical-month* sample, not the adversarial maximum. Real p90 across varied
   clients and high-transit months (cf. the Story 8.1 adversarial fixtures — a
   retrograde-station month, a two-Lunation month) may run higher. Absorbed by
-  the overhead factor and by the 50 %-trigger policy, not modelled precisely.
+  the overhead factor and by the 50 %-trigger policy, not modelled precisely —
+  **accepted as the deliberate basis, see "Measurement basis — accepted
+  deviation" below (retro item 64).**
 - **Best-case siblings.** `report_draft.draft` (205 B) and
   `gate_result.violations` (2 B) reflect the harness's minimal fake draft and a
   clean first-pass Gate. A real eight-Section generated draft, and any Gate
@@ -240,6 +242,39 @@ reasonable planning horizon — so this is raised as a decision, not absorbed:
 - **Scope.** Designing or implementing any storage-reclamation mechanism
   (pruning, archival, TTL, export-and-delete) is explicitly **out of scope** for
   this story; raising the decision is the deliverable.
+
+## Measurement basis — accepted deviation (retro item 64)
+
+Epic-8 retrospective F4 flagged the projection's measurement basis as a disclosed
+limitation and deferred the choice — **re-measure** `payload_p90_bytes` against
+the Story 8.1 adversarial fixtures (retrograde-station month, two-Lunation month)
+plus a second birth chart, **or explicitly accept** the current basis.
+
+**Decision (Francesco, 2026-08-28): accept the current basis.** The Fort Worth
+typical-month fixture over twelve consecutive months, together with the additive
+`storage_overhead_factor = 1.5`, is the deliberate projection basis. It is *not*
+re-measured against adversarial fixtures or a second chart for this record.
+
+Rationale:
+
+- **The overhead factor already leans pessimistic.** 1.5× is additive-only and
+  ignores TOAST compression on the repetitive `payload` JSON (§"How it was
+  measured"), which pulls the true on-disk ratio *down*. Adversarial months
+  produce more Transit Events and a larger Payload, but that headroom is what the
+  deliberately-high additive factor is absorbing.
+- **The trigger is the live gauge, not the projected dates.** RGD-3's policy
+  fires on the Neon dashboard storage gauge crossing 50 % (checked monthly), not
+  on `half_ceiling_reached_on`. A heavier real p90 shortens the runway but is
+  caught by the same monthly gauge reading well before the ceiling — a more
+  precise projection would not change the control.
+- **Cost/benefit.** Re-measuring needs a reachable Postgres and the opt-in
+  harness run; it would refine dates the policy does not key off. Not worth it
+  for v1.
+
+The "if the adversarial-fixture Payloads (Story 8.1) turn out materially larger
+than this typical-month sample, re-run with those inputs" line under
+"Re-measure trigger" stays as a **standing option, not an obligation** — take it
+if a future change makes adversarial-month sizing matter to a decision.
 
 ## Outcome
 

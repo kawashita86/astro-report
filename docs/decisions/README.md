@@ -16,6 +16,9 @@ context.
   in here because `sprint-change-proposal-2026-08-28.md` routed them here by
   name — its §4 carries the rulings, its §5 the "fold into `docs/decisions/`"
   handoff. No other bucket-G item from that proposal was routed here.
+- **Item 53** (backup-file operator handling — encryption at rest, retention,
+  rotation) is a ratified bucket-H policy decision; its source doc is
+  `docs/operations/backup-handling.md` and it is indexed here as **RGD-6**.
 - **Not covered:** Story 8.5 (`docs/release-validation/restore-rehearsal.md`)
   has **no** ratified decision yet — its `outcome = "pass"` still outruns the
   evidence (epic-8 retro F5 / F6; tracker item 59). It joins this index only
@@ -34,9 +37,11 @@ context.
 - **Superseding a decision** — do not delete the row. Prefix its Decision cell
   with **`Superseded by RGD-<n>`**, add the same note at the top of its prose
   section, and leave the rest intact.
-- **RGD-4 and RGD-5 have no `docs/release-validation/` record** — their source
-  is a route docstring / context doc — so they carry no `(Story 8.x)` heading
-  tag and cite no TOML machine block, unlike RGD-1 / RGD-2 / RGD-3.
+- **RGD-4, RGD-5 and RGD-6 have no `docs/release-validation/` record** — their
+  source is a route docstring, a context doc, or an operations runbook
+  (`docs/operations/backup-handling.md` for RGD-6) — so they carry no
+  `(Story 8.x)` heading tag and cite no TOML machine block, unlike
+  RGD-1 / RGD-2 / RGD-3.
 - A `docs/release-validation/` record whose `outcome` is still `blocked` can
   still carry a ratified sub-decision (see RGD-2) — the row records the ratified
   part and says what remains open.
@@ -53,6 +58,7 @@ context.
 | [RGD-3](#rgd-3--storage-growth-50-ceiling-policy-story-84) | Storage-growth policy: move Neon to paid tier at 50% of the free-plan ceiling; no Payload pruning | Francesco, 2026-08-27 | `docs/release-validation/storage-growth.md` |
 | [RGD-4](#rgd-4--get-with-side-effects-on-the-export-and-backup-routes-is-accepted) | `GET` with side effects on `/export/pdf`, `/export/markdown`, `/backup` is accepted | Francesco, 2026-08-28 | `shell/http/routes/report_runs.py`, `shell/http/routes/backup.py` |
 | [RGD-5](#rgd-5--corpus-content-is-stored-verbatim-anonymization-is-a-phase-2-boundary-requirement) | Corpus stored verbatim, operator-only; anonymization mandatory before any phase-2 use | Francesco, 2026-08-28 | `_bmad-output/implementation-artifacts/epic-7-context.md` |
+| [RGD-6](#rgd-6--backup-file-operator-handling-fde-only-monthly-rotation-keep-all) | `GET /backup` file: full-disk-encrypted machine only (no per-file encryption); monthly rotation; keep every backup | Francesco, 2026-08-28 | `docs/operations/backup-handling.md` |
 
 ---
 
@@ -195,3 +201,35 @@ consumption is not built here.
 **Links.**
 - Source: [`_bmad-output/implementation-artifacts/epic-7-context.md`](../../_bmad-output/implementation-artifacts/epic-7-context.md) — Requirements & Constraints ("Anonymization position — settled 2026-08-28"); [`spec-7-2-mark-an-entry-paired-or-unpaired.md`](../../_bmad-output/implementation-artifacts/spec-7-2-mark-an-entry-paired-or-unpaired.md).
 - Ratifying context: [`sprint-change-proposal-2026-08-28.md`](../../_bmad-output/planning-artifacts/sprint-change-proposal-2026-08-28.md) §4 item 57; retrospective item `epic-7-retro-item-57`.
+
+## RGD-6 — backup-file operator handling: FDE-only, monthly rotation, keep all
+
+**Context.** `GET /backup` (`shell/http/routes/backup.py`, Story 6.5) serves a
+full unencrypted plaintext JSON dump of every durability-relevant table —
+every Client's name, birth date, and birth place included. It is the
+application's real durability mechanism (AD-17: Neon's free plan has no
+scheduled backups). No policy governed the downloaded file once it left the
+route (epic-6 retro / tracker item `epic-6-retro-item-53`).
+
+**Decision.**
+
+- **Encryption at rest — full-disk encryption only, no per-file encryption.**
+  Backup files are kept only on a full-disk-encrypted personal machine
+  (FileVault / LUKS). The plaintext JSON must never come to rest on a
+  non-FDE volume (USB stick, sync folder, consumer cloud drive). No
+  `age`/`gpg` wrapping. Accepted residual: anyone with the machine unlocked
+  can read every Client's PII — accepted under the single-operator model.
+  Per-file encryption becomes mandatory if a second person needs a copy or a
+  backup must leave the FDE machine.
+- **Retention / rotation — monthly, keep every backup.** Take a fresh backup
+  monthly via the reports page "Back up now" link (`GET /backup?record=1`, so
+  Story 6.6 staleness tracking sees it). Do not delete old backups. Story 6.6's
+  in-app staleness warning is the cadence reminder.
+- **Decommission.** Destroy the FDE key before the disk leaves the operator's
+  control.
+
+**Ratified.** Francesco, 2026-08-28.
+
+**Links.**
+- Source: [`docs/operations/backup-handling.md`](../operations/backup-handling.md) — full policy, rationale, decommission step.
+- Ratifying context: retrospective item `epic-6-retro-item-53`. Related: **RGD-4** (the `GET`-with-side-effects deviation on the same route) and **RGD-5** (Corpus PII position).

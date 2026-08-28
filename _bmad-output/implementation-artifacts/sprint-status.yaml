@@ -587,7 +587,17 @@ action_items:
       retention, rotation) before the route sees regular use -- it is a full unencrypted
       plaintext dump of every Clients PII."
     owner: "Francesco"
-    status: open
+    status: done
+    decided_on: 2026-08-28
+    decision: "Policy written to docs/operations/backup-handling.md, indexed as RGD-6
+      in docs/decisions/README.md. Encryption at rest: full-disk-encrypted personal
+      machine only (FileVault/LUKS), no per-file age/gpg wrapping; plaintext JSON
+      never on a non-FDE volume; per-file encryption becomes mandatory if a copy
+      leaves that machine or a second person needs one. Retention/rotation: monthly
+      backup via the reports-page 'Back up now' link (GET /backup?record=1 so Story
+      6.6 staleness tracking sees it), keep every backup, Story 6.6's staleness
+      warning is the cadence reminder. Decommission: destroy the FDE key before the
+      disk leaves the operator's control."
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-7-retro-item-54-add-a-pragma-foreign_keys-on-connect-eve"
     epic: 7
@@ -691,7 +701,17 @@ action_items:
       in storage-growth.md that Fort Worth typical-month + 1.5x factor is the deliberate
       basis."
     owner: "dev loop / Francesco"
-    status: open
+    status: done
+    decided_on: 2026-08-28
+    decision: "Accept the current basis (do not re-measure). Fort Worth typical-month
+      fixture over 12 consecutive months + the additive storage_overhead_factor=1.5
+      is the deliberate projection basis. Rationale: the additive factor already
+      leans pessimistic (ignores TOAST compression), and RGD-3's policy triggers on
+      the live Neon storage gauge crossing 50% (monthly check), not on the projected
+      dates -- a heavier real p90 is caught by the same gauge reading regardless.
+      Accepted-deviation note added to docs/release-validation/storage-growth.md
+      ('Measurement basis -- accepted deviation'). The 're-run with Story 8.1
+      adversarial inputs' line stays a standing option, not an obligation."
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
   - id: "epic-8-retro-item-65-harden-the-outcome-pass-guard-against-pa"
     epic: 8
