@@ -785,6 +785,10 @@ def test_never_backed_up_with_a_report_shows_the_warning(
 
     assert response.status_code == 200
     assert _WARNING_TEXT in response.text
+    # The "Back up now" link must carry the deliberate-record flag (retro-C
+    # item 49) -- a bare /backup would serve the export without recording it,
+    # so the warning would never clear.
+    assert 'href="/backup?record=1"' in response.text
 
 
 def test_a_fresh_backup_shows_no_warning(

@@ -14,7 +14,9 @@ to enforce uniqueness on; ``created_at`` alone, most-recent-first, is all
 Written by :func:`store_backup_record`, called from
 ``shell/http/routes/backup.py``'s ``download_backup`` only after the export
 body is already built, right before the response is returned -- so a row is
-recorded only for a backup that actually completed.
+recorded only for a backup that actually completed. Since retro-C item 49,
+``download_backup`` calls it only for a deliberate ``?record=1`` request; a
+bare ``GET /backup`` serves the export but records nothing.
 """
 
 from __future__ import annotations

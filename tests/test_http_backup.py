@@ -14,7 +14,7 @@ module (``tests/test_client_store.py``, ``tests/test_report_run_store.py``,
 from __future__ import annotations
 
 import time
-from datetime import date
+from datetime import UTC, date, datetime
 from datetime import time as time_of_day
 from decimal import Decimal
 
@@ -40,6 +40,7 @@ from shell.config import Environment, Settings
 from shell.http.app import create_app, get_session
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
 from shell.http.routes.backup import _BACKUP_MODELS
+from shell.http.routes.clients import _backup_is_stale
 
 AUTH_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$hQD4AS+0CkX36kCpbKWmRg$"
@@ -529,10 +530,13 @@ def test_a_report_with_two_export_records_and_no_draft_theme_or_gate_result_asso
 # --- Backup staleness record (Story 6.6) ------------------------------------
 
 
-def test_a_completed_backup_commits_one_backup_record_row(
+def test_a_deliberate_backup_commits_one_backup_record_row(
     authenticated_client: TestClient, db_session: Session
 ) -> None:
-    response = authenticated_client.get("/backup")
+    """Only a deliberate ``GET /backup?record=1`` -- the flag the reports
+    page's "Back up now" link carries (retro-C item 49) -- records a
+    backup."""
+    response = authenticated_client.get("/backup?record=1")
 
     assert response.status_code == 200
     rows = db_session.exec(select(BackupRecord)).all()
@@ -540,16 +544,70 @@ def test_a_completed_backup_commits_one_backup_record_row(
     assert rows[0].created_at is not None
 
 
-def test_two_completed_backups_commit_two_backup_record_rows(
+def test_two_deliberate_backups_commit_two_backup_record_rows(
     authenticated_client: TestClient, db_session: Session
 ) -> None:
-    first = authenticated_client.get("/backup")
-    second = authenticated_client.get("/backup")
+    first = authenticated_client.get("/backup?record=1")
+    second = authenticated_client.get("/backup?record=1")
 
     assert first.status_code == 200
     assert second.status_code == 200
     rows = db_session.exec(select(BackupRecord)).all()
     assert len(rows) == 2
+
+
+def test_a_deliberate_backup_clears_the_staleness_warning(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Symmetric to the bare-``GET`` case: given a prior ``backup_record``
+    plus a newer ``Report`` (so ``_backup_is_stale`` is True), a deliberate
+    ``GET /backup?record=1`` commits a fresh row and ``_backup_is_stale``
+    flips to False."""
+    ada = _make_client(db_session)
+    run = _make_run(db_session, client_id=ada.id)
+    _make_report(db_session, run=run)
+    db_session.add(BackupRecord(created_at=datetime(2020, 1, 1, tzinfo=UTC)))
+    db_session.commit()
+
+    assert _backup_is_stale(db_session) is True
+
+    response = authenticated_client.get("/backup?record=1")
+
+    assert response.status_code == 200
+    assert _backup_is_stale(db_session) is False
+
+
+def test_a_bare_backup_serves_the_export_but_records_nothing_and_leaves_staleness(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """A bare ``GET /backup`` (no ``?record=1``): the full JSON export is
+    still served, but no ``backup_record`` row is written -- so an
+    incidental hit (old bookmark, URL probe, prefetch) cannot silently
+    clear Story 6.6's staleness warning (retro-C item 49). Given a prior
+    backup plus a newer ``Report``, ``_backup_is_stale`` stays true."""
+    ada = _make_client(db_session)
+    run = _make_run(db_session, client_id=ada.id)
+    report = _make_report(db_session, run=run)
+    # A backup recorded strictly before the Report above -> the system is
+    # stale until the next *deliberate* backup.
+    db_session.add(BackupRecord(created_at=datetime(2020, 1, 1, tzinfo=UTC)))
+    db_session.commit()
+
+    assert _backup_is_stale(db_session) is True
+
+    response = authenticated_client.get("/backup")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert set(body) == set(_TABLE_ORDER)
+    assert [row["id"] for row in body["report"]] == [str(report.id)]
+
+    # The bare hit wrote no new backup_record row ...
+    rows = db_session.exec(select(BackupRecord)).all()
+    assert len(rows) == 1
+    # ... and the staleness warning is unaffected.
+    assert _backup_is_stale(db_session) is True
 
 
 def test_backup_record_is_not_included_in_the_export_body(

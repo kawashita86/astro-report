@@ -55,6 +55,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from core.domains.profiles import assemble_domain_profiles
@@ -678,6 +679,30 @@ def drive(
     4.8) -- ``draft_ready``'s Gemini attempts stay within the provider's
     10 requests-per-minute ceiling -- and the plain defaults otherwise.
 
+    Every ``with_backoff`` attempt runs the stage function inside its own
+    ``session.begin_nested()`` SAVEPOINT (epic-4-retro item 23): a two-write
+    stage (``_run_payload_ready``, ``_run_gate_passed``) that partially
+    flushes and then fails has that partial flush rolled back to the
+    savepoint, so the *next* ``with_backoff`` attempt -- and, after
+    exhaustion, ``drive()``'s own ``except`` handlers -- run on a clean
+    session instead of dying on ``PendingRollbackError``. A transient
+    second-write failure now gets a real retry within the same call.
+
+    A unique-constraint ``IntegrityError`` from a concurrent ``drive()`` for
+    the same run (the start route and the poll route both call this with no
+    row lock -- items 26/44) is handled separately from every other stage
+    exception. It is intercepted *inside* the retried callable so
+    ``with_backoff`` never retries it (a unique-constraint conflict never
+    clears on retry, and on ``draft_ready`` a retry would spend another paid
+    ``generator.generate()`` call plus ``with_backoff``'s 6 s / 12 s
+    sleeps); the loop body then rolls back, ``session.refresh(run)``, and if
+    ``run.stage`` has advanced past the current stage treats it as a
+    completed stage (``break``, no counter change, INFO log). Otherwise --
+    a genuine integrity bug, no concurrent advance -- it falls through to
+    the same stage-failure path as any other exception (``stage_failure_count``
+    increment, terminal at :data:`_MAX_STAGE_FAILURES`), still without a
+    retry.
+
     A successful stage advance resets ``run.stage_failure_count`` to 0.
     When a stage's ``with_backoff`` call exhausts every attempt,
     ``run.stage`` is left unchanged (as before) but
@@ -729,20 +754,53 @@ def drive(
 
         backoff_kwargs = _STAGE_BACKOFF_OVERRIDES.get(stage_name, {})
 
+        #: Set by `_attempt` below when the stage's own flush raised a
+        #: unique-constraint `IntegrityError` -- the fingerprint of a
+        #: concurrent `drive()` (start route + poll route, no row lock;
+        #: items 26/44) having already written this stage's row. Holds the
+        #: caught exception so the genuine-bug path can still log it.
+        integrity_error: IntegrityError | None = None
+
+        def _attempt(stage_fn: StageFn = stage_fn) -> None:
+            # NOT a straight mirror of `place_cache.store_resolved_place`:
+            # that helper wraps `begin_nested()` in `try/except
+            # IntegrityError: pass` and swallows the conflict in place. Here
+            # the SAVEPOINT shape is the same (item 23: a partial flush rolls
+            # back to the savepoint, so the next `with_backoff` attempt runs
+            # on a clean session), but a caught `IntegrityError` is surfaced
+            # to `drive()`'s loop body via `integrity_error` for a benign-vs-
+            # genuine classification -- it is deliberately NOT re-raised into
+            # `with_backoff`'s retry: a unique-constraint conflict from a
+            # concurrent `drive()` never clears on a retry, and letting it
+            # ride `with_backoff` would burn up to `max_attempts` doomed
+            # attempts -- for `draft_ready` that is three real
+            # `generator.generate()` (Gemini) calls plus `time.sleep(6)` +
+            # `time.sleep(12)` before the conflict is even classified. (The
+            # "next attempt runs clean" reasoning for the SAVEPOINT itself
+            # does not apply to `gate_passed`, which is `max_attempts=1`.)
+            nonlocal integrity_error
+            # Defensive reset: if a future change ever lets `with_backoff`
+            # re-enter `_attempt` after a transient failure, a stale caught
+            # conflict from an earlier attempt must not leak into the `else`
+            # branch's benign-vs-genuine check.
+            integrity_error = None
+            try:
+                with session.begin_nested():
+                    stage_fn(
+                        session,
+                        run,
+                        natal_chart,
+                        config,
+                        ephemeris_identity,
+                        sections_config,
+                        generator,
+                        vocabulary,
+                    )
+            except IntegrityError as conflict:
+                integrity_error = conflict
+
         try:
-            with_backoff(
-                lambda stage_fn=stage_fn: stage_fn(
-                    session,
-                    run,
-                    natal_chart,
-                    config,
-                    ephemeris_identity,
-                    sections_config,
-                    generator,
-                    vocabulary,
-                ),
-                **backoff_kwargs,
-            )
+            with_backoff(_attempt, **backoff_kwargs)
         except GateFailedError as error:
             # `_run_gate_passed`'s pass-path attempt (`store_report` then
             # `store_gate_result`, each its own flush) may have partially
@@ -844,6 +902,62 @@ def drive(
             session.add(run)
             session.commit()
             break
+        else:
+            if integrity_error is not None:
+                # `_attempt` caught a unique-constraint `IntegrityError` and
+                # returned normally so `with_backoff` did not retry it. The
+                # stage's `begin_nested()` already rolled its partial flush
+                # back to the savepoint; roll the *outer* transaction back
+                # too, before re-reading `run`, so the refresh below runs in
+                # a fresh transaction and sees a concurrent commit under
+                # READ COMMITTED or REPEATABLE READ alike.
+                session.rollback()
+                session.refresh(run)
+                if _stage_index(run.stage) >= index:
+                    # A concurrent `drive()` already completed this stage and
+                    # advanced `run.stage`. Benign -- not a stage failure:
+                    # `stage_failure_count`/`regeneration_count`/`failed_at`
+                    # are all left exactly as the concurrent winner's
+                    # committed row (just refreshed) has them.
+                    _logger.info(
+                        "stage %s already completed by a concurrent drive(); "
+                        "run.stage is now %s: %s",
+                        stage_name,
+                        run.stage,
+                        run.id,
+                    )
+                    break
+                # `run.stage` did not advance: this is a genuine integrity
+                # bug, not a concurrent-stage race. Record it as a stage
+                # failure exactly like the `except Exception` path above --
+                # but still without a `with_backoff` retry (it never clears).
+                # `_logger.error` (not `.exception`): this runs in the `else`
+                # clause with no active exception handler; `exc_info` carries
+                # the conflict caught back inside `_attempt`.
+                _logger.error(
+                    "report run stage failed on a non-concurrent IntegrityError, "
+                    "left un-advanced: %s",
+                    run.id,
+                    exc_info=integrity_error,
+                )
+                run.stage_failure_count += 1
+                run.updated_at = datetime.now(UTC)
+                if run.stage_failure_count >= _MAX_STAGE_FAILURES:
+                    run.failed_at = run.updated_at
+                    run.failure_reason = (
+                        f"stage {stage_name!r} failed {run.stage_failure_count} consecutive "
+                        f"times: {integrity_error}"
+                    )
+                    _logger.error(
+                        "report run marked terminally failed at %s after %s consecutive "
+                        "failures: %s",
+                        stage_name,
+                        run.stage_failure_count,
+                        run.id,
+                    )
+                session.add(run)
+                session.commit()
+                break
 
         if stage_name == "natal_ready":
             run.natal_chart_id = natal_chart_id

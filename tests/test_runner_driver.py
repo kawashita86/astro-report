@@ -38,6 +38,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import shell.runner.driver as driver_module
@@ -1302,6 +1303,347 @@ def test_gate_failed_error_path_survives_a_gate_result_flush_failure(
     ).all()
     assert len(stored_gate_results) == 1
     assert stored_gate_results[0].regeneration_count == 1
+
+
+# --- retro-C items 23 / 26 / 44: savepoint-per-attempt + concurrent-drive() races ---
+
+
+def _stray_report_payload(session: Session, *, client_id, report_run_id) -> ReportPayload:
+    """A minimally-valid ``ReportPayload`` for ``report_run_id``, built
+    straight against the model's columns -- stands in for the row a
+    concurrent ``drive()`` would have committed at ``payload_ready``."""
+    row = ReportPayload(
+        client_id=client_id,
+        report_run_id=report_run_id,
+        schema_version=1,
+        computation_config_version=1,
+        computation_config_content_hash="a" * 64,
+        sections_config_version=1,
+        sections_config_content_hash="b" * 64,
+        ephemeris_files=[{"name": "test.se1"}],
+        payload={"schema_version": 1},
+    )
+    session.add(row)
+    return row
+
+
+def test_a_two_write_stage_whose_second_write_fails_transiently_still_advances(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """retro-C item 23: ``_run_payload_ready`` flushes ``ReportPayload`` and
+    then ``store_report_theme`` raises a real (non-``IntegrityError``) DB
+    error once. Each ``with_backoff`` attempt now runs inside its own
+    ``session.begin_nested()`` SAVEPOINT, so attempt 1's partial flush rolls
+    back to the savepoint and attempt 2 runs on a clean session and
+    completes -- ``run.stage`` advances within the one ``drive()`` call and
+    ``stage_failure_count`` stays 0. A ``base_delay_seconds: 0.0`` override
+    keeps the suite free of a real ``time.sleep``."""
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "payload_ready",
+        {"base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    real_store_report_theme = driver_module.store_report_theme
+    calls: list[int] = []
+
+    def _fails_once_then_delegates(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OperationalError(
+                "UPDATE report_theme", {}, Exception("simulated transient DB error")
+            )
+        return real_store_report_theme(*args, **kwargs)
+
+    monkeypatch.setattr(driver_module, "store_report_theme", _fails_once_then_delegates)
+
+    result = _drive(session, run, natal_chart)
+
+    assert len(calls) == 2, "with_backoff must have retried the whole two-write stage"
+    assert result.stage == "gate_passed"
+    assert result.stage_failure_count == 0
+    assert result.failed_at is None
+    assert (
+        len(session.exec(select(ReportPayload).where(ReportPayload.report_run_id == run.id)).all())
+        == 1
+    ), "attempt 1's partial ReportPayload flush must have rolled back to its savepoint"
+    assert (
+        len(
+            session.exec(
+                select(StoredReportTheme).where(StoredReportTheme.report_run_id == run.id)
+            ).all()
+        )
+        == 1
+    )
+
+
+def test_a_pre_existing_report_payload_row_makes_payload_ready_a_completed_stage(
+    session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """retro-C items 26/44: a concurrent ``drive()`` already wrote this run's
+    ``ReportPayload`` (``report_run_id`` unique) and advanced ``run.stage``.
+    Our ``drive()`` still holding the older ``run.stage`` in memory reaches
+    ``payload_ready``, hits the unique-constraint ``IntegrityError`` on the
+    **first** attempt, and -- because ``run.stage`` refreshed past
+    ``payload_ready`` -- treats it as a completed stage: no ``with_backoff``
+    retry, ``stage_failure_count``/``failed_at`` untouched, INFO (not
+    ``exception``) logged."""
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "payload_ready",
+        {"base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    # The concurrent winner: a full, clean drive() that commits the
+    # ReportPayload row and leaves stage_failure_count at 0.
+    _drive(session, run, natal_chart)
+    assert run.stage == "gate_passed"
+
+    # Our own drive() call still sees the pre-race stage in memory.
+    run.stage = "transits_ready"
+
+    entries: list[int] = []
+    real_payload_ready = _STAGE_FUNCTIONS["payload_ready"]
+
+    def _counting(*args, **kwargs):
+        entries.append(1)
+        return real_payload_ready(*args, **kwargs)
+
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "payload_ready", _counting)
+
+    with caplog.at_level(logging.INFO, logger=driver_module._logger.name):
+        result = _drive(session, run, natal_chart)
+
+    assert entries == [1], "the concurrent conflict must not be retried"
+    assert result.stage == "gate_passed"
+    assert result.stage_failure_count == 0
+    assert result.regeneration_count == 0
+    assert result.failed_at is None
+    assert (
+        len(session.exec(select(ReportPayload).where(ReportPayload.report_run_id == run.id)).all())
+        == 1
+    )
+    info_records = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.INFO
+        and "already completed by a concurrent drive" in record.getMessage()
+    ]
+    assert len(info_records) == 1
+    assert "gate_passed" in info_records[0].getMessage(), "the observed run.stage must be logged"
+    assert all(record.levelno < logging.ERROR for record in caplog.records)
+
+
+def test_a_pre_existing_report_draft_row_makes_draft_ready_a_completed_stage(
+    session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """retro-C items 26/44, ``draft_ready`` variant: a concurrent ``drive()``
+    already wrote ``ReportDraft (run, attempt=0)``
+    (``ix_report_draft_report_run_id_attempt``). Our ``drive()`` re-runs
+    ``draft_ready`` at the same attempt, hits the ``IntegrityError``, and
+    recognises the completed stage without a ``with_backoff`` retry -- and,
+    critically, without a second paid ``generator.generate()`` call."""
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "draft_ready",
+        {"max_attempts": 3, "base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    # The concurrent winner: a full, clean drive() that commits
+    # ReportDraft(attempt=0).
+    _drive(session, run, natal_chart)
+    assert run.stage == "gate_passed"
+
+    # Our own drive() call still sees the pre-race stage in memory, so it
+    # re-enters draft_ready at run.regeneration_count == 0.
+    run.stage = "payload_ready"
+    generator = _FakeGenerator()
+
+    with caplog.at_level(logging.INFO, logger=driver_module._logger.name):
+        result = _drive(session, run, natal_chart, generator=generator)
+
+    assert len(generator.calls) == 1, "the stage calls the generator exactly once, before the flush"
+    assert result.stage == "gate_passed"
+    assert result.stage_failure_count == 0
+    assert result.regeneration_count == 0
+    assert result.failed_at is None
+    assert (
+        len(session.exec(select(ReportDraft).where(ReportDraft.report_run_id == run.id)).all()) == 1
+    )
+    info_records = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.INFO
+        and "already completed by a concurrent drive" in record.getMessage()
+    ]
+    assert len(info_records) == 1
+    assert all(record.levelno < logging.ERROR for record in caplog.records)
+
+
+def test_an_integrity_error_without_a_stage_advance_is_recorded_as_a_stage_failure(
+    session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """retro-C: an ``IntegrityError`` at ``payload_ready`` whose
+    ``run.stage`` did **not** move past the current stage after refresh is a
+    genuine integrity bug, not a concurrent-stage advance. It falls through
+    to the ordinary stage-failure path -- ``stage_failure_count += 1``,
+    ``logger.error``, terminal at ``_MAX_STAGE_FAILURES`` -- but is
+    still never retried by ``with_backoff``."""
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "payload_ready",
+        {"base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    # Stop at transits_ready, then neutralise the fixture's own failure bump
+    # so the assertion below targets only the IntegrityError path.
+    with monkeypatch.context() as m:
+
+        def _always_fail(*args, **kwargs):
+            raise RuntimeError("simulated failure -- stop at transits_ready")
+
+        m.setitem(_STAGE_FUNCTIONS, "payload_ready", _always_fail)
+        _drive(session, run, natal_chart)
+        assert run.stage == "transits_ready"
+    run.stage_failure_count = 0
+    session.add(run)
+    session.commit()
+
+    # A stray ReportPayload row exists, but no concurrent drive() advanced
+    # run.stage -- so the refresh will still show transits_ready.
+    _stray_report_payload(session, client_id=client.id, report_run_id=run.id)
+    session.commit()
+
+    entries: list[int] = []
+    real_payload_ready = _STAGE_FUNCTIONS["payload_ready"]
+
+    def _counting(*args, **kwargs):
+        entries.append(1)
+        return real_payload_ready(*args, **kwargs)
+
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "payload_ready", _counting)
+
+    with caplog.at_level(logging.ERROR, logger=driver_module._logger.name):
+        result = _drive(session, run, natal_chart)
+
+    assert entries == [1], "a non-concurrent IntegrityError must not be retried either"
+    assert result.stage == "transits_ready"
+    assert result.stage_failure_count == 1
+    assert result.regeneration_count == 0
+    assert result.failed_at is None
+    assert str(run.id) in caplog.text
+
+
+def test_a_two_write_stage_whose_second_write_fails_on_every_attempt_stays_recoverable(
+    session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """retro-C item 23, exhaustion path: ``_run_payload_ready`` flushes
+    ``ReportPayload`` and then ``store_report_theme`` raises a real
+    (non-``IntegrityError``) DB error on **every** ``with_backoff`` attempt.
+    Each attempt's partial flush rolls back to its own savepoint, so
+    ``with_backoff`` exhausts cleanly and ``drive()``'s ``except Exception``
+    branch runs without any ``PendingRollbackError`` escaping: the run is
+    left un-advanced with ``stage_failure_count == 1`` and no half-written
+    rows survive (the protected item-39 test only used a plain
+    ``RuntimeError``)."""
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "payload_ready",
+        {"base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    def _always_fails_at_the_database(*args, **kwargs):
+        raise OperationalError(
+            "UPDATE report_theme", {}, Exception("simulated persistent DB error")
+        )
+
+    monkeypatch.setattr(driver_module, "store_report_theme", _always_fails_at_the_database)
+
+    with caplog.at_level(logging.ERROR, logger=driver_module._logger.name):
+        result = _drive(session, run, natal_chart)
+
+    # No exception escaped drive() -- the call completing at all is part of
+    # what this proves.
+    assert result.stage == "transits_ready"
+    assert result.stage_failure_count == 1
+    assert result.failed_at is None
+    assert str(run.id) in caplog.text
+    assert (
+        session.exec(select(ReportPayload).where(ReportPayload.report_run_id == run.id)).all() == []
+    ), "every attempt's partial ReportPayload flush must have rolled back to its savepoint"
+    assert (
+        session.exec(
+            select(StoredReportTheme).where(StoredReportTheme.report_run_id == run.id)
+        ).all()
+        == []
+    )
+
+
+def test_repeated_non_concurrent_integrity_errors_at_one_stage_reach_terminal_failure(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """retro-C: ``_MAX_STAGE_FAILURES`` consecutive non-concurrent
+    ``IntegrityError``s at ``payload_ready`` -- each classified as a genuine
+    bug because ``run.stage`` never advances -- drive the run through the
+    new ``else``-branch terminal path: ``failed_at`` is set and
+    ``failure_reason`` names the stage, exactly as the generic
+    ``except Exception`` exhaustion path does."""
+    monkeypatch.setitem(
+        driver_module._STAGE_BACKOFF_OVERRIDES,
+        "payload_ready",
+        {"base_delay_seconds": 0.0},
+    )
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    # Stop at transits_ready, then neutralise the fixture's own failure bump.
+    with monkeypatch.context() as m:
+
+        def _always_fail(*args, **kwargs):
+            raise RuntimeError("simulated failure -- stop at transits_ready")
+
+        m.setitem(_STAGE_FUNCTIONS, "payload_ready", _always_fail)
+        _drive(session, run, natal_chart)
+        assert run.stage == "transits_ready"
+    run.stage_failure_count = 0
+    session.add(run)
+    session.commit()
+
+    # A stray ReportPayload row makes every payload_ready run conflict,
+    # while run.stage never advances -> a genuine integrity bug each time.
+    _stray_report_payload(session, client_id=client.id, report_run_id=run.id)
+    session.commit()
+
+    for expected_count in range(1, driver_module._MAX_STAGE_FAILURES + 1):
+        result = _drive(session, run, natal_chart)
+        assert result.stage_failure_count == expected_count
+
+    assert result.stage == "transits_ready"
+    assert result.failed_at is not None
+    assert result.failure_reason is not None
+    assert "payload_ready" in result.failure_reason
 
 
 # --- _deserialize_generated_draft round trip ------------------------------------------

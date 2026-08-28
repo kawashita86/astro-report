@@ -29,6 +29,11 @@ code, mirroring ``shell/http/routes/style_guide.py``/
 No restore, no pagination, no filtering, no streaming, no UI page here --
 this route's only job is producing the export. Restore is Story 8.5's job;
 the staleness-warning UI is Story 6.6's, and depends on this route existing.
+
+The route takes one optional ``record`` query flag (retro-C item 49). The
+JSON export body is served for every request; the ``backup_record`` row
+that Story 6.6's staleness warning reads is written only on ``?record=1``,
+so an incidental bare ``GET /backup`` cannot silently clear the warning.
 """
 
 from __future__ import annotations
@@ -36,7 +41,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlmodel import Session, select
 
@@ -77,7 +82,16 @@ _BACKUP_MODELS = (
 
 
 @router.get("/backup", include_in_schema=False)
-def download_backup(session: Session = Depends(get_session)) -> Response:
+def download_backup(
+    record: bool = Query(
+        default=False,
+        description=(
+            "Record this download as the latest backup (Story 6.6 staleness "
+            "tracking). Only the reports page's 'Back up now' link sets it."
+        ),
+    ),
+    session: Session = Depends(get_session),
+) -> Response:
     """Download every row of every durability-relevant table as one JSON
     file (Story 6.5).
 
@@ -92,6 +106,22 @@ def download_backup(session: Session = Depends(get_session)) -> Response:
     ``.model_dump(mode="json")``, keyed by the model's own ``__tablename__``
     so the file's top-level keys are the eleven real table names, in FK-safe
     order.
+
+    The export body is served for **every** request; the ``backup_record``
+    row that Story 6.6's staleness warning
+    (``_backup_is_stale``, ``shell/http/routes/clients.py``) reads is
+    written and committed **only** on ``?record=1`` (retro-C item 49).
+    That gates recording behind a deliberate act: a bare ``GET /backup``
+    Francesco did not trigger -- an old bookmark, a URL probe, a health
+    check, a link prefetch -- can no longer *silently* clear the warning by
+    recording a backup nobody kept the file from. It does not exclude every
+    automated hit: a prefetch, crawl, or retry of the flagged ``?record=1``
+    link on the reports page still records (and a retried deliberate
+    download writes a second, harmless row -- the staleness check reads only
+    the latest). The guarantee is only that an *incidental* hit cannot clear
+    the warning, not that every non-human hit is filtered out. Moving the
+    route behind ``POST`` would exclude those too but was declined: it would
+    break the plain-link download Francesco actually uses.
     """
     backup: dict[str, list[dict[str, object]]] = {
         model.__tablename__: [
@@ -100,11 +130,13 @@ def download_backup(session: Session = Depends(get_session)) -> Response:
         for model in _BACKUP_MODELS
     }
 
-    # Recorded only now that the export body is fully built -- a failure
-    # while reading/serializing any table above never records a backup that
-    # didn't actually happen (Story 6.6's Boundaries).
-    store_backup_record(session)
-    session.commit()
+    if record:
+        # Recorded only now that the export body is fully built -- a failure
+        # while reading/serializing any table above never records a backup
+        # that didn't actually happen (Story 6.6's Boundaries) -- and only
+        # for a deliberate ``?record=1`` request (retro-C item 49).
+        store_backup_record(session)
+        session.commit()
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return Response(
