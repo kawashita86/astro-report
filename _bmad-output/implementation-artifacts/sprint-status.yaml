@@ -263,7 +263,16 @@ action_items:
       wheel vs Astro.com; correction warning-then-apply; deletion 404) once a reachable
       Postgres instance is available, and record that they were run"
     owner: "Francesco"
-    status: open
+    status: done
+    checked_on: 2026-08-28
+    decision: "Run 2026-08-28 against the full docker compose stack (production image +
+      Postgres 18), driven through Chrome, with a logged-in Astro.com session for the
+      2.6 comparison. 2.6: chart wheel matches Astro.com exactly for Case1 LeapDay
+      (every body sign+degree, Asc, MC, all house cusps, to the arcminute). 2.7:
+      warn-then-confirm gate works -- chart unchanged before confirm, reflects the
+      corrected time after. 2.8: delete removes the client and its superseded chart,
+      /chart then 404s. Full record: docs/release-validation/manual-browser-checks.md;
+      recording item18-stories-2.6-2.7-2.8-browser-checks.gif."
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-3-retro-item-19-extract-the-four-duplicated-_bisect-_bui"
     epic: 3
@@ -295,7 +304,24 @@ action_items:
       generally) has not been manually checked in a browser -- no reachable Postgres
       in this environment"
     owner: "Francesco"
-    status: open
+    status: done
+    checked_on: 2026-08-28
+    decision: "Checked 2026-08-28 against the full docker compose stack. Poll view
+      (GET /report-runs/{id}) renders and drives the run per poll, and correctly
+      switches to a terminal-failure message after 5 consecutive stage failures
+      (epic-3-retro item 20 signal, working). Payload view could NOT be exercised:
+      every report run fails at transits_ready in the running server -- root-caused to
+      swe.set_ephe_path() being set only on the import/main thread while FastAPI runs
+      the sync poll route (and thus the whole runner) on an anyio worker thread with no
+      ephemeris path, so swe.calc_ut falls back to Moshier and _calc_body refuses. The
+      natal chart works only because create_client is async (main thread); the test
+      suite is green because pytest is single-threaded. This blocks the entire Epic 3+
+      report pipeline in the deployed app. Full write-up in deferred-work.md and
+      docs/release-validation/manual-browser-checks.md. FIXED 2026-08-28 by
+      spec-epic-3-retro-item-22-bind-ephemeris-path-per-thread.md: core/ephemeris/identity.py
+      now re-binds the verified swe path to whatever thread computes; re-verified in docker
+      that the report run reaches payload_ready and GET /report-runs/{id}/payload renders.
+      Full suite green (1413 passed)."
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
   - id: "epic-4-retro-item-23-guard-with_backoff-retried-two-write-sta"
     epic: 4

@@ -11,14 +11,19 @@ import hashlib
 import shutil
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+import core.ephemeris.identity as identity_module
 from core.ephemeris.identity import (
     DEFAULT_EPHEMERIS_DIR,
     EphemerisFile,
     EphemerisIdentity,
+    bind_verified_ephemeris_path_to_current_thread,
     verify_ephemeris_identity,
 )
 from core.errors import EphemerisIntegrityError
@@ -318,3 +323,114 @@ def test_importing_the_app_with_a_renamed_vendored_file_exits_non_zero(tmp_path:
     assert completed.returncode != 0
     assert "sepl_18.se1" in completed.stderr
     assert "missing" in completed.stderr
+
+
+# --- Per-thread path binding (epic-3-retro item 22) ---------------------------
+#
+# pyswisseph's `swed` state -- the ephemeris path included -- is thread-local in
+# the vendored build. `verify_ephemeris_identity()` runs on the shell's import
+# thread, but a computation dispatched to a FastAPI worker thread would start
+# with no path and fall back to Moshier. Every `swe.calc_ut` / `swe.houses`
+# entry point in `core/ephemeris/` re-binds the verified path to its own thread
+# first, via `bind_verified_ephemeris_path_to_current_thread()`.
+
+
+@pytest.fixture
+def _restore_thread_bind_state() -> object:
+    """Snapshot and restore the module-level verified dir and this thread's
+    bind marker, for tests that mutate them directly."""
+    saved_dir = identity_module._verified_ephemeris_dir
+    saved_bound = getattr(identity_module._thread_state, "bound_dir", None)
+    yield
+    identity_module._verified_ephemeris_dir = saved_dir
+    identity_module._thread_state.bound_dir = saved_bound
+
+
+def test_bind_is_a_noop_once_the_current_thread_holds_the_verified_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # conftest's autouse fixture just ran verify_ephemeris_identity() on this
+    # (main) thread, so it is already bound to the real vendored directory.
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "core.ephemeris.identity.swe.set_ephe_path", lambda path: calls.append(path)
+    )
+
+    bind_verified_ephemeris_path_to_current_thread()
+    bind_verified_ephemeris_path_to_current_thread()
+
+    assert calls == []
+
+
+def test_bind_sets_the_path_exactly_once_on_a_fresh_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "core.ephemeris.identity.swe.set_ephe_path", lambda path: calls.append(path)
+    )
+
+    def worker() -> None:
+        for _ in range(5):
+            bind_verified_ephemeris_path_to_current_thread()
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert calls == [str(DEFAULT_EPHEMERIS_DIR)]
+
+
+def test_bind_refuses_when_verification_has_not_run_in_this_process(
+    _restore_thread_bind_state: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(identity_module, "_verified_ephemeris_dir", None)
+
+    def worker() -> None:
+        # a fresh thread has no cached bind, so the None branch is reached
+        bind_verified_ephemeris_path_to_current_thread()
+
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            worker()
+        except EphemerisIntegrityError as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join()
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], EphemerisIntegrityError)
+    assert "verify_ephemeris_identity" in str(errors[0])
+
+
+def test_bind_rebinds_when_the_verified_dir_changes(
+    _restore_thread_bind_state: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "core.ephemeris.identity.swe.set_ephe_path", lambda path: calls.append(path)
+    )
+    # The main thread is currently bound to the real vendored dir (conftest).
+    identity_module._verified_ephemeris_dir = "/some/other/verified/dir"
+
+    bind_verified_ephemeris_path_to_current_thread()
+
+    assert calls == ["/some/other/verified/dir"]
+
+
+def test_calc_body_computes_the_same_value_on_a_worker_thread_as_on_the_main_thread() -> None:
+    """The regression test for the shipped bug: `_calc_body` on a worker thread
+    must not fall back to Moshier (which `_calc_body` itself would then reject)."""
+    from core.ephemeris.positions import _calc_body, _julian_day_ut
+
+    jd_ut = _julian_day_ut(datetime(2026, 9, 15, 0, 0, 0))
+
+    main_thread_result = _calc_body(jd_ut, 0)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker_thread_result = pool.submit(_calc_body, jd_ut, 0).result()
+
+    assert worker_thread_result == main_thread_result

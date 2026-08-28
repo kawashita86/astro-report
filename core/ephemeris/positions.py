@@ -10,6 +10,13 @@ clock, network or randomness, only ``swisseph`` and what is passed in.
 ``core/ephemeris/chart.py`` re-exports nothing from here beyond importing
 what it needs; its own public behavior (``compute_natal_chart()``) is
 unchanged by this extraction.
+
+``_calc_body`` assumes ``core.ephemeris.identity.verify_ephemeris_identity()``
+has run *in this process*, and re-binds the verified path to the calling
+thread (``bind_verified_ephemeris_path_to_current_thread()``) before every
+``swe.calc_ut`` -- pyswisseph's ephemeris path is thread-local in this build,
+so a computation dispatched to a worker thread would otherwise fall back to
+Moshier.
 """
 
 from __future__ import annotations
@@ -19,6 +26,7 @@ from decimal import Decimal
 
 import swisseph as swe
 
+from core.ephemeris.identity import bind_verified_ephemeris_path_to_current_thread
 from core.errors import EphemerisIntegrityError
 
 #: Only the genuinely public surface: the three shared constants. The
@@ -65,6 +73,12 @@ def _julian_day_ut(instant: datetime) -> float:
 
 
 def _calc_body(jd_ut: float, body_id: int) -> tuple[Decimal, Decimal]:
+    # pyswisseph's ephemeris path is thread-local in this build; re-pin the
+    # already-verified path on whatever thread is computing before the first
+    # calc_ut on it (idempotent and free thereafter). Without this, a scan
+    # running on a worker thread gets a Moshier fallback and the check below
+    # rejects every body.
+    bind_verified_ephemeris_path_to_current_thread()
     xx, retflag = swe.calc_ut(jd_ut, body_id, _CALC_FLAGS)
     # A negative retflag is pyswisseph's own error signal. Checked before the
     # bitwise SEFLG_SWIEPH test below: in two's-complement, a negative int

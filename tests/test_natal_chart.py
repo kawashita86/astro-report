@@ -248,6 +248,24 @@ def test_orb_is_an_unsigned_magnitude_with_applying_carried_separately() -> None
         assert isinstance(aspect.applying, bool)
 
 
+# --- epic-3-retro item 22: computes correctly off the import/main thread -----
+
+
+def test_compute_natal_chart_on_a_worker_thread_matches_the_main_thread() -> None:
+    """pyswisseph's ephemeris path is thread-local in this build, and the
+    report pipeline runs on a FastAPI worker thread. ``compute_natal_chart``
+    must re-bind the verified path to the calling thread itself (covering
+    ``swe.houses``, which cannot report a Moshier fallback), not rely on
+    ``verify_ephemeris_identity()`` having run on that thread."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    main_thread_chart = _compute()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker_thread_chart = pool.submit(_compute).result()
+
+    assert worker_thread_chart == main_thread_chart
+
+
 def test_house_cusp_and_planet_position_shapes() -> None:
     cusp = HouseCusp(number=1, longitude=Decimal("306.1868"))
     assert cusp.number == 1

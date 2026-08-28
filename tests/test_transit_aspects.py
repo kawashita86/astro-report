@@ -427,3 +427,32 @@ def test_transit_aspect_event_is_frozen() -> None:
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         event.perfected_at = None  # type: ignore[misc]
+
+
+# --- epic-3-retro item 22: runs correctly off the import/main thread ---------
+
+
+def test_find_transit_aspects_on_a_worker_thread_matches_the_main_thread() -> None:
+    """The real report pipeline runs ``find_transit_aspects`` on a FastAPI
+    worker thread (``poll_report_run`` is a sync route). pyswisseph's ephemeris
+    path is thread-local in this build, so ``_calc_body`` must re-bind the
+    verified path on the calling thread; without that, the scan on the worker
+    thread gets a Moshier fallback and every ``_calc_body`` raises. This uses
+    the real ephemeris (no ``swe.calc_ut`` patch)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Sun crosses ~85 deg in mid-June 2024, so a real scan yields a conjunction.
+    chart = _minimal_natal_chart(Decimal("85.0000"))
+    config = _config_with_single_transiting_body("sun")
+
+    def run() -> tuple[TransitAspectEvent, ...]:
+        return find_transit_aspects(chart, _MONTH_START, _MONTH_END, config)
+
+    main_thread_events = run()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker_thread_events = pool.submit(run).result()
+
+    assert worker_thread_events == main_thread_events
+    assert _events_for(
+        main_thread_events, transiting="sun", natal="moon", aspect="conjunction"
+    ), "real-ephemeris scan should have produced the mid-June Sun-conjunct-Moon event"

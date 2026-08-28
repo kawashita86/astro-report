@@ -11,11 +11,19 @@ different deployments.
 ``verify_ephemeris_identity()`` has no side effect on import -- the shell
 calls it eagerly, at import time, exactly the way ``shell/config.py`` calls
 ``load_settings()``. See ``shell/http/app.py``.
+
+``swe.set_ephe_path()`` pins the path per *thread* in the vendored pyswisseph
+build, and ``verify_ephemeris_identity()`` runs on one thread (the shell's
+import thread). ``bind_verified_ephemeris_path_to_current_thread()`` re-applies
+the already-verified path to any other thread that computes -- e.g. a FastAPI
+sync route handler on the anyio worker threadpool -- so the report pipeline
+does not silently fall back to Moshier off the main thread.
 """
 
 from __future__ import annotations
 
 import hashlib
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +35,7 @@ __all__ = [
     "DEFAULT_EPHEMERIS_DIR",
     "EphemerisFile",
     "EphemerisIdentity",
+    "bind_verified_ephemeris_path_to_current_thread",
     "verify_ephemeris_identity",
 ]
 
@@ -43,6 +52,20 @@ _MANIFEST_FILENAME = "SHA256SUMS"
 _HASH_CHUNK_SIZE = 1024 * 1024
 
 _SHA256_HEX_LENGTH = 64
+
+#: The directory the most recent successful ``verify_ephemeris_identity()`` call
+#: pinned pyswisseph to, as a string. ``None`` until that call has run in this
+#: process. ``bind_verified_ephemeris_path_to_current_thread()`` re-applies it
+#: to whatever thread is about to compute -- see that function's docstring for
+#: why re-application is necessary at all.
+_verified_ephemeris_dir: str | None = None
+
+#: Per-thread record of which directory ``swe.set_ephe_path()`` has already been
+#: called with *on this thread*. ``pyswisseph``'s ``swed`` state (the ephemeris
+#: path included) is thread-local in this build, so this guard is keyed per
+#: thread; keyed on the directory rather than a bare flag so a later
+#: re-verification against a different directory forces every thread to re-bind.
+_thread_state = threading.local()
 
 
 @dataclass(frozen=True)
@@ -174,6 +197,8 @@ def verify_ephemeris_identity(
         EphemerisIntegrityError: naming the manifest problem, the missing
             file, or the mismatched file -- whichever is encountered first.
     """
+    global _verified_ephemeris_dir
+
     manifest_path = ephemeris_dir / _MANIFEST_FILENAME
     manifest = _parse_manifest(manifest_path)
     _check_for_unlisted_files(ephemeris_dir, manifest)
@@ -194,11 +219,58 @@ def verify_ephemeris_identity(
             )
         verified.append(EphemerisFile(filename=filename, sha256=actual_sha256))
 
+    resolved_dir = str(ephemeris_dir)
     try:
-        swe.set_ephe_path(str(ephemeris_dir))
+        swe.set_ephe_path(resolved_dir)
     except Exception as error:
         raise EphemerisIntegrityError(
             f"Refusing to start: pyswisseph rejected the ephemeris path {ephemeris_dir}: "
             f"{error}."
         ) from error
+
+    # Record the verified directory so a computation running on another thread
+    # can re-pin the same path (pyswisseph's path is thread-local in this
+    # build). The line above already pinned it on *this* thread, so record that
+    # too and skip a redundant re-set on the first `_calc_body` here.
+    _verified_ephemeris_dir = resolved_dir
+    _thread_state.bound_dir = resolved_dir
+
     return EphemerisIdentity(files=tuple(verified))
+
+
+def bind_verified_ephemeris_path_to_current_thread() -> None:
+    """Re-apply the already-verified ephemeris path to the calling thread.
+
+    ``verify_ephemeris_identity()`` calls ``swe.set_ephe_path()`` once, on the
+    thread that runs it (normally the shell's import thread). In the vendored
+    ``pyswisseph`` build the ``swed`` struct -- ephemeris path included -- is
+    thread-local, so a computation that runs on a *different* thread (a FastAPI
+    sync route handler dispatched to the anyio worker threadpool, an
+    ``anyio.to_thread`` call, a ``ThreadPoolExecutor`` worker) starts with no
+    ephemeris path and ``swe.calc_ut`` silently falls back to Moshier.
+
+    Every ``swe.calc_ut`` / ``swe.houses`` entry point in ``core/ephemeris/``
+    calls this first. It re-sets the path on the current thread once and then
+    becomes a no-op for that thread -- ``swe.set_ephe_path()`` closes the open
+    ``.se1`` handles, so calling it per ``_calc_body`` would reopen the files
+    on every position lookup of a month scan.
+
+    The integrity guarantee is unchanged: if ``verify_ephemeris_identity()``
+    has never run in this process there is no verified path to bind, and this
+    raises rather than falling back to a default.
+
+    Raises:
+        EphemerisIntegrityError: ``verify_ephemeris_identity()`` has not run in
+            this process.
+    """
+    verified_dir = _verified_ephemeris_dir
+    if verified_dir is None:
+        raise EphemerisIntegrityError(
+            "Refusing to compute: verify_ephemeris_identity() has not run in this "
+            "process, so there is no verified ephemeris path to bind to this "
+            "thread. pyswisseph would fall back to Moshier."
+        )
+    if getattr(_thread_state, "bound_dir", None) == verified_dir:
+        return
+    swe.set_ephe_path(verified_dir)
+    _thread_state.bound_dir = verified_dir

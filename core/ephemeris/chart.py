@@ -3,10 +3,14 @@
 Calls ``pyswisseph`` directly -- no Kerykeion -- for planetary positions,
 Placidus cusps and natal Aspects. Purity (AD-1): no I/O, clock, network or
 randomness; imports only ``swisseph``, ``core/ephemeris/positions.py``'s
-shared low-level helpers (Story 3.1) and ``core/types/``. This module
-assumes ``core.ephemeris.identity.verify_ephemeris_identity()`` has already
-run (normally at shell import time, see ``shell/http/app.py``) and does not
-call ``swe.set_ephe_path()`` or re-verify the vendored files itself.
+shared low-level helpers (Story 3.1), ``core/ephemeris/identity.py``'s
+per-thread path bind, and ``core/types/``. This module assumes
+``core.ephemeris.identity.verify_ephemeris_identity()`` has already run
+(normally at shell import time, see ``shell/http/app.py``) and does not
+re-verify the vendored files; it does re-bind the verified path to the
+calling thread (``bind_verified_ephemeris_path_to_current_thread()``), since
+pyswisseph's ephemeris path is thread-local in this build and ``swe.houses()``
+needs it too.
 
 **Ascendant/midheaven are cusps 1 and 10, not separate lookups.** For
 Placidus, ``swe.houses()``'s ``ascmc`` output and its ``cusps[0]``/``cusps[9]``
@@ -28,6 +32,7 @@ from decimal import Decimal
 
 import swisseph as swe
 
+from core.ephemeris.identity import bind_verified_ephemeris_path_to_current_thread
 from core.ephemeris.positions import (
     FULL_CIRCLE,
     HALF_CIRCLE,
@@ -117,10 +122,16 @@ def compute_natal_chart(
             flags did not carry ``SEFLG_SWIEPH``) -- a silent Moshier
             fallback is never accepted. ``swe.houses()`` has no equivalent
             per-call flag to check; house/cusp accuracy instead depends on
-            the ephemeris path already pinned by
-            ``verify_ephemeris_identity()`` before this function runs.
+            the ephemeris path pinned by ``verify_ephemeris_identity()`` in
+            this process and re-bound to this thread at the top of this
+            function.
     """
     _require_utc(birth_instant_utc)
+
+    # swe.houses() below reads the thread-local ephemeris path too, and unlike
+    # _calc_body it cannot report a Moshier fallback -- bind the verified path
+    # to this thread explicitly, not just via the first _calc_body call.
+    bind_verified_ephemeris_path_to_current_thread()
 
     jd_ut = _julian_day_ut(birth_instant_utc)
 
