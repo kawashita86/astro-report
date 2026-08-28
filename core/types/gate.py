@@ -79,10 +79,12 @@ class GateResult:
     deterministic order (Section field order, then sentence index, then
     check order) -- two calls on identical inputs always produce a
     byte-for-byte identical tuple. ``vocabulary_version`` carries
-    ``GateVocabulary.version`` through, unchanged, for later persistence on
-    the Report row (Story 5.6).
+    ``GateVocabulary.version`` through, and ``vocabulary_content_hash``
+    carries ``GateVocabulary.content_hash`` through, both unchanged, for
+    later persistence on the Report row (Story 5.6).
     """
 
     passed: bool
     vocabulary_version: int
+    vocabulary_content_hash: str
     violations: tuple[GateViolation, ...]

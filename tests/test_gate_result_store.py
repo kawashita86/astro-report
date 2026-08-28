@@ -9,6 +9,7 @@ from stored rows with no new production query function.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
@@ -55,6 +56,10 @@ _RESOLVED_PLACE = ResolvedPlace(
     utc_offset=timedelta(hours=-6),
 )
 _BIRTH_INSTANT_UTC = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
+
+# A stand-in for ``GateVocabulary.content_hash`` -- a 64-char sha256 hex
+# digest (epic-5-retro item 45).
+_VOCABULARY_CONTENT_HASH = hashlib.sha256(b"epic-5-retro-item-45").hexdigest()
 
 
 @pytest.fixture
@@ -113,6 +118,7 @@ def test_a_gate_result_id_is_uuidv7(session: Session) -> None:
         passed=True,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     session.commit()
@@ -130,6 +136,7 @@ def test_store_gate_result_persists_a_passing_check(session: Session) -> None:
         passed=True,
         regeneration_count=0,
         vocabulary_version=3,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     session.commit()
@@ -141,6 +148,7 @@ def test_store_gate_result_persists_a_passing_check(session: Session) -> None:
     assert reloaded.passed is True
     assert reloaded.regeneration_count == 0
     assert reloaded.vocabulary_version == 3
+    assert reloaded.vocabulary_content_hash == _VOCABULARY_CONTENT_HASH
     assert reloaded.violations == []
     assert reloaded.created_at is not None
 
@@ -158,6 +166,7 @@ def test_store_gate_result_persists_a_failing_check_with_its_violations(
         passed=False,
         regeneration_count=1,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(violation,),
     )
     session.commit()
@@ -177,6 +186,94 @@ def test_store_gate_result_persists_a_failing_check_with_its_violations(
     ]
 
 
+def test_store_gate_result_persists_the_vocabulary_content_hash_on_a_fail_row(
+    session: Session,
+) -> None:
+    """The digest threaded from ``GateVocabulary.content_hash`` is written on
+    a failing row too (the fail path sources it straight off ``vocabulary``
+    in ``shell/runner/driver.py``) and survives a write/read round-trip
+    (epic-5-retro item 45)."""
+    client = _create_client(session)
+    run = _create_run(session, client)
+
+    stored = store_gate_result(
+        session,
+        run=run,
+        passed=False,
+        regeneration_count=1,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=(_a_violation(),),
+    )
+    session.commit()
+
+    reloaded = session.get(StoredGateResult, stored.id)
+    assert reloaded is not None
+    assert reloaded.vocabulary_content_hash == _VOCABULARY_CONTENT_HASH
+
+
+def test_two_gate_result_rows_with_equal_version_but_different_hash_are_distinguishable(
+    session: Session,
+) -> None:
+    """I/O & Edge-Case Matrix: a forgotten ``GateVocabulary.version`` bump on
+    a content edit is now detectable after the fact -- two rows with equal
+    ``vocabulary_version`` but different ``vocabulary_content_hash`` can be
+    told apart by a direct query (epic-5-retro item 45)."""
+    client = _create_client(session)
+    run = _create_run(session, client)
+    other_hash = hashlib.sha256(b"a-different-vocabulary").hexdigest()
+
+    store_gate_result(
+        session,
+        run=run,
+        passed=True,
+        regeneration_count=0,
+        vocabulary_version=7,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=(),
+    )
+    store_gate_result(
+        session,
+        run=run,
+        passed=True,
+        regeneration_count=1,
+        vocabulary_version=7,
+        vocabulary_content_hash=other_hash,
+        violations=(),
+    )
+    session.commit()
+
+    distinct_hashes = session.exec(
+        select(StoredGateResult.vocabulary_content_hash)
+        .where(StoredGateResult.vocabulary_version == 7)
+        .distinct()
+    ).all()
+    assert set(distinct_hashes) == {_VOCABULARY_CONTENT_HASH, other_hash}
+
+
+def test_a_gate_result_row_written_without_the_hash_reads_back_none(session: Session) -> None:
+    """A row inserted before migration ``0021`` -- modelled here by building
+    ``StoredGateResult`` directly without the new field -- reads the new
+    column as ``None``, never crashing (epic-5-retro item 45)."""
+    client = _create_client(session)
+    run = _create_run(session, client)
+
+    row = StoredGateResult(
+        client_id=client.id,
+        report_run_id=run.id,
+        passed=True,
+        regeneration_count=0,
+        vocabulary_version=1,
+        violations=[],
+    )
+    session.add(row)
+    session.commit()
+
+    reloaded = session.get(StoredGateResult, row.id)
+    assert reloaded is not None
+    assert reloaded.vocabulary_content_hash is None
+
+
 def test_store_gate_result_only_flushes_never_commits(session: Session) -> None:
     client = _create_client(session)
     run = _create_run(session, client)
@@ -187,6 +284,7 @@ def test_store_gate_result_only_flushes_never_commits(session: Session) -> None:
         passed=True,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     stored_id = stored.id
@@ -211,6 +309,7 @@ def test_report_run_id_is_not_unique_across_gate_result_rows(session: Session) -
         passed=False,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(_a_violation(),),
     )
     store_gate_result(
@@ -219,6 +318,7 @@ def test_report_run_id_is_not_unique_across_gate_result_rows(session: Session) -
         passed=True,
         regeneration_count=1,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     session.commit()
@@ -243,6 +343,7 @@ def test_mutating_and_committing_a_persisted_gate_result_raises(session: Session
         passed=True,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     session.commit()
@@ -268,6 +369,7 @@ def test_delete_client_and_derived_removes_its_gate_results(session: Session) ->
         passed=True,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     session.commit()
@@ -291,6 +393,7 @@ def test_delete_client_and_derived_does_not_persist_gate_result_deletion_without
         passed=True,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     session.commit()
@@ -324,6 +427,7 @@ def test_a_client_with_a_pass_and_an_earlier_fail_loses_both_gate_result_rows(
         passed=False,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(_a_violation(),),
     )
     passing = store_gate_result(
@@ -332,6 +436,7 @@ def test_a_client_with_a_pass_and_an_earlier_fail_loses_both_gate_result_rows(
         passed=True,
         regeneration_count=1,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     session.commit()
@@ -363,6 +468,7 @@ def test_first_generation_pass_rate_and_regeneration_series_are_directly_queryab
         passed=True,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
 
@@ -374,6 +480,7 @@ def test_first_generation_pass_rate_and_regeneration_series_are_directly_queryab
         passed=False,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(_a_violation(),),
     )
     store_gate_result(
@@ -382,6 +489,7 @@ def test_first_generation_pass_rate_and_regeneration_series_are_directly_queryab
         passed=True,
         regeneration_count=1,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
 
@@ -393,6 +501,7 @@ def test_first_generation_pass_rate_and_regeneration_series_are_directly_queryab
         passed=False,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(_a_violation(),),
     )
     session.commit()
@@ -511,6 +620,7 @@ def test_a_passed_reports_stored_draft_citations_are_checkable_against_its_store
         passed=True,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(),
     )
     session.commit()

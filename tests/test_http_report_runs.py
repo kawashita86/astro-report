@@ -63,6 +63,10 @@ AUTH_PASSWORD_HASH = (
 )
 SESSION_SECRET_KEY = "test-session-secret-key-at-least-32-chars-long"
 
+#: The live Gate vocabulary's sha256 digest -- recorded on ``report`` /
+#: ``gate_result`` rows alongside ``vocabulary_version`` (epic-5-retro item 45).
+_VOCABULARY_CONTENT_HASH = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH).content_hash
+
 LOCAL = Settings(
     environment=Environment.LOCAL,
     database_url="postgresql://astro:astro@localhost:5432/astro_report",
@@ -847,6 +851,7 @@ def test_getting_the_draft_for_a_bound_exhausted_run_shows_gate_violations_and_f
         passed=gate_result.passed,
         regeneration_count=run.regeneration_count,
         vocabulary_version=gate_result.vocabulary_version,
+        vocabulary_content_hash=gate_result.vocabulary_content_hash,
         violations=gate_result.violations,
     )
     db_session.commit()
@@ -914,6 +919,7 @@ def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_l
             passed=False,
             regeneration_count=count,
             vocabulary_version=1,
+            vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
             violations=(
                 GateViolation(
                     kind="empty_citation",
@@ -944,6 +950,7 @@ def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_l
         passed=False,
         regeneration_count=3,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=(
             GateViolation(
                 kind="empty_citation",
@@ -1100,6 +1107,7 @@ def _store_passed_report(
             style_guide_version=1,
             payload_schema_version=frozen["schema_version"],
             gate_vocabulary_version=1,
+            gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         )
         store_gate_result(
             db_session,
@@ -1107,6 +1115,7 @@ def _store_passed_report(
             passed=True,
             regeneration_count=regeneration_count,
             vocabulary_version=1,
+            vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
             violations=(),
         )
     else:
@@ -1117,6 +1126,7 @@ def _store_passed_report(
                 style_guide_version=1,
                 payload_schema_version=frozen["schema_version"],
                 gate_vocabulary_version=1,
+                gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
                 created_at=created_at,
             )
         )
@@ -1127,6 +1137,7 @@ def _store_passed_report(
                 passed=True,
                 regeneration_count=regeneration_count,
                 vocabulary_version=1,
+                vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
                 violations=[],
                 created_at=created_at,
             )
@@ -1311,6 +1322,7 @@ def test_getting_the_report_with_multiple_gate_results_picks_the_passing_row(
             passed=False,
             regeneration_count=count,
             vocabulary_version=1,
+            vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
             violations=(
                 GateViolation(
                     kind="empty_citation",

@@ -93,6 +93,7 @@ def _create_passed_report(session: Session) -> tuple[Client, ReportRun, Report]:
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash="e" * 64,
     )
     session.commit()
     return client, run, report

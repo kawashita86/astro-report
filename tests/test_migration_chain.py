@@ -186,6 +186,19 @@ def test_an_offline_upgrade_runs_env_py_and_emits_the_chain() -> None:
     # reasoning as 0006_report_payload's own unique index above.
     assert "CREATE TABLE report_theme" in completed.stdout
     assert "CREATE UNIQUE INDEX ix_report_theme_report_run_id" in completed.stdout
+    # 0021_gate_vocabulary_hash: one nullable VARCHAR(64) column added to each
+    # of report/gate_result (epic-5-retro item 45) -- no adapter-level test
+    # exercises this migration's own ALTER TABLE (those build their schema via
+    # SQLModel.create_all()), so this is the only check tying the hand-written
+    # add-column SQL to the model fields it must match.
+    assert (
+        "ALTER TABLE report ADD COLUMN gate_vocabulary_content_hash VARCHAR(64)"
+        in completed.stdout
+    )
+    assert (
+        "ALTER TABLE gate_result ADD COLUMN vocabulary_content_hash VARCHAR(64)"
+        in completed.stdout
+    )
 
 
 def test_a_percent_encoded_password_does_not_abort_the_migration() -> None:

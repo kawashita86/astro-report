@@ -491,13 +491,17 @@ action_items:
       added column + one write-site. NOT a standalone story -- fold into the next
       change that legitimately touches StoredGateResult or the Gate write path."
     owner: "dev loop (opportunistic)"
-    status: open
+    status: done
     decided_on: 2026-08-28
     decision: "Accept the addition, fold into the next Gate-touching change. Cheap
       insurance that a forgotten version bump on a vocabulary content edit is
       detectable after the fact; not urgent, and adding a column now while the
       migration chain is still fragile (item 46) argues against rushing it."
-    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
+    done_note: "Done standalone 2026-08-28: item 46's migration-chain fix removed
+      the stated blocker. Threads GateVocabulary.content_hash through GateResult
+      and persists it as a nullable String(64) column on report/gate_result via
+      forward migration 0021_gate_vocabulary_hash."
+    ref: "_bmad-output/implementation-artifacts/spec-epic-5-retro-item-45-persist-gatevocabulary-content-hash.md"
   - id: "epic-6-retro-item-46-make-the-alembic-migration-chain-reachab"
     epic: 6
     action: "Make the Alembic migration chain reachable on a real Postgres: revision

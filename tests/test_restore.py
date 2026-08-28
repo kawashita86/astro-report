@@ -391,6 +391,11 @@ def test_claims_are_traceable_after_restore() -> None:
             select(StoredGateResult).where(StoredGateResult.report_run_id == run_id)
         ).one()
         source_vocabulary_version = source_gate.vocabulary_version
+        source_vocabulary_content_hash = source_gate.vocabulary_content_hash
+        source_report = source_session.exec(
+            select(Report).where(Report.report_run_id == run_id)
+        ).one()
+        source_report_hash = source_report.gate_vocabulary_content_hash
         backup = _serialize_as_backup(source_session)
 
     target_engine = _fk_enforcing_engine()
@@ -405,10 +410,19 @@ def test_claims_are_traceable_after_restore() -> None:
         restored_payload = verify_session.exec(
             select(ReportPayload).where(ReportPayload.report_run_id == run_id)
         ).one()
+        restored_report = verify_session.exec(
+            select(Report).where(Report.report_run_id == run_id)
+        ).one()
 
     assert restored_gate.passed is True
     assert restored_gate.violations == []
     assert restored_gate.vocabulary_version == source_vocabulary_version
+    # epic-5-retro item 45: the GateVocabulary content hash survives the
+    # backup -> restore round-trip on both the gate_result and report rows.
+    assert restored_gate.vocabulary_content_hash == source_vocabulary_content_hash
+    assert source_vocabulary_content_hash is not None
+    assert restored_report.gate_vocabulary_content_hash == source_report_hash
+    assert source_report_hash is not None
     assert restored_payload.payload  # the Payload the Claims resolve against survived
 
 

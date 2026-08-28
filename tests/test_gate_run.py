@@ -676,6 +676,16 @@ def test_gate_result_carries_the_vocabulary_version_through() -> None:
     assert result.vocabulary_version == _VOCABULARY.version
 
 
+def test_gate_result_carries_the_vocabulary_content_hash_through() -> None:
+    """``run_gate()`` copies ``GateVocabulary.content_hash`` onto the result
+    verbatim, exactly as it already does for ``version`` -- so a later
+    persistence write-site can record the digest the Gate checked against
+    (epic-5-retro item 45)."""
+    result = run_gate(_draft(), _freeze(), _VOCABULARY)
+
+    assert result.vocabulary_content_hash == _VOCABULARY.content_hash
+
+
 def test_violations_are_gate_violation_instances() -> None:
     result = run_gate(
         _draft(energia_generale=(Sentence(text="Marte porta energia.", entry_ids=()),)),

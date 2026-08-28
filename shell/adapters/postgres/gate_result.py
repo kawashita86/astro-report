@@ -63,6 +63,13 @@ class StoredGateResult(SQLModel, table=True):
     passed: bool
     regeneration_count: int
     vocabulary_version: int
+    # Nullable, no `server_default`: a row written before migration `0021`
+    # honestly has no recorded hash (mirrors `0020`'s `month` add-column).
+    # Every write after `0021` populates it. `max_length=64` mirrors
+    # `StoredNatalChart.computation_config_content_hash`'s width -- a sha256
+    # hex digest -- though that precedent is NOT NULL, whereas this column
+    # is deliberately nullable (pre-`0021` rows have no recorded hash).
+    vocabulary_content_hash: str | None = Field(default=None, max_length=64)
     # `sa_column=Column(...)` bypasses SQLModel's usual inference of
     # `nullable` from the type annotation, so `nullable=False` must be given
     # explicitly here -- matching `ReportDraft.draft`'s own JSON column.
@@ -116,6 +123,7 @@ def store_gate_result(
     passed: bool,
     regeneration_count: int,
     vocabulary_version: int,
+    vocabulary_content_hash: str,
     violations: tuple[GateViolation, ...],
 ) -> StoredGateResult:
     """Persist one Groundedness Gate outcome for ``run``, in one flush.
@@ -138,6 +146,7 @@ def store_gate_result(
         passed=passed,
         regeneration_count=regeneration_count,
         vocabulary_version=vocabulary_version,
+        vocabulary_content_hash=vocabulary_content_hash,
         violations=_json_safe(violations),
     )
     session.add(stored)

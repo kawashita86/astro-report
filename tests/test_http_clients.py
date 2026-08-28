@@ -56,6 +56,10 @@ AUTH_PASSWORD_HASH = (
 )
 SESSION_SECRET_KEY = "test-session-secret-key-at-least-32-chars-long"
 
+#: A stand-in for ``GateVocabulary.content_hash`` -- a 64-char sha256 hex
+#: digest recorded on ``report`` rows (epic-5-retro item 45).
+_VOCABULARY_CONTENT_HASH = "d" * 64
+
 LOCAL = Settings(
     environment=Environment.LOCAL,
     database_url="postgresql://astro:astro@localhost:5432/astro_report",
@@ -710,6 +714,7 @@ def _create_passed_report(
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     db_session.commit()
     return run
@@ -904,6 +909,7 @@ def _make_passed_report_at(
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         created_at=created_at,
     )
     db_session.add(report)

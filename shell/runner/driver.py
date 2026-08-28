@@ -616,6 +616,7 @@ def _run_gate_passed(
         style_guide_version=stored_draft.style_guide_version,
         payload_schema_version=stored_payload.schema_version,
         gate_vocabulary_version=result.vocabulary_version,
+        gate_vocabulary_content_hash=result.vocabulary_content_hash,
     )
     store_gate_result(
         session,
@@ -623,6 +624,7 @@ def _run_gate_passed(
         passed=True,
         regeneration_count=run.regeneration_count,
         vocabulary_version=result.vocabulary_version,
+        vocabulary_content_hash=result.vocabulary_content_hash,
         violations=result.violations,
     )
 
@@ -831,6 +833,7 @@ def drive(
                     passed=False,
                     regeneration_count=run.regeneration_count,
                     vocabulary_version=vocabulary.version,
+                    vocabulary_content_hash=vocabulary.content_hash,
                     violations=error.violations,
                 )
             except Exception:

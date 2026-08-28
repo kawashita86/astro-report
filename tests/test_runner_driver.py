@@ -916,6 +916,7 @@ def test_gate_passed_advances_on_a_clean_draft_and_persists_a_report_row(
     assert stored_report.style_guide_version == stored_draft.style_guide_version
     assert stored_report.payload_schema_version == stored_payload.schema_version
     assert stored_report.gate_vocabulary_version == _VOCABULARY.version
+    assert stored_report.gate_vocabulary_content_hash == _VOCABULARY.content_hash
 
     # Story 5.6: exactly one immutable gate_result row also records the pass.
     stored_gate_results = session.exec(
@@ -927,6 +928,7 @@ def test_gate_passed_advances_on_a_clean_draft_and_persists_a_report_row(
     assert stored_gate_result.passed is True
     assert stored_gate_result.regeneration_count == 0
     assert stored_gate_result.vocabulary_version == _VOCABULARY.version
+    assert stored_gate_result.vocabulary_content_hash == _VOCABULARY.content_hash
     assert stored_gate_result.violations == []
 
 
@@ -973,6 +975,7 @@ def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_drive_
     assert stored_gate_results[0].passed is False
     assert stored_gate_results[0].regeneration_count == 0
     assert stored_gate_results[0].vocabulary_version == _VOCABULARY.version
+    assert stored_gate_results[0].vocabulary_content_hash == _VOCABULARY.content_hash
     assert stored_gate_results[0].violations
 
     result = _drive(session, run, natal_chart, generator=generator)

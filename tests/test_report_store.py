@@ -7,6 +7,7 @@ Client-deletion cascade.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
@@ -42,6 +43,10 @@ _RESOLVED_PLACE = ResolvedPlace(
     utc_offset=timedelta(hours=-6),
 )
 _BIRTH_INSTANT_UTC = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
+
+# A stand-in for ``GateVocabulary.content_hash`` -- a 64-char sha256 hex
+# digest (epic-5-retro item 45).
+_VOCABULARY_CONTENT_HASH = hashlib.sha256(b"epic-5-retro-item-45").hexdigest()
 
 
 @pytest.fixture
@@ -88,6 +93,7 @@ def test_a_report_id_is_uuidv7(session: Session) -> None:
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     session.commit()
 
@@ -104,6 +110,7 @@ def test_store_report_persists_identity_and_every_recorded_version(session: Sess
         style_guide_version=3,
         payload_schema_version=2,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     session.commit()
 
@@ -114,7 +121,52 @@ def test_store_report_persists_identity_and_every_recorded_version(session: Sess
     assert reloaded.style_guide_version == 3
     assert reloaded.payload_schema_version == 2
     assert reloaded.gate_vocabulary_version == 1
+    assert reloaded.gate_vocabulary_content_hash == _VOCABULARY_CONTENT_HASH
     assert reloaded.created_at is not None
+
+
+def test_store_report_persists_the_gate_vocabulary_content_hash(session: Session) -> None:
+    """The digest threaded from ``GateVocabulary.content_hash`` survives a
+    write/read round-trip on its own column (epic-5-retro item 45)."""
+    client = _create_client(session)
+    run = _create_run(session, client)
+
+    stored = store_report(
+        session,
+        run=run,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+    )
+    session.commit()
+
+    reloaded = session.get(Report, stored.id)
+    assert reloaded is not None
+    assert reloaded.gate_vocabulary_content_hash == _VOCABULARY_CONTENT_HASH
+
+
+def test_a_report_row_written_without_the_hash_reads_back_none(session: Session) -> None:
+    """A row inserted before migration ``0021`` -- modelled here by building
+    ``Report`` directly without the new field -- reads the new column as
+    ``None``, never crashing (epic-5-retro item 45; mirrors ``0020``'s
+    nullable ``month``)."""
+    client = _create_client(session)
+    run = _create_run(session, client)
+
+    report = Report(
+        client_id=client.id,
+        report_run_id=run.id,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+    )
+    session.add(report)
+    session.commit()
+
+    reloaded = session.get(Report, report.id)
+    assert reloaded is not None
+    assert reloaded.gate_vocabulary_content_hash is None
 
 
 def test_store_report_only_flushes_never_commits(session: Session) -> None:
@@ -127,6 +179,7 @@ def test_store_report_only_flushes_never_commits(session: Session) -> None:
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     stored_id = stored.id
     session.rollback()
@@ -147,6 +200,7 @@ def test_mutating_and_committing_a_persisted_report_raises(session: Session) -> 
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     session.commit()
 
@@ -178,6 +232,7 @@ def test_a_second_report_for_the_same_report_run_id_raises_integrity_error(
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     session.commit()
 
@@ -188,6 +243,7 @@ def test_a_second_report_for_the_same_report_run_id_raises_integrity_error(
             style_guide_version=1,
             payload_schema_version=1,
             gate_vocabulary_version=1,
+            gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         )
 
     session.rollback()
@@ -206,6 +262,7 @@ def test_two_report_runs_for_one_client_each_get_their_own_report_row(session: S
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     store_report(
         session,
@@ -213,6 +270,7 @@ def test_two_report_runs_for_one_client_each_get_their_own_report_row(session: S
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     session.commit()
 
@@ -232,6 +290,7 @@ def test_delete_client_and_derived_removes_its_reports(session: Session) -> None
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     session.commit()
 
@@ -254,6 +313,7 @@ def test_delete_client_and_derived_does_not_persist_report_deletion_without_a_co
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     session.commit()
 

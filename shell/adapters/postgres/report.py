@@ -31,7 +31,8 @@ class Report(SQLModel, table=True):
     """One passed Groundedness Gate outcome for one ``ReportRun``.
 
     Records exactly which versions of the Style Guide, the Report Payload
-    schema and the Gate vocabulary produced this pass -- mirrors
+    schema and the Gate vocabulary produced this pass -- plus the Gate
+    vocabulary's own content hash (epic-5-retro item 45) -- mirrors
     ``ReportDraft``/``ReportPayload``'s own traceability shape, so a
     ``Report`` row is traceable back to exactly what generated and checked
     it, even though it stores no content of its own (the content stays in
@@ -52,6 +53,13 @@ class Report(SQLModel, table=True):
     style_guide_version: int
     payload_schema_version: int
     gate_vocabulary_version: int
+    # Nullable, no `server_default`: a row written before migration `0021`
+    # honestly has no recorded hash (mirrors `0020`'s `month` add-column).
+    # Every write after `0021` populates it. `max_length=64` mirrors
+    # `StoredNatalChart.computation_config_content_hash`'s width -- a sha256
+    # hex digest -- though that precedent is NOT NULL, whereas this column
+    # is deliberately nullable (pre-`0021` rows have no recorded hash).
+    gate_vocabulary_content_hash: str | None = Field(default=None, max_length=64)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(_UTCDateTime, nullable=False),
@@ -77,6 +85,7 @@ def store_report(
     style_guide_version: int,
     payload_schema_version: int,
     gate_vocabulary_version: int,
+    gate_vocabulary_content_hash: str,
 ) -> Report:
     """Persist a passed Groundedness Gate outcome for ``run``, in one flush.
 
@@ -94,6 +103,7 @@ def store_report(
         style_guide_version=style_guide_version,
         payload_schema_version=payload_schema_version,
         gate_vocabulary_version=gate_vocabulary_version,
+        gate_vocabulary_content_hash=gate_vocabulary_content_hash,
     )
     session.add(report)
     session.flush()

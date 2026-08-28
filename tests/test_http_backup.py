@@ -48,6 +48,10 @@ AUTH_PASSWORD_HASH = (
 )
 SESSION_SECRET_KEY = "test-session-secret-key-at-least-32-chars-long"
 
+#: A stand-in for ``GateVocabulary.content_hash`` -- a 64-char sha256 hex
+#: digest, recorded on ``report``/``gate_result`` rows (epic-5-retro item 45).
+_VOCABULARY_CONTENT_HASH = "c" * 64
+
 LOCAL = Settings(
     environment=Environment.LOCAL,
     database_url="postgresql://astro:astro@localhost:5432/astro_report",
@@ -157,6 +161,7 @@ def _make_report(db_session: Session, *, run: ReportRun) -> Report:
         style_guide_version=1,
         payload_schema_version=1,
         gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
     )
     db_session.add(report)
     db_session.flush()
@@ -212,6 +217,7 @@ def _make_gate_result(db_session: Session, *, run: ReportRun) -> StoredGateResul
         passed=True,
         regeneration_count=0,
         vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
         violations=[],
     )
     db_session.add(gate_result)
@@ -359,6 +365,25 @@ def test_populated_pipeline_includes_every_row_exactly_once_in_fk_safe_order(
         if table_name in {"style_guide", "corpus_entry"}:
             continue
         assert len(body[table_name]) == 2
+
+
+def test_backup_carries_the_gate_vocabulary_content_hash_on_report_and_gate_result(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """epic-5-retro item 45: the nullable ``String(64)`` hash column added to
+    ``report`` and ``gate_result`` flows through the generic ``/backup``
+    serializer like any other column -- present in the payload when set."""
+    chain = _full_chain(db_session, name="Ada Lovelace")
+    db_session.commit()
+
+    body = authenticated_client.get("/backup").json()
+
+    report_row = next(row for row in body["report"] if row["id"] == str(chain["report"].id))
+    assert report_row["gate_vocabulary_content_hash"] == _VOCABULARY_CONTENT_HASH
+    gate_result_row = next(
+        row for row in body["gate_result"] if row["id"] == str(chain["gate_result"].id)
+    )
+    assert gate_result_row["vocabulary_content_hash"] == _VOCABULARY_CONTENT_HASH
 
 
 def test_a_pre_story_6_4_report_run_with_no_natal_chart_id_is_included(

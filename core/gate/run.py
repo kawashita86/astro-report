@@ -499,5 +499,6 @@ def run_gate(
     return GateResult(
         passed=not violations,
         vocabulary_version=vocabulary.version,
+        vocabulary_content_hash=vocabulary.content_hash,
         violations=tuple(violations),
     )
