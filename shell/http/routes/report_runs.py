@@ -1,12 +1,17 @@
 """``POST /clients/{client_id}/report-runs`` (start) and
 ``GET /report-runs/{run_id}`` (HTMX poll) -- Francesco starts a month's
-computation and watches it finish (Story 3.5).
+computation and watches it advance one stage at a time (Story 3.5, reshaped
+for AD-20 by Story 3.10).
 
-Both routes call ``shell/runner/driver.py::drive()`` -- the start route once,
-right after creating the row, so a fast run can finish inside the same
-request; the poll route again on every poll, so an interrupted or still-
-running run keeps advancing on whichever request -- start or poll -- reaches
-it next. No background task, no queue: see ``shell/runner/driver.py``'s
+The start route only creates the ``ReportRun`` row, commits and redirects to
+the poll view -- it runs no stage, so it returns immediately. Every stage is
+driven from the poll route: each ``GET`` calls
+``shell/runner/driver.py::advance()`` once, which moves the run forward by
+at most one stage and returns, so the first stage runs on the first poll and
+a poll never blocks on more than its own single stage (one external
+Generator call plus bounded backoff, at ``draft_ready``). Concurrent polls
+for one run are single-flighted by a Postgres advisory lock inside
+``advance()``. No background task, no queue: see ``shell/runner/driver.py``'s
 Design Notes.
 
 Authenticated by default: nothing here is named in
@@ -54,7 +59,7 @@ from shell.http.draft_view import (
 from shell.http.payload_view import localize_payload
 from shell.http.report_markdown import render_report_markdown
 from shell.ports.generator import Generator
-from shell.runner.driver import drive
+from shell.runner.driver import advance
 
 __all__ = ["get_generator", "router"]
 
@@ -66,8 +71,8 @@ _templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 #: "YYYY-MM", zero-padded -- the one shape ``shell/runner/month.py``'s
 #: ``client_month_interval_utc`` is contracted to accept. Checked here so a
 #: malformed month is a plain 422 at submission time, never handed to
-#: ``drive()`` where ``with_backoff`` would retry a permanent input error as
-#: if it were a transient one and quietly leave the run un-advanced.
+#: ``advance()`` where ``with_backoff`` would retry a permanent input error
+#: as if it were a transient one and quietly leave the run un-advanced.
 _MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 #: The only two values ``record_send_disposition`` (and the route below)
@@ -202,16 +207,17 @@ def get_generator(request: Request) -> Generator:
     return GeminiGenerator(request.app.state.settings.gemini_api_key)
 
 
-def _drive_run(
+def _advance_run(
     request: Request, session: Session, run: ReportRun, client: Client, generator: Generator
 ) -> ReportRun:
-    """Deserialize ``client``'s current stored chart and call ``drive()``
-    once -- shared by both routes below."""
+    """Deserialize ``client``'s current stored chart and call ``advance()``
+    once -- used only by ``poll_report_run`` (AD-20), so each poll moves the
+    run forward by at most one stage."""
     stored_chart = _current_chart(session, client.id)
     if stored_chart is None:
         raise HTTPException(status_code=404)
     natal_chart = deserialize_natal_chart(stored_chart)
-    return drive(
+    return advance(
         session,
         run,
         natal_chart=natal_chart,
@@ -227,10 +233,8 @@ def _drive_run(
 @router.post("/clients/{client_id}/report-runs", include_in_schema=False)
 def start_report_run(
     client_id: UUID,
-    request: Request,
     month: str = Form(...),
     session: Session = Depends(get_session),
-    generator: Generator = Depends(get_generator),
 ) -> Response:
     client = session.get(Client, client_id)
     if client is None:
@@ -239,12 +243,18 @@ def start_report_run(
     if not _MONTH_PATTERN.match(month):
         raise HTTPException(status_code=422, detail="month must be 'YYYY-MM'.")
 
+    # AD-20 (Story 3.10): the start route runs no stage -- it only creates
+    # the row, commits and redirects, so it returns immediately; the first
+    # stage runs on the first poll. The stored chart is still checked here so
+    # starting a run for a Client with no chart is a plain 404 at submission
+    # time, not a failure the operator only discovers on the first poll.
+    if _current_chart(session, client_id) is None:
+        raise HTTPException(status_code=404)
+
     now = datetime.now(UTC)
     run = ReportRun(client_id=client_id, month=month, created_at=now, updated_at=now)
     session.add(run)
     session.commit()
-
-    _drive_run(request, session, run, client, generator)
 
     return RedirectResponse(f"/report-runs/{run.id}", status_code=303)
 
@@ -264,7 +274,7 @@ def poll_report_run(
     if client is None:
         raise RuntimeError(f"ReportRun {run.id} references a missing Client.")
 
-    _drive_run(request, session, run, client, generator)
+    _advance_run(request, session, run, client, generator)
 
     return _templates.TemplateResponse(request, "report_run_poll.html", {"run": run})
 

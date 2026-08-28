@@ -140,7 +140,7 @@ def store_report_theme(
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``store_report_payload()``
     (``shell/adapters/postgres/report_payload.py``), so it never decides the
-    caller's transaction boundary. ``shell/runner/driver.py::drive()``
+    caller's transaction boundary. ``shell/runner/driver.py::advance()``
     commits once this and the rest of the ``payload_ready`` stage have
     succeeded.
     """

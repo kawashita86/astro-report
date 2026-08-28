@@ -37,9 +37,9 @@ def with_backoff[T](
 
     Re-raises the final attempt's exception once every attempt is exhausted
     -- this function never swallows a persistent failure. The caller
-    (``shell/runner/driver.py::drive()``) decides what "still failing" means
-    for a ``ReportRun``: leaving ``run.stage`` at its last successful value
-    rather than marking the run failed.
+    (``shell/runner/driver.py::advance()``) decides what "still failing"
+    means for a ``ReportRun``: leaving ``run.stage`` at its last successful
+    value rather than marking the run failed.
 
     ``base_delay_seconds`` defaults to the module's small, generic schedule
     (``_BASE_DELAY_SECONDS``) -- right for every stage whose call is local

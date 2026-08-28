@@ -45,7 +45,7 @@ class Report(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid7, primary_key=True)
     client_id: UUID = Field(foreign_key="client.id", index=True)
     # `unique=True`: exactly one `Report` per `ReportRun` -- a run only ever
-    # reaches `gate_passed` once (`drive()`'s forward-only stage advance),
+    # reaches `gate_passed` once (`advance()`'s forward-only stage advance),
     # enforced at the schema level too, not merely by `store_report()` only
     # ever being called once per `ReportRun` in `shell/runner/driver.py`'s
     # `gate_passed` stage. Mirrors `ReportDraft.report_run_id`.
@@ -92,7 +92,7 @@ def store_report(
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``store_report_draft()``
     (``shell/adapters/postgres/report_draft.py``), so it never decides the
-    caller's transaction boundary. ``shell/runner/driver.py::drive()``
+    caller's transaction boundary. ``shell/runner/driver.py::advance()``
     commits once this and the rest of the ``gate_passed`` stage have
     succeeded. Called only after a passing ``GateResult`` -- never on
     failure (Story 5.3's Boundaries).

@@ -1,16 +1,23 @@
-"""``drive()``: advances one ``ReportRun`` through AD-10's six named stages,
-one already-registered stage at a time, persisting each stage's output
-before the next begins (Story 3.5).
+"""``advance()``: moves one ``ReportRun`` forward by **at most one** of
+AD-10's six named stages per call, persisting that stage's output before it
+returns (Story 3.5, reshaped for AD-20 by Story 3.10).
 
-**Why `drive()` is called from both the start POST and the poll GET, with no
-background task or queue.** BUILD-ORDER.md's E5 explicitly rejects an
-in-process background task ("run state lives only in memory, lost silently
-on restart") and a blocking synchronous request ("a stall loses the whole
-run"). Making `drive()` a cheap, idempotent, re-entrant function that any
-request handler can call reduces the problem to "the next HTTP request in
-either role continues the run" -- the browser's own poll cadence is the
-drain, matching the architecture note "no queue infrastructure needed." See
-``shell/http/routes/report_runs.py``.
+**Why one stage per call, from the poll GET only, with no background task or
+queue.** AD-20 requires the start ``POST`` to return instantly and each
+status poll to move the run forward exactly one stage. So
+``POST /clients/{client_id}/report-runs`` only creates the row and
+redirects, and ``advance()`` is called *only* from
+``GET /report-runs/{run_id}``: the first stage runs on the first poll, and a
+poll may take as long as its one stage (one external Generator call plus
+bounded backoff, at ``draft_ready``) but never chains into a second -- so
+closing the tab can never abandon work mid-pipeline. BUILD-ORDER.md's E5
+still rules out an in-process background task ("run state lives only in
+memory, lost silently on restart") and a queue ("no queue infrastructure
+needed"): the browser's poll cadence remains the only drain. Concurrent
+polls for one run are single-flighted by a Postgres transaction-scoped
+advisory lock on the run id (``shell/runner/advisory_lock.py``) -- the poll
+that takes the lock advances one stage; the other returns the current stage
+untouched. See ``shell/http/routes/report_runs.py``.
 
 **Why only five of the six stages get real stage functions (so far).**
 BUILD-ORDER.md: "the runner introduced once two real stages exist."
@@ -21,8 +28,9 @@ Story 3.8, once ``core/payload/`` (Stories 3.6-3.8) existed to call;
 ``core/gate/run.py::run_gate()`` (Story 5.2) existed to call. Registering a
 stage before its implementation exists would mean stubbing a lie.
 `_STAGE_SEQUENCE` names all six stages for display/ordering;
-`_STAGE_FUNCTIONS` only the ones actually implemented -- `drive()` stops the
-moment it reaches a name with no registered function (today, `exported`).
+`_STAGE_FUNCTIONS` only the ones actually implemented -- `advance()` stops
+the moment the next stage name has no registered function (today,
+`exported`).
 
 **`draft_ready` is the first stage with a live external call.** The three
 earlier stages read only local state (the already-persisted chart, the
@@ -91,10 +99,11 @@ from shell.adapters.postgres.report_theme import (
 )
 from shell.adapters.postgres.style_guide import current_style_guide
 from shell.ports.generator import Generator, StyleGuideVersion
+from shell.runner.advisory_lock import try_acquire_advance_lock
 from shell.runner.backoff import with_backoff
 from shell.runner.month import client_month_interval_utc
 
-__all__ = ["drive"]
+__all__ = ["advance"]
 
 _logger = logging.getLogger(__name__)
 
@@ -114,23 +123,23 @@ _STAGE_SEQUENCE: tuple[str, ...] = (
 #: stage name. `draft_ready` is the only stage with a real rate-limited
 #: network call (the module's own Design Notes): 3 attempts, 6-second base
 #: delay, doubling to a second retry at 12s -- three Gemini attempts inside
-#: one `drive()` call span 0s/6s/18s, comfortably inside the provider's 10
+#: one `advance()` call span 0s/6s/18s, comfortably inside the provider's 10
 #: requests-per-minute ceiling even if a poll lands right after a prior
-#: `drive()` call's own attempts.
+#: `advance()` call's own attempts.
 #:
 #: `gate_passed` (`_run_gate_passed`) is capped at a single attempt. Its
 #: dominant failure mode is a deterministic `GateFailedError`: the stage
 #: re-checks the *same* already-persisted draft with the pure `run_gate()`
 #: (`core/gate/run.py`), so an in-process `with_backoff` retry only re-runs
 #: an identical failing check -- wasted work that delays the real recovery,
-#: `drive()`'s `except GateFailedError` regeneration path, which produces a
-#: genuinely new draft on the *next* `drive()` call. `max_attempts=1` lets
+#: `advance()`'s `except GateFailedError` regeneration path, which produces a
+#: genuinely new draft on the *next* `advance()` call. `max_attempts=1` lets
 #: that `GateFailedError` propagate on the first attempt.
 #:
 #: Tradeoff: `_run_gate_passed` also reads `ReportDraft`/`ReportPayload`
 #: back and, on a pass, writes `Report` + `StoredGateResult`. A *transient*
-#: DB error in any of those is no longer retried within one `drive()` call;
-#: it surfaces through `drive()`'s generic `except Exception` branch, which
+#: DB error in any of those is no longer retried within one `advance()` call;
+#: it surfaces through `advance()`'s generic `except Exception` branch, which
 #: increments `stage_failure_count` from its first occurrence, so a flaky
 #: database now recovers across poll cycles (`_MAX_STAGE_FAILURES`) rather
 #: than inside a single call. A stage absent from this mapping keeps
@@ -141,9 +150,9 @@ _STAGE_BACKOFF_OVERRIDES: dict[str, dict[str, object]] = {
 }
 
 #: Consecutive `with_backoff` exhaustions on a run's current stage, across
-#: separate `drive()` calls, before that run is marked terminally failed
-#: (Story 4.8). Each `drive()` call already spends up to 3 Gemini attempts
-#: (~18s) when stuck at `draft_ready`; 5 such exhausted `drive()` calls is
+#: separate `advance()` calls, before that run is marked terminally failed
+#: (Story 4.8). Each `advance()` call already spends up to 3 Gemini attempts
+#: (~18s) when stuck at `draft_ready`; 5 such exhausted `advance()` calls is
 #: ~15 real attempts -- a genuinely exhausted run, not a blip (the module's
 #: own Design Notes).
 _MAX_STAGE_FAILURES = 5
@@ -162,7 +171,7 @@ _MAX_REGENERATIONS = 3
 #: A stage function's uniform signature: every registered stage receives the
 #: same context, whether or not it needs all of it, so the registry stays a
 #: plain ``{name: function}`` mapping rather than growing per-stage plumbing
-#: in ``drive()`` itself as more stages register. ``generator`` joined the
+#: in ``advance()`` itself as more stages register. ``generator`` joined the
 #: signature in Story 4.6 for ``draft_ready``; ``vocabulary`` joined it in
 #: Story 5.3 for ``gate_passed`` -- every other registered stage still
 #: receives both, unused, rather than the registry growing a second,
@@ -515,7 +524,7 @@ def _run_draft_ready(
 
     The persisted ``ReportDraft`` is tagged ``attempt=run.regeneration_count``
     (Story 5.4): ``0`` the first time this stage runs for ``run``, and
-    whatever ``drive()``'s ``GateFailedError`` handling has already
+    whatever ``advance()``'s ``GateFailedError`` handling has already
     incremented it to on a re-run after a Gate failure -- so a second (or
     third) draft for the same run is a new, distinctly-tagged row, never a
     conflict with the first.
@@ -566,7 +575,7 @@ def _run_gate_passed(
     (Story 5.2, ``core/gate/run.py::run_gate()``) against them, and on a
     pass persist a new immutable ``Report`` row -- never on failure
     (Story 5.3) -- alongside a ``StoredGateResult`` row recording the pass
-    (Story 5.6). The mirror write for a *failing* check lives in ``drive()``'s
+    (Story 5.6). The mirror write for a *failing* check lives in ``advance()``'s
     ``except GateFailedError`` block instead, not here: this stage's
     ``with_backoff`` wrapper is capped at ``max_attempts=1``
     (:data:`_STAGE_BACKOFF_OVERRIDES`), so a raised ``GateFailedError``
@@ -580,7 +589,7 @@ def _run_gate_passed(
     mirroring every other stage function's own "read back, never
     recomputed" pattern (this story's Boundaries). On
     ``GateResult.passed is False``, raises :class:`core.errors.GateFailedError`
-    so ``drive()``'s ``GateFailedError``-specific handling (Story 5.4)
+    so ``advance()``'s ``GateFailedError``-specific handling (Story 5.4)
     rewinds ``run.stage`` to ``payload_ready`` for a bounded regeneration --
     no ``Report`` row is ever written on a failing pass. ``natal_chart``/
     ``ephemeris_identity`` are part of :data:`StageFn`'s uniform signature;
@@ -640,7 +649,7 @@ _STAGE_FUNCTIONS: dict[str, StageFn] = {
 }
 
 
-def drive(
+def advance(
     session: Session,
     run: ReportRun,
     *,
@@ -652,55 +661,81 @@ def drive(
     generator: Generator,
     vocabulary: GateVocabulary,
 ) -> ReportRun:
-    """Advance ``run`` through every stage in ``_STAGE_SEQUENCE`` that has a
-    registered function in ``_STAGE_FUNCTIONS`` and that ``run.stage`` has
-    not already passed, committing after each stage succeeds.
+    """Advance ``run`` by **at most one** stage: run the single next stage
+    after ``run.stage`` in ``_STAGE_SEQUENCE`` that has a registered function
+    in ``_STAGE_FUNCTIONS``, commit, and return (AD-20, Story 3.10).
+
+    Called **only** from ``poll_report_run``
+    (``shell/http/routes/report_runs.py``) -- never from the start ``POST``,
+    a thread, an ``asyncio`` task, a queue consumer or a scheduled job. Each
+    status poll moves the run forward exactly one stage; the start route just
+    creates the row and redirects, so the first stage runs on the first
+    poll. A poll landing on ``draft_ready`` runs ``gate_passed`` (one
+    ``generator``-free Gate call) and returns -- it never also chains into a
+    later stage in the same call. If ``run.stage`` is ``None``, this runs
+    ``natal_ready`` only. If ``run.stage`` is ``gate_passed`` (or the next
+    stage name has no registered function yet, e.g. ``exported``), this
+    returns ``run`` unchanged with no commit.
+
+    Concurrent polls for the same run are single-flighted by a Postgres
+    transaction-scoped advisory lock on ``run.id``
+    (``shell/runner/advisory_lock.py::try_acquire_advance_lock``), taken
+    right after the ``failed_at`` short-circuit: the poll that gets the lock
+    advances one stage and commits (Postgres releases the lock on that
+    ``commit()`` / ``rollback()``, or if the connection drops -- no explicit
+    unlock), while a poll that does not get the lock rolls back, refreshes
+    ``run`` and returns its current stage without running any stage. On a
+    non-Postgres backend (SQLite, in tests) the lock is a no-op that always
+    grants -- there is no cross-connection concurrency there to guard, and
+    the concurrent-``advance()`` ``IntegrityError`` classification below
+    still stands as defense-in-depth.
 
     ``natal_chart_id`` (Story 6.4) is recorded onto ``run.natal_chart_id``
-    exactly once, the first time this call advances ``run`` through
-    ``natal_ready`` -- never touched again by any later stage or
-    regeneration, mirroring ``month_start_utc``/``month_end_utc``'s own
-    forward-only assignment inside that same stage. It is set here, in this
-    generic per-stage success block, rather than added to :data:`StageFn`'s
-    shared signature, so ``_run_natal_ready`` and the other four stage
-    functions stay byte-for-byte unchanged.
+    exactly once, on the call that advances ``run`` through ``natal_ready``
+    -- never touched again by any later stage or regeneration, mirroring
+    ``month_start_utc``/``month_end_utc``'s own forward-only assignment
+    inside that same stage. It is set here, in the generic per-stage success
+    block, rather than added to :data:`StageFn`'s shared signature, so
+    ``_run_natal_ready`` and the other four stage functions stay
+    byte-for-byte unchanged.
 
-    ``generator``/``vocabulary`` are threaded through to every stage
-    function uniformly (Stories 4.6/5.3, :data:`StageFn`) -- only
-    ``draft_ready`` calls ``generator`` and only ``gate_passed`` calls
-    ``vocabulary``, but the registry stays a plain ``{name: function}``
-    mapping rather than growing per-stage plumbing here.
+    ``generator``/``vocabulary`` are threaded through to the stage function
+    uniformly (Stories 4.6/5.3, :data:`StageFn`) -- only ``draft_ready``
+    calls ``generator`` and only ``gate_passed`` calls ``vocabulary``, but
+    the registry stays a plain ``{name: function}`` mapping rather than
+    growing per-stage plumbing here.
 
     Idempotent by construction, not by re-checking output equality: a stage
     at or before ``run.stage`` in ``_STAGE_SEQUENCE`` is never called again,
-    so re-driving a completed run is a no-op regardless of what
-    ``natal_chart``/``config`` are passed. Stops cleanly the moment it
-    reaches a stage name with no registered function (Story 3.9+ registers
-    the rest). A stage's ``with_backoff`` call uses that stage's own
+    so polling a completed run is a no-op regardless of what
+    ``natal_chart``/``config`` are passed. Resume-after-interruption still
+    works because each stage persists before the next begins: the next poll
+    picks up at the first incomplete stage and recomputes nothing already
+    stored (AD-10). The stage's ``with_backoff`` call uses that stage's own
     override from :data:`_STAGE_BACKOFF_OVERRIDES` when one exists (Story
     4.8) -- ``draft_ready``'s Gemini attempts stay within the provider's
     10 requests-per-minute ceiling -- and the plain defaults otherwise.
 
-    Every ``with_backoff`` attempt runs the stage function inside its own
+    The ``with_backoff`` attempt runs the stage function inside its own
     ``session.begin_nested()`` SAVEPOINT (epic-4-retro item 23): a two-write
     stage (``_run_payload_ready``, ``_run_gate_passed``) that partially
     flushes and then fails has that partial flush rolled back to the
     savepoint, so the *next* ``with_backoff`` attempt -- and, after
-    exhaustion, ``drive()``'s own ``except`` handlers -- run on a clean
+    exhaustion, this function's own ``except`` handlers -- run on a clean
     session instead of dying on ``PendingRollbackError``. A transient
     second-write failure now gets a real retry within the same call.
 
-    A unique-constraint ``IntegrityError`` from a concurrent ``drive()`` for
-    the same run (the start route and the poll route both call this with no
-    row lock -- items 26/44) is handled separately from every other stage
-    exception. It is intercepted *inside* the retried callable so
+    A unique-constraint ``IntegrityError`` from a concurrent ``advance()``
+    for the same run (SQLite has no advisory lock; a future non-poll caller
+    could reappear -- items 26/44) is handled separately from every other
+    stage exception. It is intercepted *inside* the retried callable so
     ``with_backoff`` never retries it (a unique-constraint conflict never
     clears on retry, and on ``draft_ready`` a retry would spend another paid
     ``generator.generate()`` call plus ``with_backoff``'s 6 s / 12 s
-    sleeps); the loop body then rolls back, ``session.refresh(run)``, and if
+    sleeps); this function then rolls back, ``session.refresh(run)``, and if
     ``run.stage`` has advanced past the current stage treats it as a
-    completed stage (``break``, no counter change, INFO log). Otherwise --
-    a genuine integrity bug, no concurrent advance -- it falls through to
+    completed stage (``return run``, no counter change, INFO log). Otherwise
+    -- a genuine integrity bug, no concurrent advance -- it falls through to
     the same stage-failure path as any other exception (``stage_failure_count``
     increment, terminal at :data:`_MAX_STAGE_FAILURES`), still without a
     retry.
@@ -709,16 +744,17 @@ def drive(
     When a stage's ``with_backoff`` call exhausts every attempt,
     ``run.stage`` is left unchanged (as before) but
     ``run.stage_failure_count`` is incremented; once it reaches
-    :data:`_MAX_STAGE_FAILURES` *consecutive* exhaustions, ``run`` is marked
-    terminally failed (``failed_at``/``failure_reason`` set) instead of
-    being retried forever -- a persistent rate limit or error now reaches a
+    :data:`_MAX_STAGE_FAILURES` *consecutive* exhaustions (across separate
+    polls), ``run`` is marked terminally failed
+    (``failed_at``/``failure_reason`` set) instead of being retried on every
+    future poll forever -- a persistent rate limit or error now reaches a
     terminal state Francesco is shown, rather than an indefinite,
     ever-hammering silent stall. Either way ``run`` is returned exactly as
     far as it got.
 
-    A run already marked ``failed_at`` short-circuits immediately: no stage
-    function runs, no ``with_backoff`` call is made, ``run`` is returned
-    unchanged.
+    A run already marked ``failed_at`` short-circuits immediately: no lock is
+    acquired, no stage function runs, no ``with_backoff`` call is made,
+    ``run`` is returned unchanged.
 
     A :class:`core.errors.GateFailedError` from ``gate_passed`` is handled
     separately from every other stage exception (Story 5.4): it persists a
@@ -727,173 +763,250 @@ def drive(
     before incrementing ``run.regeneration_count`` (never ``stage_failure_count``,
     left untouched) and, while that count is at or below
     :data:`_MAX_REGENERATIONS`, rewinds ``run.stage`` to ``payload_ready`` so
-    the *next* ``drive()`` call re-runs ``draft_ready`` -- a genuinely new
+    the *next* poll re-runs ``draft_ready`` -- a genuinely new
     ``GeneratedDraft`` from the same stored Payload -- and then ``gate_passed``
-    again. Once ``run.regeneration_count`` exceeds :data:`_MAX_REGENERATIONS`,
-    ``run`` is marked terminally failed the same way a
-    :data:`_MAX_STAGE_FAILURES` exhaustion is, except ``run.stage`` is left
-    at ``draft_ready`` (never rewound) so the last, still-failing draft stays
-    reachable rather than discarded. Either branch commits and returns
-    immediately -- regeneration itself always happens on a subsequent
-    ``drive()`` call, never within the same one that caught the failure.
-
-    Called from both the start route and the poll route
-    (``shell/http/routes/report_runs.py``): a stalled or interrupted run
-    resumes on whichever request -- start or poll -- calls this next.
+    again on the poll after that. Once ``run.regeneration_count`` exceeds
+    :data:`_MAX_REGENERATIONS`, ``run`` is marked terminally failed the same
+    way a :data:`_MAX_STAGE_FAILURES` exhaustion is, except ``run.stage`` is
+    left at ``draft_ready`` (never rewound) so the last, still-failing draft
+    stays reachable rather than discarded. Either branch commits and returns
+    immediately -- regeneration itself always happens on a subsequent poll,
+    never within the same call that caught the failure.
     """
     if run.failed_at is not None:
         return run
 
-    completed_index = _stage_index(run.stage)
+    # Resolve the single next stage from the in-memory `run` *before* taking
+    # the advisory lock: a poll on a completed run (`run.stage` is the last
+    # named stage) or one whose next stage has no registered function yet
+    # (`exported`, today) has nothing to do, so it must acquire no lock --
+    # matching the `failed_at` fast-path above.
+    next_index = _stage_index(run.stage) + 1
+    if next_index >= len(_STAGE_SEQUENCE):
+        # `run.stage` is already the last named stage (`gate_passed`) --
+        # there is no next stage to run.
+        return run
 
-    for index, stage_name in enumerate(_STAGE_SEQUENCE):
-        if index <= completed_index:
-            continue
+    stage_name = _STAGE_SEQUENCE[next_index]
+    stage_fn = _STAGE_FUNCTIONS.get(stage_name)
+    if stage_fn is None:
+        # The next stage name has no registered function yet (`exported`,
+        # today) -- stop cleanly, no commit.
+        return run
 
-        stage_fn = _STAGE_FUNCTIONS.get(stage_name)
-        if stage_fn is None:
-            break
+    if not try_acquire_advance_lock(session, run.id):
+        # A concurrent poll holds the transaction-scoped advisory lock and
+        # is advancing this run one stage. Non-blocking by design (AD-20,
+        # this module's Design Notes): roll our own empty transaction back,
+        # re-read the row so the caller renders the freshest stage, and
+        # return without running anything. Postgres releases the lock on the
+        # winner's own commit/rollback.
+        session.rollback()
+        session.refresh(run)
+        _logger.info(
+            "advance lock held by a concurrent poll; returning current stage "
+            "%s without advancing: %s",
+            run.stage,
+            run.id,
+        )
+        return run
 
-        backoff_kwargs = _STAGE_BACKOFF_OVERRIDES.get(stage_name, {})
+    backoff_kwargs = _STAGE_BACKOFF_OVERRIDES.get(stage_name, {})
 
-        #: Set by `_attempt` below when the stage's own flush raised a
-        #: unique-constraint `IntegrityError` -- the fingerprint of a
-        #: concurrent `drive()` (start route + poll route, no row lock;
-        #: items 26/44) having already written this stage's row. Holds the
-        #: caught exception so the genuine-bug path can still log it.
-        integrity_error: IntegrityError | None = None
+    #: Set by `_attempt` below when the stage's own flush raised a
+    #: unique-constraint `IntegrityError` -- the fingerprint of a concurrent
+    #: `advance()` (SQLite has no advisory lock; a future non-poll caller;
+    #: items 26/44) having already written this stage's row. Holds the
+    #: caught exception so the genuine-bug path can still log it.
+    integrity_error: IntegrityError | None = None
 
-        def _attempt(stage_fn: StageFn = stage_fn) -> None:
-            # NOT a straight mirror of `place_cache.store_resolved_place`:
-            # that helper wraps `begin_nested()` in `try/except
-            # IntegrityError: pass` and swallows the conflict in place. Here
-            # the SAVEPOINT shape is the same (item 23: a partial flush rolls
-            # back to the savepoint, so the next `with_backoff` attempt runs
-            # on a clean session), but a caught `IntegrityError` is surfaced
-            # to `drive()`'s loop body via `integrity_error` for a benign-vs-
-            # genuine classification -- it is deliberately NOT re-raised into
-            # `with_backoff`'s retry: a unique-constraint conflict from a
-            # concurrent `drive()` never clears on a retry, and letting it
-            # ride `with_backoff` would burn up to `max_attempts` doomed
-            # attempts -- for `draft_ready` that is three real
-            # `generator.generate()` (Gemini) calls plus `time.sleep(6)` +
-            # `time.sleep(12)` before the conflict is even classified. (The
-            # "next attempt runs clean" reasoning for the SAVEPOINT itself
-            # does not apply to `gate_passed`, which is `max_attempts=1`.)
-            nonlocal integrity_error
-            # Defensive reset: if a future change ever lets `with_backoff`
-            # re-enter `_attempt` after a transient failure, a stale caught
-            # conflict from an earlier attempt must not leak into the `else`
-            # branch's benign-vs-genuine check.
-            integrity_error = None
-            try:
-                with session.begin_nested():
-                    stage_fn(
-                        session,
-                        run,
-                        natal_chart,
-                        config,
-                        ephemeris_identity,
-                        sections_config,
-                        generator,
-                        vocabulary,
-                    )
-            except IntegrityError as conflict:
-                integrity_error = conflict
-
+    def _attempt(stage_fn: StageFn = stage_fn) -> None:
+        # NOT a straight mirror of `place_cache.store_resolved_place`:
+        # that helper wraps `begin_nested()` in `try/except
+        # IntegrityError: pass` and swallows the conflict in place. Here
+        # the SAVEPOINT shape is the same (item 23: a partial flush rolls
+        # back to the savepoint, so the next `with_backoff` attempt runs
+        # on a clean session), but a caught `IntegrityError` is surfaced
+        # to `advance()`'s body via `integrity_error` for a benign-vs-
+        # genuine classification -- it is deliberately NOT re-raised into
+        # `with_backoff`'s retry: a unique-constraint conflict from a
+        # concurrent `advance()` never clears on a retry, and letting it
+        # ride `with_backoff` would burn up to `max_attempts` doomed
+        # attempts -- for `draft_ready` that is three real
+        # `generator.generate()` (Gemini) calls plus `time.sleep(6)` +
+        # `time.sleep(12)` before the conflict is even classified. (The
+        # "next attempt runs clean" reasoning for the SAVEPOINT itself
+        # does not apply to `gate_passed`, which is `max_attempts=1`.)
+        nonlocal integrity_error
+        # Defensive reset: if a future change ever lets `with_backoff`
+        # re-enter `_attempt` after a transient failure, a stale caught
+        # conflict from an earlier attempt must not leak into the `else`
+        # branch's benign-vs-genuine check.
+        integrity_error = None
         try:
-            with_backoff(_attempt, **backoff_kwargs)
-        except GateFailedError as error:
-            # `_run_gate_passed`'s pass-path attempt (`store_report` then
-            # `store_gate_result`, each its own flush) may have partially
-            # flushed and then failed before raising whatever exception
-            # `with_backoff` ultimately exhausted on -- on a real database
-            # that failed flush aborts the underlying transaction, so any
-            # further statement on this session -- even reading `run.id`
-            # back for the log line below -- would fail too, masking the
-            # actual cause (epic-5-retro-item-39, re-prioritizing
-            # epic-4-retro-item-23). Rolling back first, before touching
-            # `run` at all, guarantees a clean transaction regardless of
-            # what came before.
-            session.rollback()
-            # A pure Gate re-checking the same already-persisted draft fails
-            # identically forever -- the generic stage-failure path below
-            # would just retry that same draft until _MAX_STAGE_FAILURES,
-            # never actually regenerating anything. Regeneration is a
-            # distinct counter/path (Story 5.4): stage_failure_count is left
-            # untouched here, exactly as the module's own Design Notes
-            # require.
-            _logger.exception(
-                "gate_passed rejected the draft, regenerating: %s", run.id
-            )
-            try:
-                store_gate_result(
+            with session.begin_nested():
+                stage_fn(
                     session,
-                    run=run,
-                    passed=False,
-                    regeneration_count=run.regeneration_count,
-                    vocabulary_version=vocabulary.version,
-                    vocabulary_content_hash=vocabulary.content_hash,
-                    violations=error.violations,
+                    run,
+                    natal_chart,
+                    config,
+                    ephemeris_identity,
+                    sections_config,
+                    generator,
+                    vocabulary,
                 )
-            except Exception:
-                # This write sits outside `with_backoff` by design (Story
-                # 5.6, to avoid a duplicate row) -- so nothing else retries
-                # it. Losing one gate_result row must never crash `drive()`
-                # itself: the regeneration bookkeeping below still has to
-                # run so the run keeps making progress. Roll back first --
-                # mirroring both blocks above -- before touching `run` again
-                # (even for this log line), so a real partial flush here
-                # doesn't poison the commit that follows or the log call
-                # itself.
-                session.rollback()
-                _logger.exception(
-                    "failed to persist a failing gate_result, continuing "
-                    "regeneration bookkeeping without it: %s",
-                    run.id,
-                )
-            run.regeneration_count += 1
-            run.updated_at = datetime.now(UTC)
-            if run.regeneration_count <= _MAX_REGENERATIONS:
-                run.stage = "payload_ready"
-                _logger.info(
-                    "report run rewound to payload_ready for regeneration "
-                    "attempt %s: %s",
-                    run.regeneration_count,
-                    run.id,
-                )
-            else:
-                run.failed_at = run.updated_at
-                run.failure_reason = (
-                    f"regeneration bound exhausted after {run.regeneration_count} "
-                    f"attempts: {error}"
-                )
-                _logger.error(
-                    "report run marked terminally failed: regeneration bound "
-                    "exhausted: %s",
-                    run.id,
-                )
-            session.add(run)
-            session.commit()
-            break
-        except Exception as error:
-            # Mirrors the `GateFailedError` branch above: a stage function
-            # that partially flushed before failing (e.g. `_run_gate_passed`'s
-            # `store_report`+`store_gate_result` pair) can leave this
-            # session's transaction aborted, which would make even reading
-            # `run.id` back for the log line below fail too, taking the
-            # whole `drive()` call down uncaught instead of leaving the run
-            # simply un-advanced (epic-5-retro-item-39). Rolling back first,
-            # before touching `run` at all, avoids that.
+        except IntegrityError as conflict:
+            integrity_error = conflict
+
+    try:
+        with_backoff(_attempt, **backoff_kwargs)
+    except GateFailedError as error:
+        # `_run_gate_passed`'s pass-path attempt (`store_report` then
+        # `store_gate_result`, each its own flush) may have partially
+        # flushed and then failed before raising whatever exception
+        # `with_backoff` ultimately exhausted on -- on a real database
+        # that failed flush aborts the underlying transaction, so any
+        # further statement on this session -- even reading `run.id`
+        # back for the log line below -- would fail too, masking the
+        # actual cause (epic-5-retro-item-39, re-prioritizing
+        # epic-4-retro-item-23). Rolling back first, before touching
+        # `run` at all, guarantees a clean transaction regardless of
+        # what came before.
+        session.rollback()
+        # A pure Gate re-checking the same already-persisted draft fails
+        # identically forever -- the generic stage-failure path below
+        # would just retry that same draft until _MAX_STAGE_FAILURES,
+        # never actually regenerating anything. Regeneration is a
+        # distinct counter/path (Story 5.4): stage_failure_count is left
+        # untouched here, exactly as the module's own Design Notes
+        # require.
+        _logger.exception(
+            "gate_passed rejected the draft, regenerating: %s", run.id
+        )
+        try:
+            store_gate_result(
+                session,
+                run=run,
+                passed=False,
+                regeneration_count=run.regeneration_count,
+                vocabulary_version=vocabulary.version,
+                vocabulary_content_hash=vocabulary.content_hash,
+                violations=error.violations,
+            )
+        except Exception:
+            # This write sits outside `with_backoff` by design (Story
+            # 5.6, to avoid a duplicate row) -- so nothing else retries
+            # it. Losing one gate_result row must never crash `advance()`
+            # itself: the regeneration bookkeeping below still has to
+            # run so the run keeps making progress. Roll back first --
+            # mirroring both blocks above -- before touching `run` again
+            # (even for this log line), so a real partial flush here
+            # doesn't poison the commit that follows or the log call
+            # itself.
             session.rollback()
-            _logger.exception("report run stage failed, left un-advanced: %s", run.id)
+            _logger.exception(
+                "failed to persist a failing gate_result, continuing "
+                "regeneration bookkeeping without it: %s",
+                run.id,
+            )
+        run.regeneration_count += 1
+        run.updated_at = datetime.now(UTC)
+        if run.regeneration_count <= _MAX_REGENERATIONS:
+            run.stage = "payload_ready"
+            _logger.info(
+                "report run rewound to payload_ready for regeneration "
+                "attempt %s: %s",
+                run.regeneration_count,
+                run.id,
+            )
+        else:
+            run.failed_at = run.updated_at
+            run.failure_reason = (
+                f"regeneration bound exhausted after {run.regeneration_count} "
+                f"attempts: {error}"
+            )
+            _logger.error(
+                "report run marked terminally failed: regeneration bound "
+                "exhausted: %s",
+                run.id,
+            )
+        session.add(run)
+        session.commit()
+        return run
+    except Exception as error:
+        # Mirrors the `GateFailedError` branch above: a stage function
+        # that partially flushed before failing (e.g. `_run_gate_passed`'s
+        # `store_report`+`store_gate_result` pair) can leave this
+        # session's transaction aborted, which would make even reading
+        # `run.id` back for the log line below fail too, taking the
+        # whole `advance()` call down uncaught instead of leaving the run
+        # simply un-advanced (epic-5-retro-item-39). Rolling back first,
+        # before touching `run` at all, avoids that.
+        session.rollback()
+        _logger.exception("report run stage failed, left un-advanced: %s", run.id)
+        run.stage_failure_count += 1
+        run.updated_at = datetime.now(UTC)
+        if run.stage_failure_count >= _MAX_STAGE_FAILURES:
+            run.failed_at = run.updated_at
+            run.failure_reason = (
+                f"stage {stage_name!r} failed {run.stage_failure_count} consecutive "
+                f"times: {error}"
+            )
+            _logger.error(
+                "report run marked terminally failed at %s after %s consecutive "
+                "failures: %s",
+                stage_name,
+                run.stage_failure_count,
+                run.id,
+            )
+        session.add(run)
+        session.commit()
+        return run
+    else:
+        if integrity_error is not None:
+            # `_attempt` caught a unique-constraint `IntegrityError` and
+            # returned normally so `with_backoff` did not retry it. The
+            # stage's `begin_nested()` already rolled its partial flush
+            # back to the savepoint; roll the *outer* transaction back
+            # too, before re-reading `run`, so the refresh below runs in
+            # a fresh transaction and sees a concurrent commit under
+            # READ COMMITTED or REPEATABLE READ alike.
+            session.rollback()
+            session.refresh(run)
+            if _stage_index(run.stage) >= next_index:
+                # A concurrent `advance()` already completed this stage and
+                # advanced `run.stage`. Benign -- not a stage failure:
+                # `stage_failure_count`/`regeneration_count`/`failed_at`
+                # are all left exactly as the concurrent winner's
+                # committed row (just refreshed) has them.
+                _logger.info(
+                    "stage %s already completed by a concurrent advance(); "
+                    "run.stage is now %s: %s",
+                    stage_name,
+                    run.stage,
+                    run.id,
+                )
+                return run
+            # `run.stage` did not advance: this is a genuine integrity
+            # bug, not a concurrent-stage race. Record it as a stage
+            # failure exactly like the `except Exception` path above --
+            # but still without a `with_backoff` retry (it never clears).
+            # `_logger.error` (not `.exception`): this runs in the `else`
+            # clause with no active exception handler; `exc_info` carries
+            # the conflict caught back inside `_attempt`.
+            _logger.error(
+                "report run stage failed on a non-concurrent IntegrityError, "
+                "left un-advanced: %s",
+                run.id,
+                exc_info=integrity_error,
+            )
             run.stage_failure_count += 1
             run.updated_at = datetime.now(UTC)
             if run.stage_failure_count >= _MAX_STAGE_FAILURES:
                 run.failed_at = run.updated_at
                 run.failure_reason = (
                     f"stage {stage_name!r} failed {run.stage_failure_count} consecutive "
-                    f"times: {error}"
+                    f"times: {integrity_error}"
                 )
                 _logger.error(
                     "report run marked terminally failed at %s after %s consecutive "
@@ -904,72 +1017,14 @@ def drive(
                 )
             session.add(run)
             session.commit()
-            break
-        else:
-            if integrity_error is not None:
-                # `_attempt` caught a unique-constraint `IntegrityError` and
-                # returned normally so `with_backoff` did not retry it. The
-                # stage's `begin_nested()` already rolled its partial flush
-                # back to the savepoint; roll the *outer* transaction back
-                # too, before re-reading `run`, so the refresh below runs in
-                # a fresh transaction and sees a concurrent commit under
-                # READ COMMITTED or REPEATABLE READ alike.
-                session.rollback()
-                session.refresh(run)
-                if _stage_index(run.stage) >= index:
-                    # A concurrent `drive()` already completed this stage and
-                    # advanced `run.stage`. Benign -- not a stage failure:
-                    # `stage_failure_count`/`regeneration_count`/`failed_at`
-                    # are all left exactly as the concurrent winner's
-                    # committed row (just refreshed) has them.
-                    _logger.info(
-                        "stage %s already completed by a concurrent drive(); "
-                        "run.stage is now %s: %s",
-                        stage_name,
-                        run.stage,
-                        run.id,
-                    )
-                    break
-                # `run.stage` did not advance: this is a genuine integrity
-                # bug, not a concurrent-stage race. Record it as a stage
-                # failure exactly like the `except Exception` path above --
-                # but still without a `with_backoff` retry (it never clears).
-                # `_logger.error` (not `.exception`): this runs in the `else`
-                # clause with no active exception handler; `exc_info` carries
-                # the conflict caught back inside `_attempt`.
-                _logger.error(
-                    "report run stage failed on a non-concurrent IntegrityError, "
-                    "left un-advanced: %s",
-                    run.id,
-                    exc_info=integrity_error,
-                )
-                run.stage_failure_count += 1
-                run.updated_at = datetime.now(UTC)
-                if run.stage_failure_count >= _MAX_STAGE_FAILURES:
-                    run.failed_at = run.updated_at
-                    run.failure_reason = (
-                        f"stage {stage_name!r} failed {run.stage_failure_count} consecutive "
-                        f"times: {integrity_error}"
-                    )
-                    _logger.error(
-                        "report run marked terminally failed at %s after %s consecutive "
-                        "failures: %s",
-                        stage_name,
-                        run.stage_failure_count,
-                        run.id,
-                    )
-                session.add(run)
-                session.commit()
-                break
+            return run
 
-        if stage_name == "natal_ready":
-            run.natal_chart_id = natal_chart_id
-        run.stage = stage_name
-        run.stage_failure_count = 0
-        run.updated_at = datetime.now(UTC)
-        session.add(run)
-        session.commit()
-        _logger.info("report run advanced to %s: %s", stage_name, run.id)
-        completed_index = index
-
+    if stage_name == "natal_ready":
+        run.natal_chart_id = natal_chart_id
+    run.stage = stage_name
+    run.stage_failure_count = 0
+    run.updated_at = datetime.now(UTC)
+    session.add(run)
+    session.commit()
+    _logger.info("report run advanced to %s: %s", stage_name, run.id)
     return run

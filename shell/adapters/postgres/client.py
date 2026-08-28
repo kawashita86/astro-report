@@ -179,7 +179,7 @@ def deserialize_natal_chart(stored: StoredNatalChart) -> NatalChart:
     """Reverse :func:`_serialize`'s ``Decimal``-to-``str`` JSON encoding back
     into the frozen :mod:`core.types.chart` dataclasses (Story 3.5).
 
-    ``shell/runner/driver.py``'s ``drive()`` needs an already-computed chart
+    ``shell/runner/driver.py``'s ``advance()`` needs an already-computed chart
     as a real :class:`NatalChart` -- the shape ``core/transits/*``'s four
     scan functions take -- not the JSON rows ``StoredNatalChart`` persists it
     as. ``stored.ascendant``/``stored.midheaven`` are already ``Decimal``

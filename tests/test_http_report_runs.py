@@ -1,18 +1,20 @@
 """``POST /clients/{client_id}/report-runs`` and ``GET /report-runs/{run_id}``
--- Story 3.5's own I/O & Edge-Case Matrix rows, exercised end-to-end through
-the real app/session wiring, mirroring ``tests/test_http_clients.py``.
+-- Story 3.5's own I/O & Edge-Case Matrix rows (reshaped for AD-20 by Story
+3.10), exercised end-to-end through the real app/session wiring, mirroring
+``tests/test_http_clients.py``.
 
 The Client and its Natal Chart are created with a real ``compute_natal_chart()``
 call (this route never calls it itself -- it only reads the already-stored
-chart back via ``deserialize_natal_chart``). ``drive()`` itself is faked
-(the ``fake_drive`` fixture) for tests that reach it: Starlette's
+chart back via ``deserialize_natal_chart``). ``advance()`` itself is faked
+(the ``fake_advance`` fixture) for tests that reach it: Starlette's
 ``TestClient`` runs the ASGI app on its own worker thread, and pyswisseph's
 ``set_ephe_path()`` pins the vendored ephemeris per-thread, so a real
-``drive()`` call touching ``core/transits/*`` from that thread needs its own
+``advance()`` call touching ``core/transits/*`` from that thread needs its own
 ``verify_ephemeris_identity()`` call -- out of scope here, mirroring
 ``tests/test_http_clients.py``'s own real-vs-fake boundary. Real stage
 behavior is ``tests/test_runner_driver.py``'s job; these tests only prove
-the routes' own orchestration -- auth, 404s, the redirect, the HTMX
+the routes' own orchestration -- AD-20's start-does-not-advance /
+one-stage-per-poll split, auth, 404s, the redirect, the HTMX
 fragment/full-page split.
 """
 
@@ -133,29 +135,32 @@ def authenticated_client(client: TestClient) -> TestClient:
 
 
 @pytest.fixture
-def fake_drive(app_instance: FastAPI, monkeypatch: pytest.MonkeyPatch):
-    """Stand in for a real ``drive()`` call, mirroring
+def fake_advance(app_instance: FastAPI, monkeypatch: pytest.MonkeyPatch):
+    """Stand in for a real ``advance()`` call, mirroring
     ``tests/test_http_clients.py``'s own real-vs-fake boundary
     (``fake_chart_computation``): Starlette's ``TestClient`` runs the ASGI app
     on its own worker thread, and pyswisseph's ``set_ephe_path()`` pins the
-    vendored ephemeris per-thread -- a real ``drive()`` call reaching
+    vendored ephemeris per-thread -- a real ``advance()`` call reaching
     ``core/transits/*`` from that thread would need its own
     ``verify_ephemeris_identity()`` call, out of scope for a
-    route-orchestration test. Real stage-advancement behavior (both real
-    registered stages, real backoff, real month resolution) is
-    ``tests/test_runner_driver.py``'s job; these HTTP tests only need to
-    prove the routes call ``drive()``, persist whatever it returns, and
-    render/redirect correctly around it.
+    route-orchestration test. Real stage-advancement behavior (one stage per
+    call, real backoff, real month resolution, the advisory lock) is
+    ``tests/test_runner_driver.py``'s / ``tests/test_runner_advisory_lock.py``'s
+    job; these HTTP tests only need to prove the poll route calls
+    ``advance()`` once per request, persists whatever it returns, and
+    renders correctly around it.
 
-    ``get_generator`` is also overridden with a fake, never a real
-    ``GeminiGenerator`` -- mirrors ``tests/test_http_clients.py``'s own
-    ``get_geocoder`` override: ``_fake_drive`` never actually calls the
-    ``generator`` it receives, so nothing here needs a working one, only
-    something structurally accepted where a ``Generator`` is expected.
+    Like the real ``advance()`` (AD-20, Story 3.10) this moves the run
+    forward by **at most one** stage per call -- here only through the first
+    two stages, enough to exercise the poll view's stage rendering without a
+    real ``core/`` call. ``get_generator`` is also overridden with a fake,
+    never a real ``GeminiGenerator`` -- mirrors ``tests/test_http_clients.py``'s
+    own ``get_geocoder`` override: ``_fake_advance`` never actually calls the
+    ``generator`` it receives.
     """
     import shell.http.routes.report_runs as report_runs_module
 
-    def _fake_drive(
+    def _fake_advance(
         session,
         run,
         *,
@@ -174,16 +179,18 @@ def fake_drive(app_instance: FastAPI, monkeypatch: pytest.MonkeyPatch):
             run.natal_chart_id = natal_chart_id
             session.add(run)
             session.commit()
+            return run
         if run.stage == "natal_ready":
             run.transit_events = []
             run.stage = "transits_ready"
             session.add(run)
             session.commit()
+            return run
         return run
 
-    monkeypatch.setattr(report_runs_module, "drive", _fake_drive)
+    monkeypatch.setattr(report_runs_module, "advance", _fake_advance)
     app_instance.dependency_overrides[get_generator] = lambda: object()
-    return _fake_drive
+    return _fake_advance
 
 
 def _create_client_with_real_chart(db_session: Session, *, name: str = "Ada Lovelace") -> Client:
@@ -281,9 +288,12 @@ def test_anonymous_get_is_rejected(client: TestClient, db_session: Session) -> N
 # --- Happy path -------------------------------------------------------------------
 
 
-def test_starting_a_run_creates_it_drives_it_and_redirects_to_the_poll_view(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+def test_starting_a_run_creates_it_without_advancing_and_redirects_to_the_poll_view(
+    authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
+    """AD-20 (Story 3.10): the start POST only creates the row, commits and
+    redirects -- it runs no stage, so ``stage`` is ``None`` and every
+    stage-produced column is still ``NULL`` when the redirect returns."""
     ada = _create_client_with_real_chart(db_session)
 
     response = authenticated_client.post(
@@ -295,31 +305,45 @@ def test_starting_a_run_creates_it_drives_it_and_redirects_to_the_poll_view(
     assert len(runs) == 1
     run = runs[0]
     assert response.headers["location"] == f"/report-runs/{run.id}"
-    # Both registered stages are local-only (Design Notes) so a real drive()
-    # call inside this same request already finishes them.
-    assert run.stage == "transits_ready"
-    assert run.month_start_utc == datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
-    assert run.transit_events is not None
+    assert run.stage is None
+    assert run.month_start_utc is None
+    assert run.month_end_utc is None
+    assert run.transit_events is None
 
 
-def test_the_poll_view_shows_the_current_stage(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+def test_starting_a_run_does_not_call_advance(
+    authenticated_client: TestClient,
+    db_session: Session,
+    app_instance: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """AD-20: no runner function is called from the start route -- only the
+    poll route advances."""
+    import shell.http.routes.report_runs as report_runs_module
+
     ada = _create_client_with_real_chart(db_session)
-    start_response = authenticated_client.post(
+    calls: list[int] = []
+
+    def _spy_advance(*args, **kwargs):
+        calls.append(1)
+
+    monkeypatch.setattr(report_runs_module, "advance", _spy_advance)
+    app_instance.dependency_overrides[get_generator] = lambda: object()
+
+    response = authenticated_client.post(
         f"/clients/{ada.id}/report-runs", data={"month": "2026-01"}, follow_redirects=False
     )
-    location = start_response.headers["location"]
 
-    response = authenticated_client.get(location)
-
-    assert response.status_code == 200
-    assert "transits_ready" in response.text
+    assert response.status_code == 303
+    assert calls == [], "the start route must not call advance()"
+    assert len(_report_runs(db_session)) == 1
 
 
-def test_polling_an_already_completed_run_is_a_noop_and_still_shows_its_stage(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+def test_each_poll_advances_the_run_by_one_stage(
+    authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
+    """AD-20: the first stage runs on the first poll; each subsequent poll
+    moves the run forward one stage."""
     ada = _create_client_with_real_chart(db_session)
     start_response = authenticated_client.post(
         f"/clients/{ada.id}/report-runs", data={"month": "2026-01"}, follow_redirects=False
@@ -327,17 +351,68 @@ def test_polling_an_already_completed_run_is_a_noop_and_still_shows_its_stage(
     location = start_response.headers["location"]
 
     first_poll = authenticated_client.get(location)
-    second_poll = authenticated_client.get(location)
-
     assert first_poll.status_code == 200
+    assert "natal_ready" in first_poll.text
+
+    second_poll = authenticated_client.get(location)
     assert second_poll.status_code == 200
     assert "transits_ready" in second_poll.text
+
+
+def test_the_poll_route_invokes_advance_exactly_once_per_request(
+    authenticated_client: TestClient,
+    db_session: Session,
+    app_instance: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AD-20: each poll calls ``advance()`` exactly once -- never in a loop."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+
+    calls: list[int] = []
+
+    def _counting_advance(session, run, **kwargs):
+        calls.append(1)
+        return run
+
+    monkeypatch.setattr(report_runs_module, "advance", _counting_advance)
+    app_instance.dependency_overrides[get_generator] = lambda: object()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert calls == [1]
+
+
+def test_polling_an_already_completed_run_is_a_noop_and_still_shows_its_stage(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    start_response = authenticated_client.post(
+        f"/clients/{ada.id}/report-runs", data={"month": "2026-01"}, follow_redirects=False
+    )
+    location = start_response.headers["location"]
+
+    # fake_advance drains through natal_ready then transits_ready, one per
+    # poll, then stops -- further polls are a no-op.
+    authenticated_client.get(location)
+    authenticated_client.get(location)
+    third_poll = authenticated_client.get(location)
+    fourth_poll = authenticated_client.get(location)
+
+    assert third_poll.status_code == 200
+    assert fourth_poll.status_code == 200
+    assert "transits_ready" in fourth_poll.text
     runs = _report_runs(db_session)
     assert len(runs) == 1
 
 
 def test_an_htmx_poll_request_gets_a_fragment_without_the_full_page_shell(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+    authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     start_response = authenticated_client.post(
@@ -501,7 +576,7 @@ def test_getting_the_payload_hides_empty_groupings(
 
 
 def test_the_poll_view_links_to_the_payload_once_it_is_ready(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+    authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
@@ -515,7 +590,7 @@ def test_the_poll_view_links_to_the_payload_once_it_is_ready(
 
 
 def test_the_poll_view_has_no_payload_link_before_payload_ready(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+    authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     start_response = authenticated_client.post(
@@ -660,7 +735,7 @@ def test_getting_the_draft_shows_the_latest_attempt_when_more_than_one_exists(
 
 
 def test_the_poll_view_links_to_the_draft_once_it_is_ready(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+    authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
@@ -674,7 +749,7 @@ def test_the_poll_view_links_to_the_draft_once_it_is_ready(
 
 
 def test_the_poll_view_has_no_draft_link_before_draft_ready(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+    authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
@@ -706,7 +781,7 @@ class _StubRequest:
 
 
 def test_get_generator_builds_a_real_gemini_generator_from_the_apps_configured_key() -> None:
-    """``fake_drive`` (used by every other test here) overrides ``get_generator``
+    """``fake_advance`` (used by every other test here) overrides ``get_generator``
     with a fake, so nothing else in this module exercises the real dependency
     itself -- this proves ``get_generator`` wires ``request.app.state.settings
     .gemini_api_key`` into a real ``GeminiGenerator`` under ``Environment
@@ -733,8 +808,8 @@ def test_get_generator_returns_the_recorded_response_generator_under_local() -> 
 
 def _a_failed_run(client_id) -> ReportRun:
     """A ``ReportRun`` already marked terminally failed at ``draft_ready``
-    (Story 4.8) -- ``drive()`` short-circuits on ``failed_at`` before ever
-    touching the Generator, so no ``fake_drive``/real Gemini call is needed
+    (Story 4.8) -- ``advance()`` short-circuits on ``failed_at`` before ever
+    touching the Generator, so no ``fake_advance``/real Gemini call is needed
     for either test below."""
     return ReportRun(
         client_id=client_id,
@@ -888,7 +963,7 @@ def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_l
     sets ``run.regeneration_count = 4`` and ``shell/runner/driver.py``'s
     ``_MAX_REGENERATIONS`` is 3, so the check that actually pushed the count
     past the bound ran at the pre-increment value of 3, matching how
-    ``drive()``'s ``except GateFailedError`` block calls ``store_gate_result``
+    ``advance()``'s ``except GateFailedError`` block calls ``store_gate_result``
     before incrementing ``run.regeneration_count``.
 
     Also proves ``report_run_id`` isolation: a second ``ReportRun`` gets its
@@ -1377,7 +1452,7 @@ def test_getting_the_report_for_a_run_that_has_moved_past_gate_passed_into_expor
 
 @pytest.mark.parametrize("stage", ["gate_passed", "exported"])
 def test_the_poll_view_links_to_the_report_once_the_gate_has_passed(
-    authenticated_client: TestClient, db_session: Session, fake_drive, stage: str
+    authenticated_client: TestClient, db_session: Session, fake_advance, stage: str
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage=stage)
@@ -1391,7 +1466,7 @@ def test_the_poll_view_links_to_the_report_once_the_gate_has_passed(
 
 
 def test_the_poll_view_has_no_report_link_before_the_gate_has_passed(
-    authenticated_client: TestClient, db_session: Session, fake_drive
+    authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")

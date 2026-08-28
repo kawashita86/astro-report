@@ -75,7 +75,7 @@ class ReportDraft(SQLModel, table=True):
     report_run_id: UUID = Field(foreign_key="report_run.id", index=True)
     # Which regeneration attempt produced this row (Story 5.4) -- `0` for
     # the first, never-regenerated draft, incrementing by one each time
-    # `shell/runner/driver.py::drive()` regenerates after a Groundedness
+    # `shell/runner/driver.py::advance()` regenerates after a Groundedness
     # Gate failure. Tagged by `_run_draft_ready` with `run.regeneration_count`
     # at persist time.
     attempt: int = Field(default=0)
@@ -149,7 +149,7 @@ def store_report_draft(
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``store_report_theme()``
     (``shell/adapters/postgres/report_theme.py``), so it never decides the
-    caller's transaction boundary. ``shell/runner/driver.py::drive()``
+    caller's transaction boundary. ``shell/runner/driver.py::advance()``
     commits once this and the rest of the ``draft_ready`` stage have
     succeeded.
     """

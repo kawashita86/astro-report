@@ -2,13 +2,13 @@
 computation through AD-10's six named stages (Story 3.5).
 
 A row is created once, then advanced forward-only by
-``shell/runner/driver.py::drive()`` -- never re-created, never rewound.
+``shell/runner/driver.py::advance()`` -- never re-created, never rewound.
 Persisting each stage's output before the next begins (rather than holding
 run state only in memory) means a spin-down or redeploy never loses a whole
-run: the next call to ``drive()``, from either the start route or the poll
-route, resumes exactly where the row left off. A persistent rate-limit
-stall on the Generator (``draft_ready``) is handled the same way, plus its
-own bounded failure counter (``stage_failure_count``/``failed_at``/
+run: the next poll calls ``advance()``, which resumes exactly where the row
+left off (AD-20: one stage per poll, from the poll route only). A persistent
+rate-limit stall on the Generator (``draft_ready``) is handled the same way,
+plus its own bounded failure counter (``stage_failure_count``/``failed_at``/
 ``failure_reason``, Story 4.8): once too many consecutive attempts exhaust
 ``with_backoff``, the run is marked terminally failed instead of being
 retried by every future poll forever.
@@ -39,8 +39,8 @@ class ReportRun(SQLModel, table=True):
     has advanced yet", not a seventh named state. ``month_start_utc``/
     ``month_end_utc`` are set by ``natal_ready``; ``transit_events`` is set
     by ``transits_ready``. Both stay ``NULL`` until their producing stage
-    runs, which is exactly how a partially-driven row is told apart from a
-    fully-driven one after a restart.
+    runs, which is exactly how a partially-advanced row is told apart from a
+    fully-advanced one after a restart.
 
     ``transit_events`` holds every result from the four Story 3.1-3.4 scan
     functions as one JSON list, each entry tagged ``"kind"``
@@ -51,7 +51,7 @@ class ReportRun(SQLModel, table=True):
 
     ``stage_failure_count``/``failed_at``/``failure_reason`` (Story 4.8)
     track consecutive ``with_backoff`` exhaustions on the current stage
-    across separate ``drive()`` calls, and the terminal-failure state that
+    across separate ``advance()`` calls, and the terminal-failure state that
     accumulating enough of them produces -- see each field's own comment
     below for its exact semantics.
 
@@ -67,7 +67,7 @@ class ReportRun(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid7, primary_key=True)
     client_id: UUID = Field(foreign_key="client.id", index=True)
-    # Set exactly once, inside `drive()`'s existing per-stage success path
+    # Set exactly once, inside `advance()`'s existing per-stage success path
     # (`shell/runner/driver.py`), the first time `stage_name == "natal_ready"`
     # succeeds -- mirrors `month_start_utc`/`month_end_utc`'s own
     # forward-only assignment (Story 6.4). `NULL` for any `ReportRun` row

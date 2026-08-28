@@ -13,8 +13,9 @@ than ``"pass"`` -- so an un-reconciled over-budget measurement, or a record
 that has not yet been completed with a live-Gemini generation sample and
 ratified, keeps the release gate from going green.
 
-``test_measure_latency`` is the harness: 40 end-to-end ``drive()`` runs
-through ``RecordedResponseGenerator`` plus an isolated full-month transit
+``test_measure_latency`` is the harness: 40 end-to-end runs -- each a full
+poll-drain of ``advance()`` (AD-20's one-stage-per-poll runner, Story 3.10)
+through ``RecordedResponseGenerator`` -- plus an isolated full-month transit
 scan, each timed with ``time.perf_counter()``. It never asserts on elapsed
 time -- timings are environment-dependent data, not pass/fail -- only that
 every run reaches ``gate_passed`` with ``failed_at is None`` (the throughput
@@ -313,17 +314,14 @@ def test_measure_latency(capsys: pytest.CaptureFixture[str]) -> None:
     from shell.adapters.postgres.client import create_client_with_chart
     from shell.adapters.postgres.report_run import ReportRun
     from shell.adapters.postgres.style_guide import create_style_guide_version
-    from shell.runner.driver import drive
     from shell.runner.month import client_month_interval_utc
     from tests.test_runner_driver import (
         _COMPUTATION_CONFIG,
         _EPHEMERIS_IDENTITY,
-        _NATAL_CHART_ID,
         _RESOLVED_PLACE,
-        _SECTIONS_CONFIG,
         _STYLE_GUIDE_CONTENT,
-        _VOCABULARY,
         _a_natal_chart,
+        _drive,
     )
 
     engine = create_engine("sqlite://")
@@ -352,17 +350,9 @@ def test_measure_latency(capsys: pytest.CaptureFixture[str]) -> None:
             session.commit()
 
             started = time.perf_counter()
-            result = drive(
-                session,
-                run,
-                natal_chart=natal_chart,
-                natal_chart_id=_NATAL_CHART_ID,
-                config=_COMPUTATION_CONFIG,
-                ephemeris_identity=_EPHEMERIS_IDENTITY,
-                sections_config=_SECTIONS_CONFIG,
-                generator=generator,
-                vocabulary=_VOCABULARY,
-            )
+            # AD-20 (Story 3.10): advance() moves one stage per call, so the
+            # end-to-end timing spans a full drain of it (tests.test_runner_driver._drive).
+            result = _drive(session, run, natal_chart, generator=generator)
             elapsed = time.perf_counter() - started
             run_seconds.append(elapsed)
 

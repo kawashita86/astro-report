@@ -62,7 +62,7 @@ from shell.adapters.postgres.style_guide import create_style_guide_version
 from shell.computation import load_computation_config
 from shell.gate import DEFAULT_VOCABULARY_PATH, load_gate_vocabulary
 from shell.ports.generator import Generator, StyleGuideVersion
-from shell.runner.driver import _STAGE_FUNCTIONS, _deserialize_transit_events, drive
+from shell.runner.driver import _STAGE_FUNCTIONS, _deserialize_transit_events, advance
 from shell.sections import load_sections_config
 
 _EPHEMERIS_IDENTITY = verify_ephemeris_identity()
@@ -164,14 +164,26 @@ class _FakeGenerator:
         return self._draft
 
 
-def _drive(
+#: A generous ceiling on how many ``advance()`` calls ``_drive`` will chain
+#: before giving up: the pipeline is 5 registered stages plus, in the worst
+#: regeneration case, ``_MAX_REGENERATIONS + 1`` rewind/re-draft cycles of
+#: two calls each -- well under 30. Hitting it means ``advance()`` is not
+#: making progress the way the test expects, so it is a test failure, not a
+#: silent early return.
+_DRAIN_CAP = 60
+
+
+def _advance(
     session: Session,
     run: ReportRun,
     natal_chart,
     generator: Generator | None = None,
     natal_chart_id: UUID = _NATAL_CHART_ID,
 ):
-    return drive(
+    """One ``advance()`` call -- at most one stage transition (AD-20, Story
+    3.10). Tests asserting exactly-one-transition semantics use this
+    directly; ``_drive`` below chains it to a fixed point."""
+    return advance(
         session,
         run,
         natal_chart=natal_chart,
@@ -182,6 +194,41 @@ def _drive(
         generator=generator if generator is not None else _FakeGenerator(),
         vocabulary=_VOCABULARY,
     )
+
+
+def _drive(
+    session: Session,
+    run: ReportRun,
+    natal_chart,
+    generator: Generator | None = None,
+    natal_chart_id: UUID = _NATAL_CHART_ID,
+):
+    """Drain ``advance()`` to a fixed point -- the end-to-end "run this to
+    completion" harness the full-pipeline tests here (and
+    ``tests/test_restore.py`` / ``tests/test_storage_growth_record.py`` /
+    ``tests/test_latency_record.py``) still rely on. Under AD-20 (Story 3.10)
+    ``advance()`` only moves one stage per call, so this loops it until
+    ``run.stage`` stops changing or the run is marked terminally failed."""
+    if generator is None:
+        generator = _FakeGenerator()
+    for _ in range(_DRAIN_CAP):
+        stage_before = run.stage
+        advance(
+            session,
+            run,
+            natal_chart=natal_chart,
+            natal_chart_id=natal_chart_id,
+            config=_COMPUTATION_CONFIG,
+            ephemeris_identity=_EPHEMERIS_IDENTITY,
+            sections_config=_SECTIONS_CONFIG,
+            generator=generator,
+            vocabulary=_VOCABULARY,
+        )
+        if run.failed_at is not None:
+            return run
+        if run.stage == stage_before:
+            return run
+    raise AssertionError("_drive: advance() drain exceeded its iteration cap")
 
 
 # --- Fresh run, all five registered stages succeed -----------------------------
@@ -271,22 +318,29 @@ def test_natal_chart_id_is_unaffected_by_a_later_regeneration_rewind_to_payload_
     session.commit()
 
     generator = _FakeGenerator(_a_violating_generated_draft())
-    result = _drive(
+    # One poll per stage up to draft_ready (natal, transits, payload, draft).
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator, natal_chart_id=_NATAL_CHART_ID)
+    assert run.stage == "draft_ready"
+
+    # The poll that runs gate_passed fails the Gate and rewinds to
+    # payload_ready (Story 5.4) -- natal_ready is never re-run.
+    result = _advance(
         session, run, natal_chart, generator=generator, natal_chart_id=_NATAL_CHART_ID
     )
-
     assert result.stage == "payload_ready", "fixture did not regenerate -- test is vacuous"
     assert result.natal_chart_id == _NATAL_CHART_ID
 
-    # A second drive() call regenerates (draft_ready -> gate_passed again)
-    # without ever re-running natal_ready -- natal_chart_id must stay
-    # exactly what it was set to the first time, even when a different id is
-    # passed to this later call.
+    # Regenerate (a poll re-runs draft_ready) then fail the Gate again on the
+    # poll after -- passing a *different* natal_chart_id to each call.
+    # natal_chart_id must stay exactly what natal_ready first set it to.
     other_chart_id = uuid4()
-    result = _drive(session, run, natal_chart, generator=generator, natal_chart_id=other_chart_id)
+    _advance(session, run, natal_chart, generator=generator, natal_chart_id=other_chart_id)
+    assert run.stage == "draft_ready"
+    result = _advance(session, run, natal_chart, generator=generator, natal_chart_id=other_chart_id)
 
     assert result.natal_chart_id == _NATAL_CHART_ID, (
-        "natal_chart_id must not be overwritten by a later drive() call"
+        "natal_chart_id must not be overwritten by a later poll"
     )
 
 
@@ -508,10 +562,10 @@ def test_a_persistently_failing_stage_leaves_the_run_unadvanced(
     monkeypatch.setitem(_STAGE_FUNCTIONS, "natal_ready", _always_fail)
 
     with caplog.at_level(logging.ERROR, logger=driver_module._logger.name):
-        result = _drive(session, run, natal_chart)
+        result = _advance(session, run, natal_chart)
 
-    # No exception escaped drive() -- the call above completing at all is
-    # part of what this test proves.
+    # No exception escaped advance() -- the call above completing at all is
+    # part of what this test proves. One poll = one exhausted stage attempt-set.
     assert result.stage is None
     assert result.month_start_utc is None
     assert len(calls) == 3, "with_backoff's default max_attempts is 3"
@@ -531,7 +585,9 @@ def test_a_stage_failing_after_a_prior_success_leaves_stage_at_the_last_success(
 
     monkeypatch.setitem(_STAGE_FUNCTIONS, "transits_ready", _always_fail)
 
-    result = _drive(session, run, natal_chart)
+    _advance(session, run, natal_chart)  # natal_ready succeeds
+    assert run.stage == "natal_ready"
+    result = _advance(session, run, natal_chart)  # transits_ready exhausts every attempt
 
     assert result.stage == "natal_ready"
     assert result.month_start_utc is not None
@@ -932,7 +988,7 @@ def test_gate_passed_advances_on_a_clean_draft_and_persists_a_report_row(
     assert stored_gate_result.violations == []
 
 
-def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_drive_call(
+def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_poll(
     session: Session,
 ) -> None:
     """I/O & Edge-Case Matrix row 1, "First Gate failure": given a failing
@@ -940,16 +996,23 @@ def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_drive_
     ``draft_ready`` -- Story 5.4 replaces the old generic stage-failure
     bookkeeping for this specific error), ``regeneration_count`` becomes 1,
     ``stage_failure_count`` is left untouched, and no ``Report`` row is
-    written. A second, still-violating ``drive()`` call regenerates: a new
-    ``ReportDraft`` at ``attempt=1`` is persisted from the same Payload, and
-    ``regeneration_count`` reaches 2."""
+    written. Two more polls (re-run ``draft_ready``, then fail
+    ``gate_passed`` again) regenerate: a new ``ReportDraft`` at ``attempt=1``
+    is persisted from the same Payload, and ``regeneration_count`` reaches
+    2 -- one transition per poll (AD-20, Story 3.10)."""
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
     session.commit()
 
     generator = _FakeGenerator(_a_violating_generated_draft())
-    result = _drive(session, run, natal_chart, generator=generator)
+    # natal, transits, payload, draft -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+
+    # This poll runs gate_passed, which fails and rewinds to payload_ready.
+    result = _advance(session, run, natal_chart, generator=generator)
 
     assert result.stage == "payload_ready"
     assert result.regeneration_count == 1
@@ -978,7 +1041,11 @@ def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_drive_
     assert stored_gate_results[0].vocabulary_content_hash == _VOCABULARY.content_hash
     assert stored_gate_results[0].violations
 
-    result = _drive(session, run, natal_chart, generator=generator)
+    # Poll: re-run draft_ready (attempt 1). Poll again: gate_passed fails once
+    # more, rewinding to payload_ready with regeneration_count now 2.
+    _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+    result = _advance(session, run, natal_chart, generator=generator)
 
     assert result.stage == "payload_ready"
     assert result.regeneration_count == 2
@@ -1055,13 +1122,13 @@ def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
     assert caught.value.violations[0].kind == "empty_citation"
 
 
-def test_a_failing_gate_passed_stage_runs_exactly_once_per_drive_call(
+def test_a_failing_gate_passed_stage_runs_exactly_once_per_poll(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Epic-6-retro item 43: ``gate_passed`` is capped at ``max_attempts=1``,
-    so a failing Gate does not retry the stage function inside one ``drive()``
-    call -- it runs once, then ``drive()``'s ``GateFailedError`` regeneration
-    handling takes over."""
+    so a failing Gate does not retry the stage function inside one
+    ``advance()`` call -- it runs once, then ``advance()``'s
+    ``GateFailedError`` regeneration handling takes over on that same poll."""
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
@@ -1078,9 +1145,17 @@ def test_a_failing_gate_passed_stage_runs_exactly_once_per_drive_call(
     monkeypatch.setitem(_STAGE_FUNCTIONS, "gate_passed", _counting_gate_passed)
 
     generator = _FakeGenerator(_a_violating_generated_draft())
-    result = _drive(session, run, natal_chart, generator=generator)
+    # natal, transits, payload, draft -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+    assert calls == 0, "gate_passed must not run before the poll that lands on it"
 
-    assert calls == 1, "gate_passed must not be retried within a single drive() call"
+    # The poll that runs gate_passed: it fails once, then regeneration
+    # bookkeeping takes over -- no with_backoff retry of the stage function.
+    result = _advance(session, run, natal_chart, generator=generator)
+
+    assert calls == 1, "gate_passed must not be retried within a single poll"
     assert result.stage == "payload_ready"
     assert result.regeneration_count == 1
 
@@ -1110,11 +1185,20 @@ def test_gate_passed_regenerates_and_advances_once_a_later_attempt_passes(
 
     generator = _ViolatesOnceThenCleanGenerator()
 
-    first = _drive(session, run, natal_chart, generator=generator)
+    # natal, transits, payload, draft (violating) -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+
+    # Poll: gate_passed fails on the violating draft, rewinds to payload_ready.
+    first = _advance(session, run, natal_chart, generator=generator)
     assert first.stage == "payload_ready", "fixture did not fail once -- test is vacuous"
     assert first.regeneration_count == 1
 
-    result = _drive(session, run, natal_chart, generator=generator)
+    # Poll: re-run draft_ready (clean draft now). Poll again: gate_passed passes.
+    _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+    result = _advance(session, run, natal_chart, generator=generator)
 
     assert result.stage == "gate_passed"
     assert result.regeneration_count == 1
@@ -1160,13 +1244,23 @@ def test_gate_passed_exhausting_the_regeneration_bound_marks_the_run_terminally_
 
     generator = _FakeGenerator(_a_violating_generated_draft())
 
+    # natal, transits, payload, draft -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+
     for expected_regeneration_count in range(1, driver_module._MAX_REGENERATIONS + 1):
-        result = _drive(session, run, natal_chart, generator=generator)
+        # Poll that runs gate_passed: fails, rewinds to payload_ready.
+        result = _advance(session, run, natal_chart, generator=generator)
         assert result.stage == "payload_ready"
         assert result.regeneration_count == expected_regeneration_count
         assert result.failed_at is None
+        # Poll that re-runs draft_ready for the next regeneration attempt.
+        result = _advance(session, run, natal_chart, generator=generator)
+        assert result.stage == "draft_ready"
 
-    result = _drive(session, run, natal_chart, generator=generator)
+    # Poll that runs gate_passed once more -- this failure exceeds the bound.
+    result = _advance(session, run, natal_chart, generator=generator)
 
     assert result.stage == "draft_ready"
     assert result.regeneration_count == driver_module._MAX_REGENERATIONS + 1
@@ -1257,12 +1351,12 @@ def test_gate_passed_pass_path_flush_failure_leaves_run_recoverable(
 def test_gate_failed_error_path_survives_a_gate_result_flush_failure(
     session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """``drive()``'s own ``except GateFailedError`` block calls
+    """``advance()``'s own ``except GateFailedError`` block calls
     ``store_gate_result`` unguarded, outside ``with_backoff`` by design
     (Story 5.6, to avoid a duplicate row on retry). If that flush fails, the
     regeneration bookkeeping that follows (``regeneration_count`` increment,
     ``run.stage`` rewind) must still happen and commit cleanly -- losing one
-    audit row must never crash ``drive()`` itself or block the run from
+    audit row must never crash ``advance()`` itself or block the run from
     progressing (epic-5-retro-item-39, re-prioritizing epic-4-retro-item-23)."""
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
@@ -1277,15 +1371,20 @@ def test_gate_failed_error_path_survives_a_gate_result_flush_failure(
         # exception is caught.
         session.execute(text("SELECT * FROM this_table_does_not_exist"))
 
-    monkeypatch.setattr(driver_module, "store_gate_result", _fail_at_the_database)
-
     generator = _FakeGenerator(_a_violating_generated_draft())
 
-    with caplog.at_level(logging.ERROR, logger=driver_module._logger.name):
-        result = _drive(session, run, natal_chart, generator=generator)
+    # natal, transits, payload, draft -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
 
-    # No exception escaped drive() despite the audit write failing on every
-    # with_backoff attempt of the pure, always-failing gate_passed check.
+    monkeypatch.setattr(driver_module, "store_gate_result", _fail_at_the_database)
+
+    with caplog.at_level(logging.ERROR, logger=driver_module._logger.name):
+        result = _advance(session, run, natal_chart, generator=generator)
+
+    # No exception escaped advance() despite the audit write failing on the
+    # single with_backoff attempt of the pure, failing gate_passed check.
     assert result.stage == "payload_ready"
     assert result.regeneration_count == 1
     assert result.stage_failure_count == 0
@@ -1297,7 +1396,11 @@ def test_gate_failed_error_path_survives_a_gate_result_flush_failure(
 
     monkeypatch.undo()
 
-    result = _drive(session, run, natal_chart, generator=generator)
+    # Poll: re-run draft_ready (attempt 1). Poll: gate_passed fails again, and
+    # now store_gate_result works -- one row lands, at regeneration_count 1.
+    _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+    result = _advance(session, run, natal_chart, generator=generator)
 
     assert result.stage == "payload_ready"
     assert result.regeneration_count == 2
@@ -1387,14 +1490,14 @@ def test_a_two_write_stage_whose_second_write_fails_transiently_still_advances(
 def test_a_pre_existing_report_payload_row_makes_payload_ready_a_completed_stage(
     session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """retro-C items 26/44: a concurrent ``drive()`` already wrote this run's
-    ``ReportPayload`` (``report_run_id`` unique) and advanced ``run.stage``.
-    Our ``drive()`` still holding the older ``run.stage`` in memory reaches
-    ``payload_ready``, hits the unique-constraint ``IntegrityError`` on the
-    **first** attempt, and -- because ``run.stage`` refreshed past
+    """retro-C items 26/44: a concurrent ``advance()`` already wrote this
+    run's ``ReportPayload`` (``report_run_id`` unique) and advanced
+    ``run.stage``. Our poll, still holding the older ``run.stage`` in memory,
+    re-runs ``payload_ready``, hits the unique-constraint ``IntegrityError``
+    on the single attempt, and -- because ``run.stage`` refreshed past
     ``payload_ready`` -- treats it as a completed stage: no ``with_backoff``
     retry, ``stage_failure_count``/``failed_at`` untouched, INFO (not
-    ``exception``) logged."""
+    ``exception``) logged. One ``advance()`` call asserts exactly this."""
     monkeypatch.setitem(
         driver_module._STAGE_BACKOFF_OVERRIDES,
         "payload_ready",
@@ -1405,12 +1508,12 @@ def test_a_pre_existing_report_payload_row_makes_payload_ready_a_completed_stage
     session.add(run)
     session.commit()
 
-    # The concurrent winner: a full, clean drive() that commits the
+    # The concurrent winner: a full, clean drain that commits the
     # ReportPayload row and leaves stage_failure_count at 0.
     _drive(session, run, natal_chart)
     assert run.stage == "gate_passed"
 
-    # Our own drive() call still sees the pre-race stage in memory.
+    # Our own poll still sees the pre-race stage in memory.
     run.stage = "transits_ready"
 
     entries: list[int] = []
@@ -1423,7 +1526,7 @@ def test_a_pre_existing_report_payload_row_makes_payload_ready_a_completed_stage
     monkeypatch.setitem(_STAGE_FUNCTIONS, "payload_ready", _counting)
 
     with caplog.at_level(logging.INFO, logger=driver_module._logger.name):
-        result = _drive(session, run, natal_chart)
+        result = _advance(session, run, natal_chart)
 
     assert entries == [1], "the concurrent conflict must not be retried"
     assert result.stage == "gate_passed"
@@ -1438,7 +1541,7 @@ def test_a_pre_existing_report_payload_row_makes_payload_ready_a_completed_stage
         record
         for record in caplog.records
         if record.levelno == logging.INFO
-        and "already completed by a concurrent drive" in record.getMessage()
+        and "already completed by a concurrent advance" in record.getMessage()
     ]
     assert len(info_records) == 1
     assert "gate_passed" in info_records[0].getMessage(), "the observed run.stage must be logged"
@@ -1448,12 +1551,13 @@ def test_a_pre_existing_report_payload_row_makes_payload_ready_a_completed_stage
 def test_a_pre_existing_report_draft_row_makes_draft_ready_a_completed_stage(
     session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """retro-C items 26/44, ``draft_ready`` variant: a concurrent ``drive()``
-    already wrote ``ReportDraft (run, attempt=0)``
-    (``ix_report_draft_report_run_id_attempt``). Our ``drive()`` re-runs
+    """retro-C items 26/44, ``draft_ready`` variant: a concurrent
+    ``advance()`` already wrote ``ReportDraft (run, attempt=0)``
+    (``ix_report_draft_report_run_id_attempt``). Our poll re-runs
     ``draft_ready`` at the same attempt, hits the ``IntegrityError``, and
     recognises the completed stage without a ``with_backoff`` retry -- and,
-    critically, without a second paid ``generator.generate()`` call."""
+    critically, without a second paid ``generator.generate()`` call. One
+    ``advance()`` call asserts exactly this."""
     monkeypatch.setitem(
         driver_module._STAGE_BACKOFF_OVERRIDES,
         "draft_ready",
@@ -1464,18 +1568,18 @@ def test_a_pre_existing_report_draft_row_makes_draft_ready_a_completed_stage(
     session.add(run)
     session.commit()
 
-    # The concurrent winner: a full, clean drive() that commits
+    # The concurrent winner: a full, clean drain that commits
     # ReportDraft(attempt=0).
     _drive(session, run, natal_chart)
     assert run.stage == "gate_passed"
 
-    # Our own drive() call still sees the pre-race stage in memory, so it
-    # re-enters draft_ready at run.regeneration_count == 0.
+    # Our own poll still sees the pre-race stage in memory, so it re-enters
+    # draft_ready at run.regeneration_count == 0.
     run.stage = "payload_ready"
     generator = _FakeGenerator()
 
     with caplog.at_level(logging.INFO, logger=driver_module._logger.name):
-        result = _drive(session, run, natal_chart, generator=generator)
+        result = _advance(session, run, natal_chart, generator=generator)
 
     assert len(generator.calls) == 1, "the stage calls the generator exactly once, before the flush"
     assert result.stage == "gate_passed"
@@ -1489,7 +1593,7 @@ def test_a_pre_existing_report_draft_row_makes_draft_ready_a_completed_stage(
         record
         for record in caplog.records
         if record.levelno == logging.INFO
-        and "already completed by a concurrent drive" in record.getMessage()
+        and "already completed by a concurrent advance" in record.getMessage()
     ]
     assert len(info_records) == 1
     assert all(record.levelno < logging.ERROR for record in caplog.records)
@@ -1847,3 +1951,218 @@ def test_a_stage_other_than_draft_ready_failing_persistently_also_reaches_termin
     assert result.stage_failure_count == 5
     assert result.failed_at is not None
     assert "natal_ready" in result.failure_reason
+
+
+# --- Story 3.10 (AD-20): advance() performs at most one stage transition per call ---
+
+
+def test_advance_moves_the_run_forward_exactly_one_stage_per_call(session: Session) -> None:
+    """AD-20 / new test (a): each ``advance()`` call moves ``run.stage``
+    forward by exactly one ``_STAGE_SEQUENCE`` position, and the Generator is
+    never touched until the call that lands on ``draft_ready``."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator()
+    expected_stages = [
+        "natal_ready",
+        "transits_ready",
+        "payload_ready",
+        "draft_ready",
+        "gate_passed",
+    ]
+
+    for stage_name in expected_stages:
+        result = _advance(session, run, natal_chart, generator=generator)
+        assert result.stage == stage_name
+        if stage_name in ("natal_ready", "transits_ready", "payload_ready"):
+            assert generator.calls == [], "the Generator must not be touched before draft_ready"
+
+    assert len(generator.calls) == 1, "the Generator is called once, on the draft_ready poll"
+
+    # A further call does not chain past gate_passed into exported (no
+    # registered function) -- it returns the current stage unchanged.
+    updated_at_before = run.updated_at
+    result = _advance(session, run, natal_chart, generator=generator)
+    assert result.stage == "gate_passed"
+    assert result.updated_at == updated_at_before
+
+
+def test_a_poll_that_runs_draft_ready_calls_the_generator_once_and_stops_there(
+    session: Session,
+) -> None:
+    """AD-20 / new test (b): the poll that runs ``draft_ready`` calls the
+    Generator exactly once and returns at ``draft_ready`` -- it never also
+    runs ``gate_passed`` in that same call, so no ``Report`` row exists yet."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator()
+    for _ in range(3):  # natal, transits, payload
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "payload_ready"
+    assert generator.calls == []
+
+    result = _advance(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready"
+    assert len(generator.calls) == 1
+    # gate_passed did not also run in this call.
+    assert session.exec(select(Report).where(Report.report_run_id == run.id)).all() == []
+
+
+def test_a_poll_landing_on_draft_ready_runs_gate_passed_and_never_chains_further(
+    session: Session,
+) -> None:
+    """AD-20 I/O Matrix "Poll lands on draft_ready": a call entered with
+    ``run.stage == "draft_ready"`` runs ``gate_passed`` (one generator-free
+    Gate call) and returns at ``gate_passed`` -- it never chains into a
+    later stage in the same call."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator()
+    for _ in range(4):  # natal, transits, payload, draft
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+    generator_calls_before = list(generator.calls)
+
+    result = _advance(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "gate_passed"
+    assert generator.calls == generator_calls_before, "gate_passed must not call the Generator"
+    assert len(session.exec(select(Report).where(Report.report_run_id == run.id)).all()) == 1
+
+
+def test_advance_resumes_at_the_next_stage_after_a_simulated_mid_run_kill(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AD-20 / new test (c): a run polled after a simulated mid-run kill
+    (``run.stage`` at an intermediate value, its stored columns present)
+    resumes at the next stage and recomputes nothing already persisted."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    _advance(session, run, natal_chart)  # natal_ready
+    _advance(session, run, natal_chart)  # transits_ready
+    assert run.stage == "transits_ready", "fixture did not reach transits_ready -- vacuous"
+    recorded_start, recorded_end = run.month_start_utc, run.month_end_utc
+    recorded_events = run.transit_events
+
+    # Simulate the process restarting: nothing already persisted may be
+    # recomputed on the next poll.
+    def _raise_if_called(*args, **kwargs):
+        raise AssertionError("client_month_interval_utc must not be called again")
+
+    monkeypatch.setattr(driver_module, "client_month_interval_utc", _raise_if_called)
+
+    def _transits_raise(*args, **kwargs):
+        raise AssertionError("transits_ready must not run again")
+
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "transits_ready", _transits_raise)
+
+    result = _advance(session, run, natal_chart)  # resumes at payload_ready
+
+    assert result.stage == "payload_ready"
+    assert result.month_start_utc == recorded_start
+    assert result.month_end_utc == recorded_end
+    assert result.transit_events == recorded_events
+
+
+def test_advance_returns_the_current_stage_without_advancing_when_the_lock_is_unavailable(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AD-20 / new test (d): with ``try_acquire_advance_lock`` forced to
+    ``False`` (a concurrent poll holds it), ``advance()`` returns the run's
+    current stage, runs no stage function, and commits no stage change."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    _advance(session, run, natal_chart)  # natal_ready
+    assert run.stage == "natal_ready"
+    updated_at_before = run.updated_at
+
+    monkeypatch.setattr(driver_module, "try_acquire_advance_lock", lambda session, run_id: False)
+
+    called: list[int] = []
+    real_transits = _STAGE_FUNCTIONS["transits_ready"]
+
+    def _counting_transits(*args, **kwargs):
+        called.append(1)
+        return real_transits(*args, **kwargs)
+
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "transits_ready", _counting_transits)
+
+    result = _advance(session, run, natal_chart)
+
+    assert result.stage == "natal_ready"
+    assert called == [], "no stage function runs when the advance lock is unavailable"
+    assert result.updated_at == updated_at_before
+    reloaded = session.get(ReportRun, run.id)
+    assert reloaded is not None
+    assert reloaded.stage == "natal_ready"
+
+
+def test_advance_takes_the_advisory_lock_on_the_winning_path(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AD-20: a normal in-progress poll acquires the advance lock exactly
+    once, keyed on the run's id, before running its one stage."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    lock_calls: list[tuple] = []
+    real_lock = driver_module.try_acquire_advance_lock
+
+    def _spy_lock(session_arg, run_id):
+        lock_calls.append((session_arg, run_id))
+        return real_lock(session_arg, run_id)
+
+    monkeypatch.setattr(driver_module, "try_acquire_advance_lock", _spy_lock)
+
+    result = _advance(session, run, natal_chart)  # runs natal_ready
+
+    assert len(lock_calls) == 1, "advance() must take the lock exactly once on the winning path"
+    assert lock_calls[0][0] is session
+    assert lock_calls[0][1] == run.id
+    assert result.stage == "natal_ready", "the run still advances exactly one stage"
+
+
+def test_advance_takes_no_advisory_lock_when_the_run_is_already_terminally_failed(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AD-20 / this module's docstring: a run with ``failed_at`` set
+    short-circuits before any lock is acquired."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(
+        client_id=client.id,
+        month="2026-01",
+        stage="draft_ready",
+        failed_at=datetime(2026, 1, 20, 12, 0, 0, tzinfo=UTC),
+        failure_reason="regeneration bound exhausted after 4 attempts: simulated",
+    )
+    session.add(run)
+    session.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("try_acquire_advance_lock must not be called on a failed run")
+
+    monkeypatch.setattr(driver_module, "try_acquire_advance_lock", _fail_if_called)
+
+    result = _advance(session, run, natal_chart)
+
+    assert result is run
+    assert result.stage == "draft_ready"
+    assert result.failed_at is not None

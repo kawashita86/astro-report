@@ -231,14 +231,14 @@ computation_config: ComputationConfig = load_computation_config()
 #: The declarative Section-to-Payload mapping (AD-13), loaded once at import
 #: time exactly like ``computation_config``. Story 3.8's ``payload_ready``
 #: stage (``shell/runner/driver.py``) is the first consumer, via
-#: ``shell/http/routes/report_runs.py``'s ``_drive_run``.
+#: ``shell/http/routes/report_runs.py``'s ``_advance_run``.
 sections_config: SectionsConfig = load_sections_config()
 
 #: The versioned closed Italian vocabulary that decides what counts as a
 #: Claim (Story 5.1, AD-8), loaded once at import time exactly like
 #: ``computation_config``/``sections_config``. ``shell/runner/driver.py``'s
 #: ``gate_passed`` stage (via ``shell/http/routes/report_runs.py``'s
-#: ``_drive_run``) is the first consumer.
+#: ``_advance_run``) is the first consumer.
 gate_vocabulary: GateVocabulary = load_gate_vocabulary()
 
 #: The instance the ASGI server imports (``shell.http.app:app``).

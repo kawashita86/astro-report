@@ -95,7 +95,7 @@ def store_report_payload(
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``create_client_with_chart()``
     (``shell/adapters/postgres/client.py``), so it never decides the caller's
-    transaction boundary. ``shell/runner/driver.py::drive()`` commits once
+    transaction boundary. ``shell/runner/driver.py::advance()`` commits once
     this and the rest of the ``payload_ready`` stage have succeeded.
     """
     report_payload = ReportPayload(
