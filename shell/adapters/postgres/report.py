@@ -21,7 +21,8 @@ from sqlalchemy.orm import Mapper
 from sqlmodel import Field, Session, SQLModel
 from uuid6 import uuid7
 
-from shell.adapters.postgres.report_run import ReportRun, _UTCDateTime
+from shell.adapters.postgres.columns import _UTCDateTime
+from shell.adapters.postgres.report_run import ReportRun
 
 __all__ = ["Report", "store_report"]
 

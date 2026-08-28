@@ -21,36 +21,15 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import JSON, Column
-from sqlalchemy import DateTime as _DateTime
-from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
 from uuid6 import uuid7
 
+# ``_UTCDateTime`` now lives in ``shell/adapters/postgres/columns.py``
+# (epic-6-retro-item-52); imported here only because ``ReportRun``'s own
+# timestamp columns still use it.
+from shell.adapters.postgres.columns import _UTCDateTime
+
 __all__ = ["ReportRun"]
-
-
-class _UTCDateTime(TypeDecorator):
-    """A timezone-aware UTC ``datetime`` that round-trips identically on
-    Postgres (production) and SQLite (the Postgres stand-in every test in
-    this codebase uses, ``tests/test_client_store.py`` onward).
-
-    Plain ``DateTime(timezone=True)`` is enough on Postgres -- ``psycopg``
-    always returns a ``tzinfo``-aware value for a ``TIMESTAMPTZ`` column.
-    SQLite has no native timezone-aware storage, so the same column reads
-    back *naive* there, and every value this table ever stores is UTC by
-    construction (``client_month_interval_utc``, ``datetime.now(UTC)``) --
-    so a naive value read back is unambiguously UTC, re-attached here rather
-    than left to trip ``core/transits/*``'s strict UTC-awareness check
-    (``core/`` itself is never modified, per this story's Boundaries).
-    """
-
-    impl = _DateTime(timezone=True)
-    cache_ok = True
-
-    def process_result_value(self, value: datetime | None, dialect: object) -> datetime | None:
-        if value is not None and value.tzinfo is None:
-            return value.replace(tzinfo=UTC)
-        return value
 
 
 class ReportRun(SQLModel, table=True):

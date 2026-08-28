@@ -20,7 +20,7 @@ No new error hierarchy: ``PlaceResolutionError`` (``.step``) and whatever
 ``login.html``'s error-banner pattern -- a wrapper error type would only
 re-narrate a step name the domain errors already carry. Deletion has no
 resolution or computation step to fail once the client is found -- a 404 for
-an unknown id and a 422 for a malformed body (``_parse_form``'s own two
+an unknown id and a 422 for a malformed body (``parse_form``'s own two
 failure modes) are its only error paths.
 
 Authenticated by default: nothing here is named in ``shell.http.auth.ALLOWLIST``,
@@ -35,7 +35,6 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -58,6 +57,7 @@ from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_run import ReportRun
 from shell.http.app import get_session
 from shell.http.auth import log_client_deleted
+from shell.http.form import FormNotUtf8, FormTooLarge, parse_form
 from shell.ports.geocoder import Geocoder
 
 __all__ = ["get_geocoder", "router"]
@@ -95,41 +95,6 @@ _CANDIDATE_DECODE_ERRORS: tuple[type[Exception], ...] = (
 #: candidate's JSON -- so it is sized well above the login form's 4096, while
 #: still rejecting a garbage-sized body before reading it.
 _MAX_CLIENT_FORM_BODY_BYTES = 65536
-
-
-class _FormTooLarge(Exception):
-    """The declared or actual body size exceeds ``_MAX_CLIENT_FORM_BODY_BYTES``."""
-
-
-class _FormNotUtf8(Exception):
-    """The body could not be decoded as UTF-8."""
-
-
-async def _parse_form(request: Request) -> dict[str, str]:
-    """Hand-parsed, urlencoded body -- mirrors ``login_submit()`` in
-    ``shell/http/app.py``, which reads the raw body rather than pulling in
-    ``python-multipart`` for FastAPI's ``Form()``.
-
-    Raises :class:`_FormTooLarge` for an oversized (or unstated) body and
-    :class:`_FormNotUtf8` for a non-UTF-8 one -- both failing visibly with a
-    422 rather than a 500, mirroring this story's own stated goal.
-    """
-    declared_length = request.headers.get("content-length")
-    try:
-        body_too_large = (
-            declared_length is None or int(declared_length) > _MAX_CLIENT_FORM_BODY_BYTES
-        )
-    except ValueError:
-        body_too_large = True
-    if body_too_large:
-        raise _FormTooLarge
-
-    raw_body = await request.body()
-    try:
-        body = raw_body.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise _FormNotUtf8 from error
-    return dict(parse_qsl(body))
 
 
 def _missing_fields(fields: dict[str, str]) -> list[str]:
@@ -263,10 +228,10 @@ async def create_client(
     geocoder: Geocoder = Depends(get_geocoder),
 ) -> Response:
     try:
-        fields = await _parse_form(request)
-    except _FormTooLarge:
+        fields = await parse_form(request, max_bytes=_MAX_CLIENT_FORM_BODY_BYTES)
+    except FormTooLarge:
         return _render_form(request, status_code=422, error="the submitted form is too large.")
-    except _FormNotUtf8:
+    except FormNotUtf8:
         return _render_form(
             request, status_code=422, error="the submitted form is not valid UTF-8."
         )
@@ -403,15 +368,15 @@ async def correct_client(
         raise HTTPException(status_code=404)
 
     try:
-        fields = await _parse_form(request)
-    except _FormTooLarge:
+        fields = await parse_form(request, max_bytes=_MAX_CLIENT_FORM_BODY_BYTES)
+    except FormTooLarge:
         return _render_edit_form(
             request,
             client_id=client_id,
             status_code=422,
             error="the submitted form is too large.",
         )
-    except _FormNotUtf8:
+    except FormNotUtf8:
         return _render_edit_form(
             request,
             client_id=client_id,
@@ -573,7 +538,7 @@ async def delete_client(
     re-rendered. Deletion takes no new input beyond that flag, so the only
     error paths here are the 404 for an unknown client and a 422 for a
     malformed body -- too large or not valid UTF-8 -- mirroring
-    ``create_client``/``correct_client``'s own handling of ``_parse_form``'s
+    ``create_client``/``correct_client``'s own handling of ``parse_form``'s
     two failure modes (no external resolution or computation runs that could
     fail once the client is found and the body parses).
     """
@@ -582,8 +547,8 @@ async def delete_client(
         raise HTTPException(status_code=404)
 
     try:
-        fields = await _parse_form(request)
-    except _FormTooLarge:
+        fields = await parse_form(request, max_bytes=_MAX_CLIENT_FORM_BODY_BYTES)
+    except FormTooLarge:
         return _render_delete_form(
             request,
             client_id=client_id,
@@ -591,7 +556,7 @@ async def delete_client(
             has_superseded_chart=_has_superseded_chart(session, client_id),
             error="the submitted form is too large.",
         )
-    except _FormNotUtf8:
+    except FormNotUtf8:
         return _render_delete_form(
             request,
             client_id=client_id,

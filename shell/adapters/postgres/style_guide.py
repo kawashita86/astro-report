@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapper
 from sqlmodel import Field, Session, SQLModel, select
 from uuid6 import uuid7
 
-from shell.adapters.postgres.report_run import _UTCDateTime
+from shell.adapters.postgres.columns import _UTCDateTime
 
 __all__ = [
     "StyleGuide",

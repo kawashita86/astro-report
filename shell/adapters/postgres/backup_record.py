@@ -28,7 +28,7 @@ from sqlalchemy import Column
 from sqlmodel import Field, Session, SQLModel, select
 from uuid6 import uuid7
 
-from shell.adapters.postgres.report_run import _UTCDateTime
+from shell.adapters.postgres.columns import _UTCDateTime
 
 __all__ = ["BackupRecord", "latest_backup_record", "store_backup_record"]
 

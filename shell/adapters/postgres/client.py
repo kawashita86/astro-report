@@ -146,6 +146,35 @@ def _serialize(instance: Any) -> dict[str, Any]:
     return {key: _json_safe(value) for key, value in asdict(instance).items()}
 
 
+def _build_stored_chart(
+    *,
+    client_id: UUID,
+    natal_chart: NatalChart,
+    computation_config: ComputationConfig,
+    ephemeris_identity: EphemerisIdentity,
+) -> StoredNatalChart:
+    """The ``StoredNatalChart`` row both :func:`create_client_with_chart` and
+    :func:`correct_client_and_chart` insert (epic-2-retro-item-13) -- the
+    construction block was byte-identical in both.
+
+    ``planets``/``houses``/``aspects`` are JSON-serialized here via
+    :func:`_serialize` (every ``Decimal`` inside them to a string first). The
+    caller owns ``session.add()`` and the transaction boundary; this only
+    builds the row.
+    """
+    return StoredNatalChart(
+        client_id=client_id,
+        ascendant=natal_chart.ascendant,
+        midheaven=natal_chart.midheaven,
+        planets=[_serialize(planet) for planet in natal_chart.planets],
+        houses=[_serialize(house) for house in natal_chart.houses],
+        aspects=[_serialize(aspect) for aspect in natal_chart.aspects],
+        computation_config_version=computation_config.version,
+        computation_config_content_hash=computation_config.content_hash,
+        ephemeris_files=[_serialize(file) for file in ephemeris_identity.files],
+    )
+
+
 def deserialize_natal_chart(stored: StoredNatalChart) -> NatalChart:
     """Reverse :func:`_serialize`'s ``Decimal``-to-``str`` JSON encoding back
     into the frozen :mod:`core.types.chart` dataclasses (Story 3.5).
@@ -227,16 +256,11 @@ def create_client_with_chart(
         longitude=resolved_place.longitude,
         iana_zone=resolved_place.iana_zone,
     )
-    chart = StoredNatalChart(
+    chart = _build_stored_chart(
         client_id=client.id,
-        ascendant=natal_chart.ascendant,
-        midheaven=natal_chart.midheaven,
-        planets=[_serialize(planet) for planet in natal_chart.planets],
-        houses=[_serialize(house) for house in natal_chart.houses],
-        aspects=[_serialize(aspect) for aspect in natal_chart.aspects],
-        computation_config_version=computation_config.version,
-        computation_config_content_hash=computation_config.content_hash,
-        ephemeris_files=[_serialize(file) for file in ephemeris_identity.files],
+        natal_chart=natal_chart,
+        computation_config=computation_config,
+        ephemeris_identity=ephemeris_identity,
     )
 
     session.add(client)
@@ -279,16 +303,11 @@ def correct_client_and_chart(
     current_chart.superseded_at = datetime.now(UTC)
     session.add(current_chart)
 
-    new_chart = StoredNatalChart(
+    new_chart = _build_stored_chart(
         client_id=client.id,
-        ascendant=natal_chart.ascendant,
-        midheaven=natal_chart.midheaven,
-        planets=[_serialize(planet) for planet in natal_chart.planets],
-        houses=[_serialize(house) for house in natal_chart.houses],
-        aspects=[_serialize(aspect) for aspect in natal_chart.aspects],
-        computation_config_version=computation_config.version,
-        computation_config_content_hash=computation_config.content_hash,
-        ephemeris_files=[_serialize(file) for file in ephemeris_identity.files],
+        natal_chart=natal_chart,
+        computation_config=computation_config,
+        ephemeris_identity=ephemeris_identity,
     )
     session.add(new_chart)
 

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from urllib.parse import parse_qsl
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -33,6 +32,7 @@ from sqlmodel import Session, select
 from shell.adapters.postgres.client import Client, list_clients
 from shell.adapters.postgres.corpus_entry import add_corpus_entry, list_corpus_entries
 from shell.http.app import get_session
+from shell.http.form import FormNotUtf8, FormTooLarge, parse_form
 
 __all__ = ["router"]
 
@@ -56,38 +56,6 @@ _MAX_CORPUS_FORM_BODY_BYTES = 1_048_576
 #: uses ``datetime.strptime(month, "%Y-%m")`` and would also accept an
 #: unpadded month such as ``2026-1``.
 _MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
-
-
-class _FormTooLarge(Exception):
-    """The declared or actual body size exceeds ``_MAX_CORPUS_FORM_BODY_BYTES``."""
-
-
-class _FormNotUtf8(Exception):
-    """The body could not be decoded as UTF-8."""
-
-
-async def _parse_form(request: Request) -> dict[str, str]:
-    """Hand-parsed, urlencoded body -- mirrors
-    ``shell/http/routes/style_guide.py``'s ``_parse_form``, which reads the
-    raw body rather than pulling in ``python-multipart`` for FastAPI's
-    ``Form()``.
-    """
-    declared_length = request.headers.get("content-length")
-    try:
-        body_too_large = (
-            declared_length is None or int(declared_length) > _MAX_CORPUS_FORM_BODY_BYTES
-        )
-    except ValueError:
-        body_too_large = True
-    if body_too_large:
-        raise _FormTooLarge
-
-    raw_body = await request.body()
-    try:
-        body = raw_body.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise _FormNotUtf8 from error
-    return dict(parse_qsl(body))
 
 
 def _render_new_form(
@@ -196,8 +164,8 @@ async def add_corpus(request: Request, session: Session = Depends(get_session)) 
     with ``client_id``/``month`` forced to ``NULL`` whatever was submitted.
     """
     try:
-        fields = await _parse_form(request)
-    except _FormTooLarge:
+        fields = await parse_form(request, max_bytes=_MAX_CORPUS_FORM_BODY_BYTES)
+    except FormTooLarge:
         return _render_new_form(
             request,
             session,
@@ -208,7 +176,7 @@ async def add_corpus(request: Request, session: Session = Depends(get_session)) 
             month="",
             status_code=422,
         )
-    except _FormNotUtf8:
+    except FormNotUtf8:
         return _render_new_form(
             request,
             session,

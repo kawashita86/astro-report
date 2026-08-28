@@ -29,14 +29,16 @@ import datetime
 import math
 import os
 import re
-import tomllib
-from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests._release_validation import REPO_ROOT, assert_record_not_stale, load_record_meta
+
 RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "latency.md"
 EPICS_FILE = REPO_ROOT / "_bmad-output" / "planning-artifacts" / "epics.md"
+
+#: Max age of `checked` before the record is flagged stale (epic-8-retro-item-62).
+_MAX_RECORD_AGE_DAYS = 550
 
 #: NFR-5's minutes x 60 and NFR-10's seconds, as written in the Boundaries --
 #: the guard tests bind the recorded budgets to both these literals *and* to
@@ -69,18 +71,6 @@ _EXPECTED_KEYS = {
     "outcome",
 }
 
-_TOML_BLOCK = re.compile(r"^```toml\n(.*?)\n```", re.DOTALL | re.MULTILINE)
-
-
-def _extract_toml_block(text: str) -> str:
-    match = _TOML_BLOCK.search(text)
-    assert match is not None, (
-        f"{RECORD_FILE} has no ```toml fenced block -- the machine-readable "
-        "latency record is missing or malformed"
-    )
-    return match.group(1)
-
-
 def _epics_requirement_line(tag: str) -> str:
     """The single ``epics.md`` line that begins ``<tag>:`` (e.g. ``NFR-5``) --
     the guard tests parse the stated bound out of exactly that line, never a
@@ -94,8 +84,7 @@ def _epics_requirement_line(tag: str) -> str:
 
 @pytest.fixture(scope="module")
 def meta() -> dict[str, object]:
-    assert RECORD_FILE.exists(), f"latency record missing: {RECORD_FILE}"
-    return tomllib.loads(_extract_toml_block(RECORD_FILE.read_text(encoding="utf-8")))
+    return load_record_meta(RECORD_FILE, record_label="latency")
 
 
 # --- Always-on guard tests (validate the record, never measure) ----------------
@@ -107,6 +96,10 @@ def test_record_exists() -> None:
         "Story 8.3 requires a dated measurement of the per-Report and "
         "full-month-scan latency the PRD only assumed"
     )
+
+
+def test_record_is_not_stale(meta: dict[str, object]) -> None:
+    assert_record_not_stale(meta, max_age_days=_MAX_RECORD_AGE_DAYS, record_label="latency")
 
 
 def test_toml_block_parses(meta: dict[str, object]) -> None:

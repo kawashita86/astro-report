@@ -21,13 +21,12 @@ change, unlike ``Ingress``, which has no direction/departed-entered concept
 to track here.
 
 **The same coarse-grid-plus-bisection method as ``aspects.py``/``stations.py``/
-``ingresses.py``, mirrored rather than imported.** ``_GRID_STEP`` and
-``_BISECTION_ITERATIONS`` below carry the same values and the same
-justification as those modules' own constants of the same name (the Moon's
-sweep rate, the fastest of any body this project scans, stays well above the
-grid's cadence, so no crossing is ever hidden inside a single grid step, and
-a fixed halving count bounds both runtime and precision regardless of the
-input interval's width).
+``ingresses.py``, shared via ``core/transits/_month_grid.py``.** ``_GRID_STEP``,
+``_BISECTION_ITERATIONS`` and the ``_build_grid`` / ``_require_utc_interval``
+/ ``_bisect`` helpers are imported from that module -- see its docstring for
+why the 6-hour cadence never hides a crossing (the Moon, the fastest body any
+scan here touches, still moves under ~3.5 degrees per step) and why a fixed
+halving count bounds runtime and precision.
 
 **A signed offset from each target, wrapped to ``(-180, 180]``, mirrors
 ``aspects.py``'s/``ingresses.py``'s own ``_normalize_signed``.** Both targets
@@ -47,31 +46,18 @@ directly instead.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 import swisseph as swe
 
 from core.ephemeris.chart import _house_for_longitude
 from core.ephemeris.positions import FULL_CIRCLE, HALF_CIRCLE, _calc_body, _julian_day_ut
+from core.transits._month_grid import _bisect, _build_grid, _require_utc_interval
 from core.types.chart import NatalChart
 from core.types.transits import Lunation
 
 __all__ = ["find_lunations"]
-
-#: Sampling cadence for the coarse pre-scan -- mirrors
-#: ``core/transits/aspects.py``/``core/transits/stations.py``/
-#: ``core/transits/ingresses.py``'s own ``_GRID_STEP`` (see this module's
-#: docstring for why the value is safe to reuse unchanged here).
-_GRID_STEP = timedelta(hours=6)
-
-#: Fixed halving count for every bisection -- mirrors
-#: ``core/transits/aspects.py``/``core/transits/stations.py``/
-#: ``core/transits/ingresses.py``'s own ``_BISECTION_ITERATIONS``.
-_BISECTION_ITERATIONS = 40
-
-_ZERO_OFFSET = timedelta(0)
 
 _NEW_MOON = "new_moon"
 _FULL_MOON = "full_moon"
@@ -170,33 +156,6 @@ def find_lunations(
     return tuple(records)
 
 
-def _require_utc_interval(start: datetime, end: datetime) -> None:
-    for label, value in (("month_start_utc", start), ("month_end_utc", end)):
-        if value.tzinfo is None or value.utcoffset() != _ZERO_OFFSET:
-            raise ValueError(
-                f"{label} must be timezone-aware UTC (utcoffset() == 0); got {value!r}."
-            )
-    if start >= end:
-        raise ValueError(
-            f"month_start_utc ({start!r}) must be strictly before month_end_utc ({end!r})."
-        )
-
-
-def _build_grid(start: datetime, end: datetime) -> list[datetime]:
-    """Sample instants covering ``[start, end)`` at ``_GRID_STEP`` cadence,
-    plus ``end`` itself as a final probe point -- mirrors
-    ``core/transits/aspects.py``/``core/transits/stations.py``/
-    ``core/transits/ingresses.py``'s own ``_build_grid`` (a crossing in the
-    last partial grid step before the month closes must not be missed)."""
-    times = []
-    instant = start
-    while instant < end:
-        times.append(instant)
-        instant += _GRID_STEP
-    times.append(end)
-    return times
-
-
 def _delta_lambda_at(instant: datetime) -> Decimal:
     """(Moon longitude - Sun longitude) mod 360 degrees at ``instant``."""
     jd_ut = _julian_day_ut(instant)
@@ -224,29 +183,3 @@ def _signed_offset(delta_lambda: Decimal, target: Decimal) -> Decimal:
     (no kink) through 0 -- mirrors ``core/transits/aspects.py``'s/
     ``core/transits/ingresses.py``'s own ``_signed_offset``."""
     return _normalize_signed(delta_lambda - target)
-
-
-def _bisect(f: Callable[[datetime], Decimal], lo: datetime, hi: datetime) -> datetime:
-    """Standard bisection for a continuous, sign-changing ``f`` on
-    ``[lo, hi]`` -- mirrors ``core/transits/aspects.py``/
-    ``core/transits/stations.py``/``core/transits/ingresses.py``'s own
-    ``_bisect``. The caller guarantees ``f(lo)`` and ``f(hi)`` either are
-    zero or have opposite signs -- that guarantee is the sign-change checks
-    in ``find_lunations`` before this is ever called."""
-    f_lo = f(lo)
-    if f_lo == 0:
-        return lo
-    f_hi = f(hi)
-    if f_hi == 0:
-        return hi
-
-    for _ in range(_BISECTION_ITERATIONS):
-        mid = lo + (hi - lo) / 2
-        f_mid = f(mid)
-        if f_mid == 0:
-            return mid
-        if (f_mid > 0) == (f_lo > 0):
-            lo, f_lo = mid, f_mid
-        else:
-            hi, f_hi = mid, f_mid
-    return lo + (hi - lo) / 2

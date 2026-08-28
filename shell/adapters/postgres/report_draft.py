@@ -29,7 +29,8 @@ from sqlmodel import Field, Session, SQLModel
 from uuid6 import uuid7
 
 from core.types.generation import GeneratedDraft
-from shell.adapters.postgres.report_run import ReportRun, _UTCDateTime
+from shell.adapters.postgres.columns import _UTCDateTime
+from shell.adapters.postgres.report_run import ReportRun
 
 __all__ = ["ReportDraft", "store_report_draft"]
 

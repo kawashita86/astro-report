@@ -22,7 +22,7 @@ from typing import Any
 
 from core.types.generation import GeneratedDraft, Sentence
 from core.types.memory import ReportTheme
-from shell.adapters.gemini.generator import (
+from shell.adapters.generation.validation import (
     _DATE_TOKEN_SECTIONS,
     _SECTION_FIELD_NAMES,
     _collect_known_entry_ids,

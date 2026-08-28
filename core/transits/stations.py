@@ -16,18 +16,14 @@ Story 3.1 (``core/transits/aspects.py``) never reads that second value, so
 this module is its first real consumer. A body is retrograde exactly where
 ``speed`` (dλ/dt) is negative; a Station is the instant that sign changes.
 
-**The same coarse-grid-plus-bisection method as ``aspects.py``, mirrored
-rather than imported.** ``_GRID_STEP`` and ``_BISECTION_ITERATIONS`` below
-carry the same values and the same justification as
-``core/transits/aspects.py``'s own constants of the same name (see that
-module's Design Notes for the full argument: the fastest configured body's
-sweep rate stays well above the grid's cadence, so no direction change is
-ever hidden inside a single grid step, and a fixed halving count bounds both
-runtime and precision regardless of the input interval's width). They are
-mirrored locally, not imported, since finding a *zero* of ``speed`` itself
-(no target-angle offset, unlike ``aspects.py``'s ``_signed_offset``) is a
-simpler root than what ``aspects.py`` bisects -- the two modules' bisection
-loops share their fixed-halving *shape*, not a common target function.
+**The same coarse-grid-plus-bisection method as ``aspects.py``, shared via
+``core/transits/_month_grid.py``.** ``_GRID_STEP``, ``_BISECTION_ITERATIONS``
+and the ``_build_grid`` / ``_require_utc_interval`` / ``_bisect`` helpers are
+imported from that module -- see its docstring for why the 6-hour cadence
+never hides a direction change and why a fixed halving count bounds runtime
+and precision. Only the generic scaffolding is shared; finding a *zero* of
+``speed`` itself (no target-angle offset, unlike ``aspects.py``'s
+``_signed_offset``) stays this module's own ``speed_fn``.
 
 **Body-id lookup is reused, not redefined.** ``_TRANSIT_BODY_IDS``
 (``core/transits/aspects.py``) is imported directly -- a private
@@ -38,27 +34,16 @@ than keeping a second swisseph-constant table in sync by hand.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 from core.ephemeris.positions import _calc_body, _julian_day_ut
+from core.transits._month_grid import _bisect, _build_grid, _require_utc_interval
 from core.transits.aspects import _TRANSIT_BODY_IDS
 from core.types.computation import ComputationConfig
 from core.types.transits import StandingRetrograde, Station
 
 __all__ = ["find_stations"]
-
-#: Sampling cadence for the coarse pre-scan -- mirrors
-#: ``core/transits/aspects.py``'s own ``_GRID_STEP`` (see this module's
-#: docstring for why the value is safe to reuse unchanged here).
-_GRID_STEP = timedelta(hours=6)
-
-#: Fixed halving count for every bisection -- mirrors
-#: ``core/transits/aspects.py``'s own ``_BISECTION_ITERATIONS``.
-_BISECTION_ITERATIONS = 40
-
-_ZERO_OFFSET = timedelta(0)
 
 _RETROGRADE = "retrograde"
 _DIRECT = "direct"
@@ -168,56 +153,5 @@ def find_stations(
     return tuple(records)
 
 
-def _require_utc_interval(start: datetime, end: datetime) -> None:
-    for label, value in (("month_start_utc", start), ("month_end_utc", end)):
-        if value.tzinfo is None or value.utcoffset() != _ZERO_OFFSET:
-            raise ValueError(
-                f"{label} must be timezone-aware UTC (utcoffset() == 0); got {value!r}."
-            )
-    if start >= end:
-        raise ValueError(
-            f"month_start_utc ({start!r}) must be strictly before month_end_utc ({end!r})."
-        )
-
-
-def _build_grid(start: datetime, end: datetime) -> list[datetime]:
-    """Sample instants covering ``[start, end)`` at ``_GRID_STEP`` cadence,
-    plus ``end`` itself as a final probe point -- mirrors
-    ``core/transits/aspects.py``'s own ``_build_grid`` (a turn in the last
-    partial grid step before the month closes must not be missed)."""
-    times = []
-    instant = start
-    while instant < end:
-        times.append(instant)
-        instant += _GRID_STEP
-    times.append(end)
-    return times
-
-
 def _speed_at(body_id: int, instant: datetime) -> Decimal:
     return _calc_body(_julian_day_ut(instant), body_id)[1]
-
-
-def _bisect(f: Callable[[datetime], Decimal], lo: datetime, hi: datetime) -> datetime:
-    """Standard bisection for a continuous, sign-changing ``f`` on
-    ``[lo, hi]`` -- mirrors ``core/transits/aspects.py``'s own ``_bisect``.
-    The caller guarantees ``f(lo)`` and ``f(hi)`` either are zero or have
-    opposite signs -- that guarantee is the sign-change checks in
-    ``find_stations`` before this is ever called."""
-    f_lo = f(lo)
-    if f_lo == 0:
-        return lo
-    f_hi = f(hi)
-    if f_hi == 0:
-        return hi
-
-    for _ in range(_BISECTION_ITERATIONS):
-        mid = lo + (hi - lo) / 2
-        f_mid = f(mid)
-        if f_mid == 0:
-            return mid
-        if (f_mid > 0) == (f_lo > 0):
-            lo, f_lo = mid, f_mid
-        else:
-            hi, f_hi = mid, f_mid
-    return lo + (hi - lo) / 2

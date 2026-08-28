@@ -14,7 +14,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session
 
 from shell.adapters.postgres import client as client_module
 from shell.adapters.postgres.client import (
@@ -27,13 +27,15 @@ from shell.adapters.postgres.corpus_entry import (
     add_corpus_entry,
     list_corpus_entries,
 )
+from tests._fk import fk_enforcing_session
 
 
 @pytest.fixture
 def session() -> Session:
-    engine = create_engine("sqlite://")
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
+    # Real DB-level FK enforcement for the FR-29 corpus_entry cascade tests
+    # (epic-7-retro-item-54): client_id has no ON DELETE clause, so a wrong
+    # delete order must fail loudly rather than orphan rows.
+    with fk_enforcing_session() as session:
         yield session
 
 

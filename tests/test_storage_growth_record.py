@@ -40,12 +40,11 @@ import math
 import os
 import re
 import statistics
-import tomllib
-from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests._release_validation import REPO_ROOT, assert_record_not_stale, load_record_meta
+
 RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "storage-growth.md"
 EPICS_FILE = REPO_ROOT / "_bmad-output" / "planning-artifacts" / "epics.md"
 README = REPO_ROOT / "README.md"
@@ -100,16 +99,8 @@ _EXPECTED_KEYS = {
 #: it rather than carrying an epoch sentinel.
 _OPTIONAL_KEYS = {"policy_ratified_on"}
 
-_TOML_BLOCK = re.compile(r"^```toml\n(.*?)\n```", re.DOTALL | re.MULTILINE)
-
-
-def _extract_toml_block(text: str) -> str:
-    match = _TOML_BLOCK.search(text)
-    assert match is not None, (
-        f"{RECORD_FILE} has no ```toml fenced block -- the machine-readable "
-        "storage-growth record is missing or malformed"
-    )
-    return match.group(1)
+#: Max age of `checked` before the record is flagged stale (epic-8-retro-item-62).
+_MAX_RECORD_AGE_DAYS = 550
 
 
 def _epics_requirement_line(tag: str) -> str:
@@ -134,8 +125,7 @@ def _readme_running_cost_section() -> str:
 
 @pytest.fixture(scope="module")
 def meta() -> dict[str, object]:
-    assert RECORD_FILE.exists(), f"storage-growth record missing: {RECORD_FILE}"
-    return tomllib.loads(_extract_toml_block(RECORD_FILE.read_text(encoding="utf-8")))
+    return load_record_meta(RECORD_FILE, record_label="storage-growth")
 
 
 # --- Always-on guard tests (validate the record, never measure) ----------------
@@ -146,6 +136,12 @@ def test_record_exists() -> None:
         f"release-validation storage-growth record missing: {RECORD_FILE} -- "
         "Story 8.4 requires a dated projection of report_payload storage growth "
         "against Neon's 0.5 GB free-tier ceiling"
+    )
+
+
+def test_record_is_not_stale(meta: dict[str, object]) -> None:
+    assert_record_not_stale(
+        meta, max_age_days=_MAX_RECORD_AGE_DAYS, record_label="storage-growth"
     )
 
 

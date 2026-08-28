@@ -6,15 +6,12 @@ Pure (AD-1): no I/O, clock, network or randomness -- only ``swisseph`` (via
 (``NatalChart``, the month's UTC interval, ``ComputationConfig``).
 
 **The same coarse-grid-plus-bisection method as ``aspects.py``/``stations.py``,
-mirrored rather than imported.** ``_GRID_STEP`` and ``_BISECTION_ITERATIONS``
-below carry the same values and the same justification as those two
-modules' own constants of the same name (the fastest configured body's sweep
-rate stays well above the grid's cadence, so no cusp crossing is ever hidden
-inside a single grid step, and a fixed halving count bounds both runtime and
-precision regardless of the input interval's width). Mirrored locally, not
-imported, following the same precedent ``stations.py`` already set for these
-two constants and its own ``_require_utc_interval``/``_build_grid``/``_bisect``
-helpers.
+shared via ``core/transits/_month_grid.py``.** ``_GRID_STEP``,
+``_BISECTION_ITERATIONS`` and the ``_build_grid`` / ``_require_utc_interval``
+/ ``_bisect`` helpers are imported from that module -- see its docstring for
+why the 6-hour cadence never hides a cusp crossing and why a fixed halving
+count bounds runtime and precision. Only the generic scaffolding is shared;
+the per-cusp offset stays this module's own.
 
 **A signed offset from the cusp, wrapped to ``(-180, 180]``, mirrors
 ``aspects.py``'s own ``_normalize_signed``.** The target is always 0 (the
@@ -42,30 +39,17 @@ the same "never merged" shape ``aspects.py``'s in-orb intervals and
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 from core.ephemeris.positions import FULL_CIRCLE, HALF_CIRCLE, _calc_body, _julian_day_ut
+from core.transits._month_grid import _bisect, _build_grid, _require_utc_interval
 from core.transits.aspects import _TRANSIT_BODY_IDS
 from core.types.chart import NatalChart
 from core.types.computation import ComputationConfig
 from core.types.transits import Ingress
 
 __all__ = ["find_ingresses"]
-
-#: Sampling cadence for the coarse pre-scan -- mirrors
-#: ``core/transits/aspects.py``/``core/transits/stations.py``'s own
-#: ``_GRID_STEP`` (see this module's docstring for why the value is safe to
-#: reuse unchanged here).
-_GRID_STEP = timedelta(hours=6)
-
-#: Fixed halving count for every bisection -- mirrors
-#: ``core/transits/aspects.py``/``core/transits/stations.py``'s own
-#: ``_BISECTION_ITERATIONS``.
-_BISECTION_ITERATIONS = 40
-
-_ZERO_OFFSET = timedelta(0)
 
 _HOUSES_PER_CHART = 12
 
@@ -195,33 +179,6 @@ def _previous_house(house_number: int) -> int:
     return _HOUSES_PER_CHART if house_number == 1 else house_number - 1
 
 
-def _require_utc_interval(start: datetime, end: datetime) -> None:
-    for label, value in (("month_start_utc", start), ("month_end_utc", end)):
-        if value.tzinfo is None or value.utcoffset() != _ZERO_OFFSET:
-            raise ValueError(
-                f"{label} must be timezone-aware UTC (utcoffset() == 0); got {value!r}."
-            )
-    if start >= end:
-        raise ValueError(
-            f"month_start_utc ({start!r}) must be strictly before month_end_utc ({end!r})."
-        )
-
-
-def _build_grid(start: datetime, end: datetime) -> list[datetime]:
-    """Sample instants covering ``[start, end)`` at ``_GRID_STEP`` cadence,
-    plus ``end`` itself as a final probe point -- mirrors
-    ``core/transits/aspects.py``/``core/transits/stations.py``'s own
-    ``_build_grid`` (a crossing in the last partial grid step before the
-    month closes must not be missed)."""
-    times = []
-    instant = start
-    while instant < end:
-        times.append(instant)
-        instant += _GRID_STEP
-    times.append(end)
-    return times
-
-
 def _longitude_at(body_id: int, instant: datetime) -> Decimal:
     return _calc_body(_julian_day_ut(instant), body_id)[0]
 
@@ -243,28 +200,3 @@ def _signed_offset(longitude: Decimal, cusp_longitude: Decimal) -> Decimal:
     ``_signed_offset``, with the target fixed at 0 (the cusp's own
     longitude) rather than a configurable aspect angle."""
     return _normalize_signed(longitude - cusp_longitude)
-
-
-def _bisect(f: Callable[[datetime], Decimal], lo: datetime, hi: datetime) -> datetime:
-    """Standard bisection for a continuous, sign-changing ``f`` on
-    ``[lo, hi]`` -- mirrors ``core/transits/aspects.py``/``core/transits/stations.py``'s
-    own ``_bisect``. The caller guarantees ``f(lo)`` and ``f(hi)`` either are
-    zero or have opposite signs -- that guarantee is the sign-change checks
-    in ``find_ingresses`` before this is ever called."""
-    f_lo = f(lo)
-    if f_lo == 0:
-        return lo
-    f_hi = f(hi)
-    if f_hi == 0:
-        return hi
-
-    for _ in range(_BISECTION_ITERATIONS):
-        mid = lo + (hi - lo) / 2
-        f_mid = f(mid)
-        if f_mid == 0:
-            return mid
-        if (f_mid > 0) == (f_lo > 0):
-            lo, f_lo = mid, f_mid
-        else:
-            hi, f_hi = mid, f_mid
-    return lo + (hi - lo) / 2

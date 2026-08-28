@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -104,6 +104,78 @@ def _latest_export_record(session: Session, run_id: UUID) -> ExportRecord | None
         .where(ExportRecord.report_id == stored_report.id)
         .order_by(ExportRecord.created_at.desc(), ExportRecord.id.desc())
     ).first()
+
+
+class _PassedReportBundle(NamedTuple):
+    """Every row ``view_report`` (Story 6.1) and ``download_report_pdf``
+    (Story 6.2) both load behind a Gate-passed ``Report`` row, plus the
+    rendered draft -- see :func:`_load_passed_report_bundle`."""
+
+    report: Report
+    run: ReportRun
+    stored_draft: ReportDraft
+    stored_payload: ReportPayload
+    client: Client
+    rendered: dict[str, Any]
+
+
+def _render_stored_draft(
+    stored_draft: ReportDraft, stored_payload: ReportPayload, client: Client
+) -> dict[str, Any]:
+    """Deserialize ``stored_draft`` and render it against its frozen Payload
+    -- the two-line tail ``view_report_draft`` / ``view_report`` /
+    ``download_report_pdf`` all share verbatim (epic-6-retro-item-51)."""
+    draft = deserialize_generated_draft(stored_draft.draft)
+    return render_draft(draft, stored_payload.payload, iana_zone=client.iana_zone)
+
+
+def _load_passed_report_bundle(session: Session, run_id: UUID) -> _PassedReportBundle:
+    """The ``Report`` -> ``ReportRun`` -> ``ReportDraft`` -> ``ReportPayload``
+    -> ``Client`` + ``render_draft`` block ``view_report`` and
+    ``download_report_pdf`` load identically (epic-6-retro-item-51).
+
+    404s only on the ``Report`` row's absence -- "no such run" or "its Gate
+    hasn't passed yet", mirroring ``shell/export.py::export_report()``'s
+    boundary. Once a ``Report`` exists, any row it implies being missing is a
+    ``RuntimeError`` (a data-integrity bug, not a not-ready state), with the
+    same message shapes both routes used before.
+    """
+    stored_report = session.exec(
+        select(Report).where(Report.report_run_id == run_id)
+    ).first()
+    if stored_report is None:
+        raise HTTPException(status_code=404)
+
+    run = session.get(ReportRun, run_id)
+    if run is None:
+        raise RuntimeError(f"Report {stored_report.id} references a missing ReportRun.")
+
+    stored_draft = session.exec(
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run_id)
+        .order_by(ReportDraft.attempt.desc())
+    ).first()
+    if stored_draft is None:
+        raise RuntimeError(f"Report {stored_report.id} has no matching ReportDraft.")
+
+    stored_payload = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run_id)
+    ).first()
+    if stored_payload is None:
+        raise RuntimeError(f"Report {stored_report.id} has no matching ReportPayload.")
+
+    client = session.get(Client, stored_draft.client_id)
+    if client is None:
+        raise RuntimeError(f"Report {stored_report.id} references a missing Client.")
+
+    return _PassedReportBundle(
+        report=stored_report,
+        run=run,
+        stored_draft=stored_draft,
+        stored_payload=stored_payload,
+        client=client,
+        rendered=_render_stored_draft(stored_draft, stored_payload, client),
+    )
 
 
 def get_generator(request: Request) -> Generator:
@@ -275,8 +347,7 @@ def view_report_draft(
     if client is None:
         raise RuntimeError(f"ReportDraft {stored_draft.id} references a missing Client.")
 
-    draft = deserialize_generated_draft(stored_draft.draft)
-    rendered = render_draft(draft, stored_payload.payload, iana_zone=client.iana_zone)
+    rendered = _render_stored_draft(stored_draft, stored_payload, client)
 
     context: dict[str, Any] = {
         "draft": rendered,
@@ -332,31 +403,7 @@ def view_report(
     "how did it go out" forms once an export exists and disposition is still
     unset, or the recorded choice once it is set.
     """
-    stored_report = session.exec(select(Report).where(Report.report_run_id == run_id)).first()
-    if stored_report is None:
-        raise HTTPException(status_code=404)
-
-    run = session.get(ReportRun, run_id)
-    if run is None:
-        raise RuntimeError(f"Report {stored_report.id} references a missing ReportRun.")
-
-    stored_draft = session.exec(
-        select(ReportDraft)
-        .where(ReportDraft.report_run_id == run_id)
-        .order_by(ReportDraft.attempt.desc())
-    ).first()
-    if stored_draft is None:
-        raise RuntimeError(f"Report {stored_report.id} has no matching ReportDraft.")
-
-    stored_payload = session.exec(
-        select(ReportPayload).where(ReportPayload.report_run_id == run_id)
-    ).first()
-    if stored_payload is None:
-        raise RuntimeError(f"Report {stored_report.id} has no matching ReportPayload.")
-
-    client = session.get(Client, stored_draft.client_id)
-    if client is None:
-        raise RuntimeError(f"Report {stored_report.id} references a missing Client.")
+    bundle = _load_passed_report_bundle(session, run_id)
 
     stored_gate_result = session.exec(
         select(StoredGateResult)
@@ -365,20 +412,19 @@ def view_report(
         .order_by(StoredGateResult.regeneration_count.desc())
     ).first()
     if stored_gate_result is None:
-        raise RuntimeError(f"Report {stored_report.id} has no matching passed StoredGateResult.")
-
-    draft = deserialize_generated_draft(stored_draft.draft)
-    rendered = render_draft(draft, stored_payload.payload, iana_zone=client.iana_zone)
+        raise RuntimeError(
+            f"Report {bundle.report.id} has no matching passed StoredGateResult."
+        )
 
     return _templates.TemplateResponse(
         request,
         "report.html",
         {
-            "draft": rendered,
+            "draft": bundle.rendered,
             "section_order": SECTION_ORDER,
             "list_section_names": LIST_SECTION_NAMES,
             "run_id": run_id,
-            "run": run,
+            "run": bundle.run,
             "gate_result": stored_gate_result,
             "latest_export": _latest_export_record(session, run_id),
             "disposition_choices": DISPOSITION_CHOICES,
@@ -420,51 +466,24 @@ def download_report_pdf(
     to now, never estimated later; its ``disposition`` starts ``NULL`` and is
     set afterward, in one click, by ``record_export_disposition`` below.
     """
-    stored_report = session.exec(select(Report).where(Report.report_run_id == run_id)).first()
-    if stored_report is None:
-        raise HTTPException(status_code=404)
-
-    run = session.get(ReportRun, run_id)
-    if run is None:
-        raise RuntimeError(f"Report {stored_report.id} references a missing ReportRun.")
-
-    stored_draft = session.exec(
-        select(ReportDraft)
-        .where(ReportDraft.report_run_id == run_id)
-        .order_by(ReportDraft.attempt.desc())
-    ).first()
-    if stored_draft is None:
-        raise RuntimeError(f"Report {stored_report.id} has no matching ReportDraft.")
-
-    stored_payload = session.exec(
-        select(ReportPayload).where(ReportPayload.report_run_id == run_id)
-    ).first()
-    if stored_payload is None:
-        raise RuntimeError(f"Report {stored_report.id} has no matching ReportPayload.")
-
-    client = session.get(Client, stored_draft.client_id)
-    if client is None:
-        raise RuntimeError(f"Report {stored_report.id} references a missing Client.")
-
-    draft = deserialize_generated_draft(stored_draft.draft)
-    rendered = render_draft(draft, stored_payload.payload, iana_zone=client.iana_zone)
+    bundle = _load_passed_report_bundle(session, run_id)
 
     export_html = _templates.get_template("report_export.html").render(
         {
-            "client_name": client.name,
-            "draft": rendered,
+            "client_name": bundle.client.name,
+            "draft": bundle.rendered,
             "section_order": SECTION_ORDER,
             "list_section_names": LIST_SECTION_NAMES,
         }
     )
     pdf_bytes = html_to_pdf(export_html)
 
-    if run.stage != "exported":
-        run.stage = "exported"
-        session.add(run)
-    elapsed_seconds = int((datetime.now(UTC) - run.created_at).total_seconds())
+    if bundle.run.stage != "exported":
+        bundle.run.stage = "exported"
+        session.add(bundle.run)
+    elapsed_seconds = int((datetime.now(UTC) - bundle.run.created_at).total_seconds())
     store_export_record(
-        session, report=stored_report, format="pdf", elapsed_seconds=elapsed_seconds
+        session, report=bundle.report, format="pdf", elapsed_seconds=elapsed_seconds
     )
     session.commit()
 

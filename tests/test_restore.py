@@ -28,9 +28,7 @@ from __future__ import annotations
 
 import datetime as datetime_module
 import json
-import re
 import time
-import tomllib
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
@@ -62,10 +60,13 @@ from shell.restore import (
     load_backup,
     restore_backup,
 )
+from tests._release_validation import REPO_ROOT, assert_record_not_stale, load_record_meta
 from tests.test_runner_driver import _create_client_and_chart, _drive
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "restore-rehearsal.md"
+
+#: Max age of `checked` before the record is flagged stale (epic-8-retro-item-62).
+_MAX_RECORD_AGE_DAYS = 550
 
 AUTH_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$hQD4AS+0CkX36kCpbKWmRg$"
@@ -800,9 +801,7 @@ def test_cli_requires_the_backup_file_argument(monkeypatch: pytest.MonkeyPatch) 
 
 
 # --- Record guard: docs/release-validation/restore-rehearsal.md -------------
-# Mirrors tests/test_data_terms_record.py's shape exactly.
-
-_TOML_BLOCK = re.compile(r"^```toml\n(.*?)\n```", re.DOTALL | re.MULTILINE)
+# The ```toml``` scaffolding is shared via tests/_release_validation.py.
 
 _EXPECTED_KEYS = {
     "checked",
@@ -818,25 +817,21 @@ _EXPECTED_KEYS = {
 }
 
 
-def _extract_toml_block(text: str) -> str:
-    match = _TOML_BLOCK.search(text)
-    assert match is not None, (
-        f"{RECORD_FILE} has no ```toml fenced block -- the machine-readable "
-        "restore-rehearsal record is missing or malformed"
-    )
-    return match.group(1)
-
-
 @pytest.fixture(scope="module")
 def meta() -> dict[str, object]:
-    assert RECORD_FILE.exists(), f"restore-rehearsal record missing: {RECORD_FILE}"
-    return tomllib.loads(_extract_toml_block(RECORD_FILE.read_text(encoding="utf-8")))
+    return load_record_meta(RECORD_FILE, record_label="restore-rehearsal")
 
 
 def test_record_exists() -> None:
     assert RECORD_FILE.exists(), (
         f"release-validation restore-rehearsal record missing: {RECORD_FILE} -- "
         "Story 8.5 requires a dated, ratified record of the restore rehearsal"
+    )
+
+
+def test_record_is_not_stale(meta: dict[str, object]) -> None:
+    assert_record_not_stale(
+        meta, max_age_days=_MAX_RECORD_AGE_DAYS, record_label="restore-rehearsal"
     )
 
 

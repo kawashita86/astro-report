@@ -39,7 +39,7 @@ from sqlalchemy import Column, Text
 from sqlmodel import Field, Session, SQLModel, select
 from uuid6 import uuid7
 
-from shell.adapters.postgres.report_run import _UTCDateTime
+from shell.adapters.postgres.columns import _UTCDateTime
 
 __all__ = ["CorpusEntry", "add_corpus_entry", "list_corpus_entries"]
 

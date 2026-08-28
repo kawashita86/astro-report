@@ -25,7 +25,8 @@ from sqlmodel import Field, Session, SQLModel, select
 from uuid6 import uuid7
 
 from core.types.memory import ReportTheme
-from shell.adapters.postgres.report_run import ReportRun, _UTCDateTime
+from shell.adapters.postgres.columns import _UTCDateTime
+from shell.adapters.postgres.report_run import ReportRun
 
 __all__ = ["StoredReportTheme", "most_recent_prior_report_theme", "store_report_theme"]
 

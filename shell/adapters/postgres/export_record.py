@@ -36,8 +36,8 @@ from sqlalchemy.orm import Mapper
 from sqlmodel import Field, Session, SQLModel, select, update
 from uuid6 import uuid7
 
+from shell.adapters.postgres.columns import _UTCDateTime
 from shell.adapters.postgres.report import Report
-from shell.adapters.postgres.report_run import _UTCDateTime
 
 __all__ = ["ExportRecord", "record_send_disposition", "store_export_record"]
 

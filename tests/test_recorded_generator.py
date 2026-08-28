@@ -214,8 +214,42 @@ def test_an_absent_day_list_key_is_treated_like_an_empty_one() -> None:
 
 
 def test_never_imports_google_genai() -> None:
-    """Boundaries & Constraints: never imports ``google.genai``."""
+    """Boundaries & Constraints: never imports ``google.genai`` (epic-4-retro-item-24).
+
+    Asserts the *direct* import lines of the two files that matter:
+    ``shell/adapters/local/generator.py`` names nothing under
+    ``shell.adapters.gemini`` (whose import executes ``from google import
+    genai``), and ``shell/adapters/generation/validation.py`` -- the
+    provider-neutral module ``local.generator`` now depends on -- names no
+    ``google`` root. Deeper transitive purity of ``core.*`` is enforced
+    separately by ``tests/test_import_boundary.py``."""
+    import ast
+    from pathlib import Path
+
     import shell.adapters.local.generator as module
 
     assert "genai" not in vars(module)
     assert not hasattr(module, "genai")
+
+    repo_root = Path(__file__).resolve().parent.parent
+
+    def _imported_module_names(relative_path: str) -> list[str]:
+        tree = ast.parse((repo_root / relative_path).read_text(encoding="utf-8"))
+        names: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names.append(node.module)
+        return names
+
+    local_imports = _imported_module_names("shell/adapters/local/generator.py")
+    assert not any(
+        name == "shell.adapters.gemini" or name.startswith("shell.adapters.gemini.")
+        for name in local_imports
+    ), f"local.generator still reaches into the Gemini adapter: {local_imports}"
+
+    validation_imports = _imported_module_names("shell/adapters/generation/validation.py")
+    assert not any(
+        name == "google" or name.startswith("google.") for name in validation_imports
+    ), f"generation/validation.py imports a google root: {validation_imports}"

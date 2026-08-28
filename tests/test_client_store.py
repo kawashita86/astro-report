@@ -11,8 +11,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
-from sqlalchemy import event
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, select
 
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
@@ -28,6 +27,7 @@ from shell.adapters.postgres.client import (
 )
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
+from tests._fk import fk_enforcing_session
 
 _EPHEMERIS_IDENTITY = verify_ephemeris_identity()
 _COMPUTATION_CONFIG = load_computation_config()
@@ -47,9 +47,10 @@ _BIRTH_INSTANT_UTC = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
 
 @pytest.fixture
 def session() -> Session:
-    engine = create_engine("sqlite://")
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
+    # Foreign keys enforced for every test in this module (epic-6-retro-item-52):
+    # a wrong `delete_client_and_derived` order fails loudly instead of silently
+    # leaving orphaned rows -- what SQLite does by default, unlike Postgres.
+    with fk_enforcing_session() as session:
         yield session
 
 
@@ -371,48 +372,40 @@ def test_every_table_with_a_client_id_foreign_key_is_covered_by_the_cascade_cons
 # --- Story 6.4 regression: ReportRun.natal_chart_id must not break deletion --------
 
 
-def test_delete_client_and_derived_succeeds_with_a_report_run_referencing_a_natal_chart() -> None:
+def test_delete_client_and_derived_succeeds_with_a_report_run_referencing_a_natal_chart(
+    session: Session,
+) -> None:
     """``ReportRun.natal_chart_id`` (Story 6.4) is a foreign key *to*
     ``natal_chart.id`` -- the opposite direction from every other table in
-    this cascade. The module's shared ``session`` fixture's SQLite engine
-    does not enforce foreign keys by default (unlike Postgres, this
-    codebase's real target), which is exactly why the first implementation
-    pass's wrong deletion order -- every ``StoredNatalChart`` deleted before
-    every ``ReportRun`` -- passed every other test in this suite while
-    silently breaking Client deletion in production for any Client with
-    report history (this story's Spec Change Log). This test builds its own
-    engine with a ``PRAGMA foreign_keys=ON`` "connect" listener, registered
-    before the engine's first connection, so real enforcement is on from the
-    start -- mechanically catching that class of ordering bug going forward.
+    this cascade, which is exactly why the first implementation pass's wrong
+    deletion order -- every ``StoredNatalChart`` deleted before every
+    ``ReportRun`` -- passed every other test in this suite while silently
+    breaking Client deletion in production for any Client with report history
+    (this story's Spec Change Log).
+
+    The module's shared ``session`` fixture now enforces foreign keys
+    (``PRAGMA foreign_keys=ON`` via ``tests/_fk.py``, epic-6-retro-item-52),
+    so real enforcement is on for this and every other cascade test --
+    mechanically catching that class of ordering bug going forward.
     """
-    engine = create_engine("sqlite://")
+    client = _create(session)
+    session.commit()
 
-    @event.listens_for(engine, "connect")
-    def _enable_foreign_keys(dbapi_connection: object, connection_record: object) -> None:
-        del connection_record
-        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+    chart = session.exec(
+        select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
+    ).one()
+    run = ReportRun(client_id=client.id, month="2026-01", natal_chart_id=chart.id)
+    session.add(run)
+    session.commit()
 
-    SQLModel.metadata.create_all(engine)
+    delete_client_and_derived(session, client=client)
+    session.commit()
 
-    with Session(engine) as session:
-        client = _create(session)
-        session.commit()
-
-        chart = session.exec(
+    assert session.get(Client, client.id) is None
+    assert session.get(ReportRun, run.id) is None
+    assert (
+        session.exec(
             select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
-        ).one()
-        run = ReportRun(client_id=client.id, month="2026-01", natal_chart_id=chart.id)
-        session.add(run)
-        session.commit()
-
-        delete_client_and_derived(session, client=client)
-        session.commit()
-
-        assert session.get(Client, client.id) is None
-        assert session.get(ReportRun, run.id) is None
-        assert (
-            session.exec(
-                select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
-            ).first()
-            is None
-        )
+        ).first()
+        is None
+    )

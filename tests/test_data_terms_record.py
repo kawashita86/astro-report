@@ -13,13 +13,15 @@ from __future__ import annotations
 
 import datetime
 import re
-import tomllib
-from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests._release_validation import REPO_ROOT, assert_record_not_stale, load_record_meta
+
 RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "gemini-data-terms.md"
+
+#: Max age of `checked` before the record is flagged stale (epic-8-retro-item-62).
+_MAX_RECORD_AGE_DAYS = 550
 RENDER_YAML = REPO_ROOT / "render.yaml"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 COMPOSE_FILE = REPO_ROOT / "compose.yaml"
@@ -49,22 +51,12 @@ _EXPECTED_KEYS = {
     "outcome",
 }
 
-_TOML_BLOCK = re.compile(r"^```toml\n(.*?)\n```", re.DOTALL | re.MULTILINE)
 _VERIFIED_AT = re.compile(
     r'^\s*GEMINI_DATA_TERMS_VERIFIED_AT\s*[:=]\s*"?(\d{4}-\d{2}-\d{2})"?',
     re.MULTILINE,
 )
 _RENDER_REGION = re.compile(r"^\s*region:\s*(\S+)", re.MULTILINE)
 _MODEL_LITERAL = re.compile(r'^_MODEL\s*=\s*"([^"]+)"', re.MULTILINE)
-
-
-def _extract_toml_block(text: str) -> str:
-    match = _TOML_BLOCK.search(text)
-    assert match is not None, (
-        f"{RECORD_FILE} has no ```toml fenced block -- the machine-readable "
-        "data-terms record is missing or malformed"
-    )
-    return match.group(1)
 
 
 def _readme_deployment_section() -> str:
@@ -76,8 +68,7 @@ def _readme_deployment_section() -> str:
 
 @pytest.fixture(scope="module")
 def meta() -> dict[str, object]:
-    assert RECORD_FILE.exists(), f"data-terms record missing: {RECORD_FILE}"
-    return tomllib.loads(_extract_toml_block(RECORD_FILE.read_text(encoding="utf-8")))
+    return load_record_meta(RECORD_FILE, record_label="data-terms")
 
 
 def test_record_exists() -> None:
@@ -102,6 +93,10 @@ def test_checked_is_a_date(meta: dict[str, object]) -> None:
         f"`checked` must be a bare ISO date (parses to datetime.date), got "
         f"{meta['checked']!r}"
     )
+
+
+def test_record_is_not_stale(meta: dict[str, object]) -> None:
+    assert_record_not_stale(meta, max_age_days=_MAX_RECORD_AGE_DAYS, record_label="data-terms")
 
 
 def test_checked_date_is_sane(meta: dict[str, object]) -> None:

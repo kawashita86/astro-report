@@ -22,7 +22,6 @@ with ``version="edit"``.
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -37,6 +36,7 @@ from shell.adapters.postgres.style_guide import (
     current_style_guide,
 )
 from shell.http.app import get_session
+from shell.http.form import FormNotUtf8, FormTooLarge, parse_form
 
 __all__ = ["router"]
 
@@ -51,37 +51,6 @@ _templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 #: shell/http/routes/clients.py's own _MAX_CLIENT_FORM_BODY_BYTES (65536),
 #: while still rejecting a garbage-sized body before reading it.
 _MAX_STYLE_GUIDE_FORM_BODY_BYTES = 1_048_576
-
-
-class _FormTooLarge(Exception):
-    """The declared or actual body size exceeds ``_MAX_STYLE_GUIDE_FORM_BODY_BYTES``."""
-
-
-class _FormNotUtf8(Exception):
-    """The body could not be decoded as UTF-8."""
-
-
-async def _parse_form(request: Request) -> dict[str, str]:
-    """Hand-parsed, urlencoded body -- mirrors ``shell/http/routes/clients.py``'s
-    ``_parse_form``, which reads the raw body rather than pulling in
-    ``python-multipart`` for FastAPI's ``Form()``.
-    """
-    declared_length = request.headers.get("content-length")
-    try:
-        body_too_large = (
-            declared_length is None or int(declared_length) > _MAX_STYLE_GUIDE_FORM_BODY_BYTES
-        )
-    except ValueError:
-        body_too_large = True
-    if body_too_large:
-        raise _FormTooLarge
-
-    raw_body = await request.body()
-    try:
-        body = raw_body.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise _FormNotUtf8 from error
-    return dict(parse_qsl(body))
 
 
 def _history(session: Session, *, exclude_version: int) -> list[StyleGuide]:
@@ -151,15 +120,15 @@ async def save_style_guide(
 ) -> Response:
     """Save a new Style Guide version -- always an insert, never an update."""
     try:
-        fields = await _parse_form(request)
-    except _FormTooLarge:
+        fields = await parse_form(request, max_bytes=_MAX_STYLE_GUIDE_FORM_BODY_BYTES)
+    except FormTooLarge:
         return _templates.TemplateResponse(
             request,
             "style_guide_edit.html",
             {"content": "", "error": "the submitted form is too large."},
             status_code=422,
         )
-    except _FormNotUtf8:
+    except FormNotUtf8:
         return _templates.TemplateResponse(
             request,
             "style_guide_edit.html",

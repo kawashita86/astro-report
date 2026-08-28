@@ -25,7 +25,9 @@ from core.types.gate import GateResult, GateViolation
 from core.types.generation import GeneratedDraft, Sentence
 from core.types.payload import Payload, SectionPayload
 from core.types.transits import Ingress, Lunation, Station, TransitAspectEvent
-from shell.adapters.gemini.generator import _DATE_TOKEN_PATTERN as _GENERATOR_DATE_TOKEN_PATTERN
+from shell.adapters.generation.validation import (
+    _DATE_TOKEN_PATTERN as _GENERATOR_DATE_TOKEN_PATTERN,
+)
 from shell.computation import load_computation_config
 from shell.gate import DEFAULT_VOCABULARY_PATH, load_gate_vocabulary
 from shell.sections import load_sections_config
@@ -766,8 +768,8 @@ def test_index_entries_finds_an_id_that_recurs_under_two_sections() -> None:
 
 def test_gate_date_token_pattern_matches_the_generators_hand_duplicated_copy() -> None:
     """AD-1 forbids ``core/`` importing ``shell/``, so
-    ``shell/adapters/gemini/generator.py``'s ``_DATE_TOKEN_PATTERN`` is
-    hand-duplicated here rather than imported; this catches silent drift
-    between the two copies (code-review finding #9)."""
+    ``shell/adapters/generation/validation.py``'s ``_DATE_TOKEN_PATTERN`` is
+    hand-duplicated in ``core/gate/run.py`` rather than imported; this catches
+    silent drift between the two copies (code-review finding #9)."""
     assert _GATE_DATE_TOKEN_PATTERN.pattern == _GENERATOR_DATE_TOKEN_PATTERN.pattern
     assert _GATE_DATE_TOKEN_PATTERN.flags == _GENERATOR_DATE_TOKEN_PATTERN.flags
