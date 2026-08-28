@@ -144,9 +144,15 @@ def create_app(settings: Settings) -> FastAPI:
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
-    @application.get("/healthz", include_in_schema=False)
+    @application.api_route(
+        "/healthz", methods=["GET", "HEAD"], include_in_schema=False
+    )
     def healthz() -> Response:
-        """Liveness only: the process is up and serving. No data, ever."""
+        """Liveness only: the process is up and serving. No data, ever.
+
+        Answers ``HEAD`` as well as ``GET``: some health checkers and uptime
+        monitors probe with ``HEAD``, and a ``GET``-only route would 405 them
+        rather than report the process up."""
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @application.get("/login", include_in_schema=False)

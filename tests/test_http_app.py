@@ -187,6 +187,15 @@ def test_healthz_needs_no_credentials(client: TestClient) -> None:
     assert response.status_code == 204
 
 
+def test_healthz_answers_a_head_probe(client: TestClient) -> None:
+    """Some health checkers and uptime monitors probe with `HEAD`; a
+    `GET`-only route would 405 them instead of reporting the process up."""
+    response = client.head("/healthz", headers={})
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
 def test_healthz_with_a_trailing_slash_is_not_rejected_by_auth(client: TestClient) -> None:
     """A health checker (Render's included) or a hand-typed probe that hits
     `/healthz/` must not get the middleware's empty-body 401: the allowlist
