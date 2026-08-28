@@ -2,6 +2,14 @@
 
 <!-- Compiled from planning artifacts. Edit freely. Regenerate with compile-epic-context if planning docs change. -->
 
+> **Post-epic amendment (2026-08-28, retro item 47).** Epic 6 shipped PDF export
+> only; Markdown export was deferred at planning time (`deferred-work.md:525`). The
+> "Both PDF and Markdown" requirement below is **kept, not descoped** — it is
+> tracked as a follow-up story with its own spec:
+> `_bmad-output/implementation-artifacts/spec-6-2b-markdown-export.md`. Read every
+> "PDF and Markdown" / "both formats" phrasing below as: PDF in epic 6, Markdown in
+> the spec-6-2b follow-up.
+
 ## Goal
 
 This epic is Francesco's remaining involvement with a Report once it exists: read it next to the facts that produced it, export a clean client-facing file, record how it went out, and browse what was produced before. It is also where the durability guarantee becomes something Francesco actually holds, rather than something that depends on a hosting provider's restore window. Together these close the loop that has to survive being repeated forty times in one afternoon — every interaction in this epic is budgeted against that repetition, not against a single careful use.
