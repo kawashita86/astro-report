@@ -32,11 +32,17 @@ Every environment variable is read in exactly one place, `shell/config.py`, and
 validated into a frozen settings object at startup. No other module reads
 `os.environ` — `tests/test_env_access_is_centralized.py` fails if one starts to.
 
+All seven are required; none has a default.
+
 | Variable | Required | Accepted values |
 | --- | --- | --- |
 | `ENVIRONMENT` | yes | `local`, `production` — there is no staging |
-| `DATABASE_URL` | yes | a Postgres URL (`postgres`, `postgresql` or `postgresql+psycopg` scheme) |
+| `DATABASE_URL` | yes | a Postgres URL (`postgres`, `postgresql` or `postgresql+psycopg` scheme) with a host |
 | `PORT` | yes | 1–65535; hosting platforms supply this themselves |
+| `AUTH_PASSWORD_HASH` | yes | Argon2 hash of the single sign-in password — never the plaintext |
+| `SESSION_SECRET_KEY` | yes | random string, at least 32 characters; signs the session cookie |
+| `GEMINI_API_KEY` | yes | Gemini API key for the Generator adapter; never sent under `ENVIRONMENT=local` |
+| `GEMINI_DATA_TERMS_VERIFIED_AT` | yes | ISO date (`YYYY-MM-DD`), not in the future — when the Gemini data terms were verified (NFR-17) |
 
 Nothing is defaulted. A missing or invalid variable aborts startup with a
 non-zero exit and a message naming the offender and why it was rejected; the
