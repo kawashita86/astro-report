@@ -7,7 +7,7 @@ paradigm: 'functional core, imperative shell'
 scope: 'astro-report v1 — the whole system: a single-operator hosted web app that computes natal charts and monthly transits, and generates grounded eight-section Italian reports'
 status: final
 created: '2026-08-14'
-updated: '2026-08-14'
+updated: '2026-08-28'
 binds:
   - '4.1 Client Record and Natal Chart (FR-1–FR-5, FR-28, FR-29)'
   - '4.2 Domain Profiles (FR-6, FR-7)'
@@ -22,6 +22,7 @@ sources:
   - '_bmad-output/planning-artifacts/briefs/brief-astro-report-2026-08-14/brief.md'
   - '_bmad-output/planning-artifacts/briefs/brief-astro-report-2026-08-14/addendum.md'
   - 'product_research.md'
+  - '_bmad-output/planning-artifacts/ux-designs/ux-astro-report-2026-08-28/EXPERIENCE.md  # drove AD-20 (2026-08-28 update)'
 companions:
   - 'BUILD-ORDER.md'
 ---
@@ -189,7 +190,9 @@ No arrow runs from `core` to `shell`. There is no exception.
 - **Rule:** a `ReportRun` row advances forward only, through `natal_ready → transits_ready →
   payload_ready → draft_ready → gate_passed → exported`. Each stage persists its output before the
   next begins — including the cited draft structure, which SM-7's hand sampling needs. Re-driving a
-  run resumes at the first incomplete stage. Every stage function is idempotent on its input.
+  run resumes at the first incomplete stage; **AD-20 fixes what invokes that advance and when — the
+  poll request, one stage at a time, never a background job.** Every stage function is idempotent on
+  its input.
   **Regeneration under FR-21 replaces the whole Report, never a single failing Section**, so a
   regeneration count means one thing and Sections cannot come from different drafts. Reaching
   `exported` happens once; each subsequent export writes an `EXPORT_RECORD` row rather than moving the
@@ -302,6 +305,31 @@ No arrow runs from `core` to `shell`. There is no exception.
   retained. The repository file is the seed for version 1 only. Every Report records the Style Guide
   version that produced it. Generation refuses to run when no Style Guide version exists.
 
+### AD-20 — A report run advances one stage per poll request, never on a background job
+
+- **Binds:** FR-8–FR-22, FR-25, NFR throughput and latency, UJ-1
+- **Prevents:** a read of the run view blocking until the whole run finishes — which refreezes the
+  operator's screen and reintroduces the "a stall loses the request" failure AD-10 was written
+  against; the start request blocking synchronously on generation; a later builder adding a queue, a
+  worker process or a cron to "speed up" runs, which spends the €0 / no-infra budget the persistence
+  and backup decisions (AD-11, AD-17) were bought with; and two compliant units disagreeing on *what*
+  moves a run between stages and *how* an abandoned run resumes.
+- **Rule:** the runner exposes a single **advance** function that performs **at most one** stage
+  transition (AD-10) and returns. It is invoked only from the run's poll handler (`GET` on
+  `report-runs/<run_id>`) — never from a thread, an async task, a queue consumer or a scheduled job;
+  introducing any of those is a spine amendment. The start handler (`POST` on
+  `clients/<client_id>/report-runs`) creates the `ReportRun` row and returns immediately without
+  advancing it; the first stage runs on the first poll. No HTTP response waits on
+  run completion — a single stage's own duration, including its one external call and AD-9 backoff,
+  may extend that one request, but the response never chains into a second stage. Concurrent polls are
+  made single-flight by a Postgres transaction-scoped advisory lock on the run id: a caller that
+  cannot take the lock returns the current stage without advancing, and the lock releases on commit,
+  rollback or a dropped connection. The advance is idempotent and re-entrant on its persisted input;
+  `stage_failure_count` / `regeneration_count` and their bounds (AD-10) are unchanged. A run whose tab
+  is closed pauses at its last checkpoint and resumes on the next poll of that run — there is no
+  scheduled or self-issued request that advances a run, so forward progress is bounded by genuine
+  operator polling.
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -315,7 +343,8 @@ No arrow runs from `core` to `shell`. There is no exception.
 | Data — the Payload | Canonical JSON: sorted keys, no insignificant whitespace, `Decimal` serialized as a fixed-precision string. Byte-identity is asserted by test, not assumed. |
 | Data — schema versions | The Report Payload, the Section composition file (AD-13) and the Gate vocabulary (AD-8) each carry an independent integer version, recorded on every Report. |
 | Errors | Core functions raise typed domain errors from a single `core/errors.py` and never return `None` to mean failure. The shell maps them to HTTP responses; no core module imports an HTTP status code. |
-| State mutation | Core values are frozen dataclasses; nothing in `core/` mutates its input. All writes happen in `shell/adapters/postgres/`, and only the runner advances a `ReportRun` stage. |
+| State mutation | Core values are frozen dataclasses; nothing in `core/` mutates its input. All writes happen in `shell/adapters/postgres/`, and only the runner's single-stage advance function moves a `ReportRun` stage (AD-20). |
+| Templates & assets | Every server-rendered page extends one base template; HTMX and the design-token stylesheet are vendored in the repo and loaded once from that layout. No per-page CDN `<script>` or `<link>`, and no page ships its own `<html>`/`<head>` skeleton. Visual identity and behaviour are governed by the paired `EXPERIENCE.md` / `DESIGN.md`. |
 | Configuration | Environment variables read in exactly one place, `shell/config.py`, validated into a frozen settings object at startup. No module reads `os.environ` directly. Startup fails loudly on a missing or invalid setting. |
 | Logging | Structured, and never carrying Client birth data, names or Report prose — an identifier only. Every log line for a report run carries its `ReportRun` id. |
 | Auth | One principal (AD-15). Every route is authenticated by default; the small allowlist of unauthenticated routes is declared in one place and covered by a test asserting no other route is reachable anonymously. |
@@ -445,7 +474,7 @@ astro-report/
 | 4.6 Groundedness Gate (FR-20–FR-22) | `core/gate/` | AD-5, AD-6, AD-7, AD-8 |
 | 4.7 Corpus Collection (FR-23, FR-24) | `shell/http/`, `shell/adapters/postgres/` | AD-11 |
 | 4.8 Review, Export, Report History (FR-25–FR-27) | `shell/http/`, `shell/adapters/weasyprint` | AD-7, AD-17 |
-| Report production as a whole | `shell/runner/` | AD-10, AD-9 |
+| Report production as a whole | `shell/runner/` | AD-10, AD-9, AD-20 |
 | Astronomical conformance (SM-3) | `tests/conformance/` | AD-2, AD-18 |
 
 ## Deferred
@@ -468,8 +497,9 @@ astro-report/
   availability as best-effort with no SLA, and SM-5 and SM-7 are answered by querying stored
   `GateResult` rows rather than by an observability stack. Revisit if a Gate regression is ever
   discovered by a client rather than by the stored results.
-- **Horizontal scale, multi-region, and a queue broker.** AD-10's checkpointed rows carry a single
-  operator's batch comfortably. Revisit only if the PRD's 200-reports-per-month ceiling moves.
+- **Horizontal scale, multi-region, a worker process and a queue broker.** AD-10's checkpointed rows
+  and AD-20's poll-driven advance carry a single operator's batch without any of them. Revisit only if
+  the PRD's 200-reports-per-month ceiling moves.
 - **Storage growth policy.** Report Payloads are retained permanently and grow monotonically against
   Neon's free 0.5 GB ceiling. Not a v1 decision — but measure Payload size on the first real month and
   revisit before it reaches half the ceiling.

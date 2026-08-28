@@ -140,18 +140,23 @@ function. Names stay Italian and lowercase throughout.
 
 ## E5 · Runner and checkpointed runs
 
-**Realizes:** the mechanism behind FR-19, FR-21 · **Governed by:** AD-10, AD-9, AD-11
+**Realizes:** the mechanism behind FR-19, FR-21 · **Governed by:** AD-10, AD-20, AD-9, AD-11
 
 Introduced once two real stages exist, so everything after it slots into a frame rather than being
 retrofitted into one.
 
 - The `ReportRun` row, the forward-only stage sequence, per-stage persistence, resume-at-first-
   incomplete, idempotent stage functions.
+- The **advance function**: one stage transition per call, taking a transaction-scoped Postgres
+  advisory lock on the run id for single-flight (AD-20). Invoked only from the poll handler
+  `GET /report-runs/{id}`; the start `POST` creates the row and returns without advancing. No response
+  waits on run completion, and no thread, task, queue or cron ever advances a run.
 - Bounded backoff sized for Gemini's 10 RPM ceiling; **no provider failover** (AD-9).
 - The HTMX polling view over run status.
 
 **Done when:** killing the process mid-run and re-driving resumes at the last good stage and recomputes
-nothing that already succeeded.
+nothing that already succeeded; the start `POST` returns before any stage runs; two overlapping polls
+advance the run exactly once.
 
 ---
 

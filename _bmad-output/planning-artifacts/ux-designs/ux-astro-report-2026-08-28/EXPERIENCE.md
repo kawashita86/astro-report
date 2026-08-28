@@ -46,12 +46,16 @@ updated: 2026-08-28
 - **The rebuild.** Sixteen standalone unstyled templates become one shell with a
   shared layout, a design-token stylesheet, a persistent sidebar, and the state
   and feedback primitives specified below. Route contracts are unchanged with
-  one exception the operator approved: **report-run driving becomes
-  non-blocking** — the server advances the `ReportRun` out-of-band and the stage
-  view polls only to *read* progress (today it drives the whole pipeline inside
-  the POST and re-drives on every poll). The stage machine itself
-  (`natal_ready → transits_ready → payload_ready → draft_ready → gate_passed →
-  exported`) is unchanged; only when and where it runs changes.
+  one exception the operator approved and the architecture spine now fixes
+  (ARCHITECTURE-SPINE.md **AD-20**): **starting a run no longer blocks** — the
+  start `POST` creates the run and returns immediately, and each poll `GET`
+  advances **at most one** stage then returns (today the start `POST` drives the
+  whole pipeline inline and every poll re-drives it). One stage per poll can
+  itself be slow — the `draft_ready` poll holds its connection for the Gemini
+  call — but the response never chains stages and the start never waits. No
+  background worker, queue or cron: the operator's polling is the drain. The
+  stage machine itself (`natal_ready → transits_ready → payload_ready →
+  draft_ready → gate_passed → exported`) is unchanged.
 - **Non-goals.** No offline / PWA. No multi-user anything — no account menu, no
   roles, no sharing (AD-15). No mobile-first layout. No i18n framework and no
   language switch: the UI is Italian, full stop. English appears only in code,
@@ -246,9 +250,13 @@ Visual specs are in `DESIGN.md` → Components. This section is behavior only.
 - **Stage track** — see *Report Run Lifecycle*. Polls via HTMX `hx-trigger` with
   a **fixed 2s cadence while `hx-trigger` is visible**, pausing when the tab is
   hidden (`htmx:visibilityChange` / `whenVisible`) and stopping on any terminal
-  stage. The poll **only reads** the persisted stage — the server advances the
-  run out-of-band (operator-approved change; a `shell/runner` concern to flag to
-  architecture). A poll must never trigger computation.
+  stage. Each poll `GET` advances the run **by at most one stage** and returns
+  its new state (ARCHITECTURE-SPINE.md AD-20); it never loops through stages and
+  never blocks the start `POST`. One poll — the `draft_ready` one — may hold its
+  connection for the Gemini call; the stage track just keeps showing *Verifica di
+  fondatezza* / the prior label until it returns. Overlapping polls are
+  single-flighted server-side, so a poll that lands mid-advance simply returns
+  the current stage.
 - **Disclosure (Payload sections, Corpus entries, Style Guide history rows)** —
   collapsed by default beyond the first; `<details>`/`<summary>` semantics so it
   works without JS; state not persisted across loads. Corpus entry text is
@@ -404,13 +412,19 @@ load-bearing states): [`mockups/key-run-stage.html`](mockups/key-run-stage.html)
 
 ### Rules
 
-- **Non-blocking.** Starting a run returns immediately to the run's stage view.
-  The pipeline advances server-side; the operator may navigate away, start another
-  Client's run, or close the tab. This is the operator-approved driving change —
-  the server advances the run out-of-band, not inside the POST or the poll GET.
-  A `shell/runner` concern to carry into the architecture update.
-- **Resumable.** Re-opening a run view shows its true current stage. Re-driving a
-  run resumes at the first incomplete stage (AD-10); the UI never implies lost
+- **Non-blocking start; poll-driven advance** (ARCHITECTURE-SPINE.md AD-20). The
+  start `POST` creates the run and returns immediately to the stage view without
+  running a stage. From then on, each poll `GET` advances the run by **at most
+  one** stage and returns — the operator's own polling is what moves the run
+  forward. No background worker, queue or cron. The operator may navigate away or
+  start another Client's run; a run whose tab is **closed** pauses at its last
+  checkpoint and resumes on the next time that run's view is opened and polled.
+- **One slow poll, by design.** The `draft_ready` advance makes the Gemini call
+  inside its poll `GET`, so that one request can take 10–40s (plus AD-9 backoff).
+  The stage track keeps showing the in-progress label until it returns. Every
+  other poll is fast. This is the accepted cost of carrying no run infrastructure.
+- **Resumable.** Re-opening a run view shows its true current stage; the next poll
+  resumes at the first incomplete stage (AD-10, AD-20). The UI never implies lost
   work.
 - **Regeneration replaces the whole Report** (AD-10), never one Section. The
   *Rigenera* action says so: *"La rigenerazione sostituisce l'intero report e
@@ -551,7 +565,7 @@ elevation. Borrow the *rhythm and discipline*; not the hue (cooler, graver here 
 |---|---|---|
 | Sixteen standalone HTML pages, no shared layout, no nav | The operator has no map and no way between areas | One shell, persistent sidebar, breadcrumb + contextual tabs |
 | No `/` route — landing nowhere | First impression is a 404 | Home dashboard: recent runs, backup status, quick actions |
-| `ReportRun` driven synchronously inside the POST and re-driven on every 2s poll | Blocks the request; a slow Generator freezes the screen; wasteful | Non-blocking start, server advances out-of-band, poll only reads stage |
+| `ReportRun` driven synchronously inside the POST and re-driven (whole pipeline) on every 2s poll | Start blocks for seconds; every poll re-runs the loop; a slow Generator freezes the screen | Start `POST` returns without driving; each poll advances **one** stage then returns; single-flighted; no worker/queue/cron (ARCHITECTURE-SPINE.md AD-20) |
 | Gate failure as raw text + `<ul>` on the draft page | The most consequential result is the least designed | First-class `danger` panel, one card per violation, linked to its Section, *Regenerate* primary |
 | Report Payload as an untyped recursive `<dl>`/`<ul>` dump | Unreadable; IDs indistinguishable from prose | Disclosure per Section, entry IDs as mono chips, click-to-copy |
 | Corpus list inlines a full `<pre>` of every past report | The index becomes unscannable at any real corpus size | Composition counts + rows with 6-line clamp + Expand |

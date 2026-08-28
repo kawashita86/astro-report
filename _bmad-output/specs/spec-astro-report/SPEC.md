@@ -11,6 +11,8 @@ companions:
   - _bmad-output/planning-artifacts/prds/prd-astro-report-2026-08-14/prd.md
   - _bmad-output/planning-artifacts/architecture/architecture-astro-report-2026-08-14/ARCHITECTURE-SPINE.md
   - _bmad-output/planning-artifacts/architecture/architecture-astro-report-2026-08-14/BUILD-ORDER.md
+  - _bmad-output/planning-artifacts/ux-designs/ux-astro-report-2026-08-28/EXPERIENCE.md
+  - _bmad-output/planning-artifacts/ux-designs/ux-astro-report-2026-08-28/DESIGN.md
 sources:
   - _bmad-output/planning-artifacts/briefs/brief-astro-report-2026-08-14/brief.md
   - _bmad-output/planning-artifacts/briefs/brief-astro-report-2026-08-14/addendum.md
@@ -144,6 +146,10 @@ A pain to solve, and with it a ceiling to remove. Francesco is a working astrolo
   - **intent:** The astronomy is checked against the benchmark Francesco's professional judgement is calibrated to, systematically rather than by eye.
   - **success:** A fixture set of transcribed Astro.com reference charts runs on every change, covering positions, cusps, Aspects, Stations, Ingresses and Lunations, and chosen adversarially — a leap-day birth, births either side of a historical DST switch, a near-midnight birth, a month with a retrograde station, a month with two lunations of one kind and one with none.
 
+- **CAP-30** — Watch a report run progress
+  - **intent:** Francesco can start a report run and watch it move through its stages, and can leave the view or close the tab and come back without the run being lost or restarted.
+  - **success:** Starting a run returns to the run view immediately without waiting for any stage; the view shows the run's current stage and reflects each advance as it happens; a run left or closed mid-flight resumes from its last completed stage when the view is reopened; a terminally failed run shows which stage failed and why — distinct from a Gate failure, which routes to the review surface of CAP-20. Mechanism in `ARCHITECTURE-SPINE.md` AD-10/AD-20 and `EXPERIENCE.md` (*Report Run Lifecycle*).
+
 ## Constraints
 
 - The Generator narrates and never computes: it receives the Report Payload, the Style Guide version and the two ReportThemes, and nothing else — no tools, no database handle, no prior Report prose.
@@ -151,7 +157,8 @@ A pain to solve, and with it a ceiling to remove. Francesco is a working astrolo
 - Claim-level determinism is the bar, not byte-identical prose. Wording may vary between runs; Claims may never vary, exceed the Payload, or contradict each other.
 - Identical Client birth data, month and ComputationConfig produce a byte-identical Report Payload, on every run and every deployment.
 - Reports ship unedited under Francesco's professional name. Every guardrail must hold without a human catching the failure.
-- Output language is Italian under every configuration.
+- Everything the operator sees is Italian: report content under every configuration (CAP-15), and the entire operator UI — navigation, labels, helper text, errors, empty states, toasts, stage labels, and the native date/time pickers (`lang="it"`; dates `dd/MM/yyyy`, times `HH:mm`). Only identifiers — `YYYY-MM` month codes, hashes, UUIDs — stay Latin-alphanumeric.
+- The operator-facing web UI conforms to the adopted `EXPERIENCE.md` (information architecture, voice, component / state / interaction patterns, key flows, WCAG 2.1 AA floor) and `DESIGN.md` (visual identity: `#42297A` on white, Inter, light and dark themes). Both companions are binding, not reference.
 - Exact birth time to the minute is mandatory. No noon chart, solar-house fallback or house-less path exists anywhere in the system.
 - Placidus houses; the five major aspects only; natal Orb ±7.0° default (tunable 6.0–8.0); transit-to-natal Orb ±2.0° default (tunable 1.5–2.5); the transiting Moon excluded from Aspects, entering only through Lunations. Values in `computation-tables.md`.
 - Every astronomical tuning value lives in one versioned ComputationConfig, passed explicitly and recorded with its hash on each Payload. Changing the harmonic/disharmonic rule is a data edit and a version bump, never a code change.
@@ -181,7 +188,7 @@ A pain to solve, and with it a ceiling to remove. Francesco is a working astrolo
 - No delivery mechanics. The product produces a file; sending it stays manual.
 - No Corpus-based voice conditioning, exemplar retrieval or fine-tuning in v1 — phase 2, gated on the count from CAP-22.
 - No multi-year narrative memory and no alternative report formats (quarterly, annual, per-domain) in v1.
-- No capacity planning beyond 200 Reports per month; no horizontal scale, multi-region or queue broker.
+- No capacity planning beyond 200 Reports per month; no horizontal scale, multi-region, queue broker or background worker process. A report run is advanced only by the operator's own polling of the run view (`ARCHITECTURE-SPINE.md` AD-20).
 - No observability stack beyond structured logs — no metrics backend, no alerting, no tracing.
 - The system does not teach astrology. It assumes a professional operator and explains nothing about its own reasoning beyond exposing the facts.
 
