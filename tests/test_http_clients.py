@@ -1,12 +1,18 @@
 """``/clients`` -- one test per row of the story's I/O & Edge-Case Matrix,
 plus authentication and the explicit-choice/no-cache-write contract.
 
-The ``Geocoder`` is a fake throughout (``get_geocoder`` is overridden), so
-these tests exercise the route's orchestration -- validation, resolution
-branching, chart computation, one-transaction persistence -- without a real
-network call or the real timezone dataset. Real ``NominatimGeocoder``
-resolution behavior is ``tests/test_geocoder_nominatim.py``'s job; real
-``compute_natal_chart()`` behavior is ``tests/test_natal_chart.py``'s.
+The ``Geocoder`` is a fake in every test here except where a test explicitly
+wires the real adapter (the epic-2 retro item 10 pair below), so these tests
+exercise the route's orchestration -- validation, resolution branching, chart
+computation, one-transaction persistence -- without a real network call or
+the real timezone dataset. Those real-``NominatimGeocoder`` tests wire the
+real adapter through ``get_geocoder`` with a fake ``geolocator``/
+``timezone_finder`` (still no network, no timezone dataset) to prove
+``create_client``'s fresh-place ``PLACE_CACHE`` write-through shares the
+request transaction, and that a second create of the same place is served
+from cache. Real ``NominatimGeocoder`` resolution behavior is
+``tests/test_geocoder_nominatim.py``'s job; real ``compute_natal_chart()``
+behavior is ``tests/test_natal_chart.py``'s.
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ from datetime import time as time_of_day
 from decimal import Decimal
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -26,6 +32,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from core.errors import EphemerisIntegrityError, PlaceResolutionError
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.place import PlaceCandidate, ResolvedPlace
+from shell.adapters.nominatim.geocoder import NominatimGeocoder
 from shell.adapters.postgres.backup_record import BackupRecord
 from shell.adapters.postgres.client import (
     Client,
@@ -33,6 +40,7 @@ from shell.adapters.postgres.client import (
     correct_client_and_chart,
     create_client_with_chart,
 )
+from shell.adapters.postgres.place_cache import lookup_cached_place
 from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_run import ReportRun
 from shell.config import Environment, Settings
@@ -40,6 +48,7 @@ from shell.http.app import create_app, get_session
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
 from shell.http.routes import clients as clients_module
 from shell.http.routes.clients import get_geocoder
+from shell.ports.geocoder import Geocoder
 
 AUTH_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$hQD4AS+0CkX36kCpbKWmRg$"
@@ -167,6 +176,62 @@ def _use_geocoder(app_instance: FastAPI, geocoder: _FakeGeocoder) -> None:
     app_instance.dependency_overrides[get_geocoder] = lambda: geocoder
 
 
+@dataclass
+class _FakeLocation:
+    """Mirrors ``tests/test_geocoder_nominatim.py``'s own class of the same
+    name -- not imported across test files, per that file's convention."""
+
+    address: str
+    latitude: float
+    longitude: float
+
+
+class _FakeGeolocator:
+    """Mirrors ``tests/test_geocoder_nominatim.py``'s own class of the same
+    name: records every call so "the geocoder was asked exactly once" is
+    provable rather than assumed."""
+
+    def __init__(self, results: list[_FakeLocation] | None = None) -> None:
+        self._results = results
+        self.calls: list[str] = []
+
+    def geocode(self, query: str, exactly_one: bool) -> list[_FakeLocation] | None:
+        self.calls.append(query)
+        return self._results
+
+
+class _FakeTimezoneFinder:
+    """Mirrors ``tests/test_geocoder_nominatim.py``'s own class of the same
+    name."""
+
+    def __init__(self, zone: str | None = "Europe/Rome") -> None:
+        self._zone = zone
+
+    def timezone_at(self, *, lat: float, lng: float) -> str | None:
+        return self._zone
+
+
+def _use_real_geocoder(
+    app_instance: FastAPI, geolocator: _FakeGeolocator, timezone_finder: _FakeTimezoneFinder
+) -> None:
+    """Override ``get_geocoder`` with a real ``NominatimGeocoder`` (fake
+    ``geolocator``/``timezone_finder``, no network) bound to the *active
+    per-request* session via ``Depends(get_session)`` -- not a session
+    captured once at override time -- so the adapter's ``PLACE_CACHE``
+    write-through goes through the very session the route commits, mirroring
+    ``get_geocoder``'s own production definition (``shell/http/routes/
+    clients.py``) and ``tests/test_http_client_correction.py``'s helper of the
+    same name.
+    """
+
+    def _get_real_geocoder(session: Session = Depends(get_session)) -> Geocoder:
+        return NominatimGeocoder(
+            session, geolocator=geolocator, timezone_finder=timezone_finder
+        )
+
+    app_instance.dependency_overrides[get_geocoder] = _get_real_geocoder
+
+
 def _clients(db_session: Session) -> list[Client]:
     return list(db_session.exec(select(Client)))
 
@@ -235,6 +300,88 @@ def test_all_fields_unambiguous_birthplace_persists_client_and_chart(
     assert clients[0].latitude == _LATITUDE
     assert clients[0].longitude == _LONGITUDE
     assert clients[0].iana_zone == "America/Chicago"
+
+
+# --- Real NominatimGeocoder through create_client (epic-2 retro item 10) --------
+
+
+def test_a_fresh_place_via_the_real_geocoder_is_written_through_to_place_cache(
+    authenticated_client: TestClient,
+    app_instance: FastAPI,
+    db_session: Session,
+    fake_chart_computation: NatalChart,
+) -> None:
+    """Matrix row "fresh place via real geocoder": a real ``NominatimGeocoder``
+    (fake ``geolocator``/``timezone_finder``, no network) resolving one
+    unambiguous, not-yet-cached match through ``POST /clients`` writes the
+    resolved lat/lon/zone through to ``PLACE_CACHE`` inside the Client's own
+    transaction -- ``lookup_cached_place`` on the same session that holds the
+    new Client returns it, proving the cache write shares the request
+    transaction and is not rolled back when the session closes. The fake
+    geolocator is called exactly once, and the Client row itself persists the
+    same resolved place.
+    """
+    geolocator = _FakeGeolocator([_FakeLocation("Berlin, Germany", 52.52, 13.405)])
+    _use_real_geocoder(app_instance, geolocator, _FakeTimezoneFinder(zone="Europe/Berlin"))
+    assert lookup_cached_place(db_session, "Berlin, Germany") is None, (
+        "place already cached -- test would not prove the write-through"
+    )
+
+    response = authenticated_client.post(
+        "/clients", data={**_VALID_FORM, "birthplace": "Berlin, Germany"}
+    )
+
+    assert response.status_code == 200, response.text
+    clients = _clients(db_session)
+    assert len(clients) == 1
+    assert len(geolocator.calls) == 1
+
+    assert clients[0].latitude == Decimal("52.52")
+    assert clients[0].longitude == Decimal("13.405")
+    assert clients[0].iana_zone == "Europe/Berlin"
+
+    cached = lookup_cached_place(db_session, "Berlin, Germany")
+    assert cached is not None, "the fresh place was not written through to PLACE_CACHE"
+    assert cached.latitude == Decimal("52.52")
+    assert cached.longitude == Decimal("13.405")
+    assert cached.iana_zone == "Europe/Berlin"
+
+
+def test_a_second_create_of_the_same_place_is_served_from_place_cache(
+    authenticated_client: TestClient,
+    app_instance: FastAPI,
+    db_session: Session,
+    fake_chart_computation: NatalChart,
+) -> None:
+    """Matrix row "cache hit on second create": two sequential ``POST /clients``
+    for different people at the same birthplace text, real geocoder -- both
+    succeed and the second resolves from ``PLACE_CACHE``, so the fake
+    geolocator is called exactly once in total and both Client rows persist
+    the same resolved place.
+    """
+    geolocator = _FakeGeolocator([_FakeLocation("Berlin, Germany", 52.52, 13.405)])
+    _use_real_geocoder(app_instance, geolocator, _FakeTimezoneFinder(zone="Europe/Berlin"))
+
+    first = authenticated_client.post(
+        "/clients",
+        data={**_VALID_FORM, "name": "Ada Lovelace", "birthplace": "Berlin, Germany"},
+    )
+    assert first.status_code == 200, first.text
+    assert lookup_cached_place(db_session, "Berlin, Germany") is not None
+
+    second = authenticated_client.post(
+        "/clients",
+        data={**_VALID_FORM, "name": "Grace Hopper", "birthplace": "Berlin, Germany"},
+    )
+
+    assert second.status_code == 200, second.text
+    clients = _clients(db_session)
+    assert len(clients) == 2
+    assert len(geolocator.calls) == 1, "the second create must be served from PLACE_CACHE"
+
+    assert clients[0].iana_zone == clients[1].iana_zone == "Europe/Berlin"
+    assert clients[0].latitude == clients[1].latitude == Decimal("52.52")
+    assert clients[0].longitude == clients[1].longitude == Decimal("13.405")
 
 
 # --- Ambiguous birthplace ----------------------------------------------------------

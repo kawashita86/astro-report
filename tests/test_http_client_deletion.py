@@ -115,8 +115,18 @@ def _seed_client_with_chart(db_session: Session, *, name: str = "Ada Lovelace") 
     return client_row
 
 
-def _supersede(db_session: Session, client_row: Client) -> None:
-    """Give ``client_row`` a second, superseded chart (Story 2.7's shape)."""
+def _supersede(
+    db_session: Session, client_row: Client, *, instant: datetime = _BIRTH_INSTANT_UTC
+) -> None:
+    """Give ``client_row`` a second, superseded chart (Story 2.7's shape).
+
+    ``instant`` defaults to the seed's own birth instant -- the N=1 callers
+    need no distinct position. The N=2 test (epic-2 retro item 12) passes a
+    distinct instant per call so the three stored charts differ visibly. The
+    second call runs ``correct_client_and_chart``'s ``.one()`` lookup on the
+    non-superseded row with one superseded row already present, and the
+    ``.one()`` there must still resolve to exactly one row at this depth.
+    """
     correct_client_and_chart(
         db_session,
         client=client_row,
@@ -124,7 +134,9 @@ def _supersede(db_session: Session, client_row: Client) -> None:
         birth_date=client_row.birth_date,
         birth_time=client_row.birth_time,
         resolved_place=_RESOLVED_PLACE,
-        natal_chart=_a_natal_chart(),
+        natal_chart=compute_natal_chart(
+            instant, _LATITUDE, _LONGITUDE, _COMPUTATION_CONFIG
+        ),
         computation_config=_COMPUTATION_CONFIG,
         ephemeris_identity=_EPHEMERIS_IDENTITY,
     )
@@ -267,6 +279,40 @@ def test_confirmed_delete_removes_both_the_current_and_superseded_chart(
     seeded = _seed_client_with_chart(db_session)
     _supersede(db_session, seeded)
     assert len(_charts_for(db_session, seeded.id)) == 2, "fixture is vacuous"
+
+    response = authenticated_client.post(
+        f"/clients/{seeded.id}/delete", data={"confirmed": "1"}
+    )
+
+    assert response.status_code == 200
+    assert db_session.get(Client, seeded.id) is None
+    assert _charts_for(db_session, seeded.id) == []
+
+
+# --- Superseded-chart chain at N=2 (epic-2 retro item 12) --------------------------------
+
+
+def test_confirmed_delete_at_n2_removes_the_client_and_all_three_chart_rows(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Item 12: the superseded-chart chain at N=2 (two corrections, distinct
+    instants) through the delete route. The confirmation ``GET`` names the
+    superseded chart(s), and ``POST /clients/{id}/delete`` with ``confirmed=1``
+    removes the Client and all three ``StoredNatalChart`` rows in one
+    transaction.
+    """
+    seeded = _seed_client_with_chart(db_session)
+    _supersede(db_session, seeded, instant=datetime(2026, 4, 1, 6, 0, tzinfo=UTC))
+    _supersede(db_session, seeded, instant=datetime(2026, 8, 1, 6, 0, tzinfo=UTC))
+
+    charts = _charts_for(db_session, seeded.id)
+    assert len(charts) == 3, "fixture did not reach N=2 -- test is vacuous"
+    assert len([c for c in charts if c.superseded_at is None]) == 1
+    assert len([c for c in charts if c.superseded_at is not None]) == 2
+
+    confirmation = authenticated_client.get(f"/clients/{seeded.id}/delete")
+    assert confirmation.status_code == 200
+    assert "superseded" in confirmation.text.lower()
 
     response = authenticated_client.post(
         f"/clients/{seeded.id}/delete", data={"confirmed": "1"}

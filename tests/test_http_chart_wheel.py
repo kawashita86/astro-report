@@ -25,7 +25,12 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.types.place import ResolvedPlace
-from shell.adapters.postgres.client import Client, StoredNatalChart, create_client_with_chart
+from shell.adapters.postgres.client import (
+    Client,
+    StoredNatalChart,
+    correct_client_and_chart,
+    create_client_with_chart,
+)
 from shell.computation import load_computation_config
 from shell.config import Environment, Settings
 from shell.http import chart_wheel
@@ -133,6 +138,40 @@ def _seed_client_with_chart(session: Session, *, name: str = "Ada Lovelace") -> 
     return client
 
 
+def _supersede(
+    session: Session, client_row: Client, *, instant: datetime = _BIRTH_INSTANT_UTC
+) -> None:
+    """Correct ``client_row``: mark its lone current ``StoredNatalChart`` row
+    superseded and insert a fresh current one computed at ``instant`` (Story
+    2.7's shape), then ``commit`` -- the same ``correct_client_and_chart`` +
+    ``commit`` shape ``tests/test_http_client_deletion.py``'s ``_supersede``
+    uses to reach N=1. Called twice with distinct instants it reaches N=2:
+    the second call runs ``correct_client_and_chart``'s ``.one()`` lookup on
+    the non-superseded row with one superseded row already present, and the
+    ``.one()`` there must still resolve to exactly one row at this depth.
+    The distinct instants give the three stored charts visibly different Sun
+    longitudes so "the route rendered the *current* chart" is provable rather
+    than assumed.
+
+    Only ``natal_chart`` varies with ``instant``; ``client_row``'s own birth
+    fields are kept, matching the deletion file's twin helper.
+    """
+    correct_client_and_chart(
+        session,
+        client=client_row,
+        name=client_row.name,
+        birth_date=client_row.birth_date,
+        birth_time=client_row.birth_time,
+        resolved_place=_RESOLVED_PLACE,
+        natal_chart=compute_natal_chart(
+            instant, _LATITUDE, _LONGITUDE, _COMPUTATION_CONFIG
+        ),
+        computation_config=_COMPUTATION_CONFIG,
+        ephemeris_identity=_EPHEMERIS_IDENTITY,
+    )
+    session.commit()
+
+
 @pytest.fixture
 def db_session() -> Session:
     # `check_same_thread=False` + `StaticPool`: `TestClient` dispatches the
@@ -221,6 +260,48 @@ def test_a_client_with_a_stored_chart_shows_the_wheel(
     # (the story's Design Notes), not a re-serialization of `chart.aspects`.
     assert "kr:node='Aspects_Wheel'" in body
     assert "kr:aspectname=" in body
+
+
+# --- Superseded-chart chain at N=2 (epic-2 retro item 12) -----------------------------
+
+
+def test_after_two_corrections_the_wheel_renders_the_current_chart_of_three(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Item 12: the superseded-chart chain at N=2. After two corrections
+    (distinct instants) exactly one ``StoredNatalChart`` row is non-superseded
+    and two are superseded; ``GET /clients/{id}/chart`` returns 200 and its
+    rendered Sun position matches the third (current) chart and neither
+    earlier one.
+    """
+    seeded = _seed_client_with_chart(db_session)
+    _supersede(db_session, seeded, instant=datetime(2026, 4, 1, 6, 0, tzinfo=UTC))
+    _supersede(db_session, seeded, instant=datetime(2026, 8, 1, 6, 0, tzinfo=UTC))
+
+    charts = db_session.exec(
+        select(StoredNatalChart).where(StoredNatalChart.client_id == seeded.id)
+    ).all()
+    assert len(charts) == 3, "fixture did not reach N=2 -- test is vacuous"
+    current = [chart for chart in charts if chart.superseded_at is None]
+    superseded = [chart for chart in charts if chart.superseded_at is not None]
+    assert len(current) == 1
+    assert len(superseded) == 2
+
+    response = authenticated_client.get(f"/clients/{seeded.id}/chart")
+
+    assert response.status_code == 200
+    body = response.text
+
+    current_sun = next(p for p in current[0].planets if p["name"] == "sun")
+    assert _rendered_abs_pos(body, "Sun") == pytest.approx(
+        float(current_sun["longitude"]), abs=1e-6
+    )
+
+    for old_chart in superseded:
+        old_sun = next(p for p in old_chart.planets if p["name"] == "sun")
+        assert _rendered_abs_pos(body, "Sun") != pytest.approx(
+            float(old_sun["longitude"]), abs=1e-6
+        ), "the wheel must not render a superseded chart's Sun"
 
 
 # --- Client name is escaped in the rendered SVG ---------------------------------------

@@ -185,8 +185,8 @@ action_items:
       + PLACE_CACHE through create_client/correct_client instead of always faking
       get_geocoder"
     owner: "dev"
-    status: open
-    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
+    status: done
+    ref: "_bmad-output/implementation-artifacts/spec-retro-f-test-coverage-hardening.md"
   - id: "epic-2-retro-item-11-have-chart_wheel_view-compare-the-stored"
     epic: 2
     action: "Have chart_wheel_view compare the stored chart's computation_config_content_hash
@@ -200,8 +200,8 @@ action_items:
     action: "Add a test exercising the superseded-chart chain at N=2 (two corrections)
       through both the chart-wheel and delete routes, not just N=1"
     owner: "dev"
-    status: open
-    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
+    status: done
+    ref: "_bmad-output/implementation-artifacts/spec-retro-f-test-coverage-hardening.md"
   - id: "epic-2-retro-item-13-extract-a-shared-_build_stored_chart-hel"
     epic: 2
     action: "Extract a shared _build_stored_chart(...) helper used by both create_client_with_chart()
