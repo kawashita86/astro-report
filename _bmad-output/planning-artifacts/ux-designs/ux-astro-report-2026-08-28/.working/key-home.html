@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>astro-report — Home</title>
+<!--
+  Spine sections illustrated:
+    EXPERIENCE.md → Information Architecture (sidebar, Home as new landing surface)
+    EXPERIENCE.md → State Patterns (backup-stale global banner; in-progress run badges)
+    EXPERIENCE.md → Report Run Lifecycle (batch context: scannable run status)
+    DESIGN.md → app-shell, sidebar, sidebar-item-active, card, badge, banner, button-primary
+  Canonical state: month-end, one run in progress, backup stale.
+-->
+<style>
+  :root{
+    --surface-base:#FFFFFF;--surface-sunken:#F6F5FA;--surface-nav:#F7F6FB;
+    --ink-primary:#141221;--ink-secondary:#585472;--ink-tertiary:#8A85A0;
+    --border-hairline:#E6E3F0;--border-strong:#CFC9E0;
+    --p50:#F5F3FA;--p100:#EBE7F5;--p700:#42297A;--p600:#573A97;
+    --link:#5B3FA0;--focus:#8F79C6;
+    --success:#1F7A4D;--success-s:#E7F4EC;--warning:#B45309;--warning-s:#FBF0E1;
+    --danger:#B42318;--danger-s:#FBEBE9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#33303c;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px}
+  .frame{max-width:1180px;margin:0 auto;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4);background:var(--surface-base)}
+  .chrome{background:#e8e6ee;padding:8px 12px;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border-hairline)}
+  .chrome i{width:11px;height:11px;border-radius:50%;background:#c8c4d4;display:block}
+  .chrome .url{margin-left:12px;font-size:12px;color:#6b6580;background:#fff;border-radius:6px;padding:3px 10px;font-family:ui-monospace,Menlo,monospace}
+  .app{display:flex;min-height:620px}
+  /* sidebar */
+  .side{width:240px;flex:none;background:var(--surface-nav);border-right:1px solid var(--border-hairline);display:flex;flex-direction:column;padding:16px 12px}
+  .brand{font-weight:700;font-size:15px;color:var(--p700);padding:6px 10px 16px}
+  .nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;font-size:14px;font-weight:600;color:var(--ink-secondary);text-decoration:none;margin-bottom:2px}
+  .nav a.active{background:var(--p100);color:var(--p700);box-shadow:inset 3px 0 0 var(--p700)}
+  .nav a:hover:not(.active){background:var(--p50);color:var(--ink-primary)}
+  .side .foot{margin-top:auto;border-top:1px solid var(--border-hairline);padding-top:12px}
+  .side .foot a{color:var(--ink-secondary);font-size:13px;text-decoration:none;display:block;padding:6px 10px}
+  .toggle{font-size:12px;color:var(--ink-tertiary);padding:6px 10px}
+  /* content */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .phead{position:sticky;top:0;background:var(--surface-base);border-bottom:1px solid var(--border-hairline);padding:20px 32px 16px}
+  .crumb{font-size:12px;color:var(--ink-secondary);margin-bottom:6px}
+  .phead-row{display:flex;justify-content:space-between;align-items:center}
+  h1{font-size:28px;font-weight:700;color:var(--p700);margin:0;letter-spacing:-.01em}
+  .btn{font:inherit;font-weight:600;font-size:14px;border-radius:10px;padding:9px 16px;border:1px solid transparent;cursor:default}
+  .btn-p{background:var(--p700);color:#fff}
+  .body{padding:24px 32px;overflow:auto}
+  .banner{display:flex;gap:10px;align-items:center;padding:11px 14px;border-radius:10px;border-left:3px solid var(--warning);background:var(--warning-s);color:var(--warning);font-size:13px;margin-bottom:20px}
+  .banner a{color:var(--warning);font-weight:600}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px}
+  @media(max-width:1000px){.cards{grid-template-columns:1fr 1fr}}
+  .card{background:var(--surface-base);border:1px solid var(--border-hairline);border-radius:10px;padding:18px}
+  .card .k{font-size:12px;color:var(--ink-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+  .card .v{font-size:26px;font-weight:700;color:var(--ink-primary);margin-top:6px}
+  .card .s{font-size:12px;color:var(--ink-tertiary);margin-top:2px}
+  .panel{background:var(--surface-base);border:1px solid var(--border-hairline);border-radius:10px;overflow:hidden}
+  .panel h2{font-size:16px;font-weight:600;margin:0;padding:14px 18px;border-bottom:1px solid var(--border-hairline);color:var(--ink-primary)}
+  table{width:100%;border-collapse:collapse}
+  td,th{text-align:left;font-size:14px;padding:0 18px;height:40px;border-bottom:1px solid var(--border-hairline);color:var(--ink-primary)}
+  th{font-size:12px;font-weight:600;color:var(--ink-secondary);text-transform:uppercase;letter-spacing:.03em;height:34px}
+  tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--surface-sunken)}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--surface-sunken);color:var(--ink-secondary);padding:1px 6px;border-radius:6px}
+  .badge{font-size:11px;font-weight:600;padding:2px 10px;border-radius:9999px;display:inline-block}
+  .b-ok{background:var(--success-s);color:var(--success)}
+  .b-run{background:var(--p100);color:var(--p700)}
+  .b-fail{background:var(--danger-s);color:var(--danger)}
+  .b-warn{background:var(--warning-s);color:var(--warning)}
+  .t-sec{color:var(--ink-secondary);font-size:12px}
+  .quick{display:flex;gap:10px;margin-top:18px}
+  .btn-s{background:var(--surface-base);color:var(--p700);border:1px solid var(--border-strong);border-radius:10px;padding:9px 16px;font-weight:600;font-size:14px}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="chrome"><i></i><i></i><i></i><span class="url">astro-report.internal/</span></div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand">astro-report</div>
+      <nav class="nav">
+        <a class="active" href="#">Home</a>
+        <a href="#">Clienti</a>
+        <a href="#">Guida di stile</a>
+        <a href="#">Corpus</a>
+        <a href="#">Backup</a>
+      </nav>
+      <div class="foot">
+        <div class="toggle">Tema: chiaro · scuro</div>
+        <a href="#">Esci</a>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="phead">
+        <div class="crumb">Home</div>
+        <div class="phead-row">
+          <h1>Home</h1>
+          <button class="btn btn-p">Nuovo cliente</button>
+        </div>
+      </div>
+      <div class="body">
+        <div class="banner">
+          <span>⚠</span>
+          <span>Backup non aggiornato — esistono nuovi report dall'ultimo backup (18/11/2025 09:12).</span>
+          <a href="#" style="margin-left:auto">Esegui backup ora</a>
+        </div>
+
+        <div class="cards">
+          <div class="card"><div class="k">Report di dicembre</div><div class="v">21 / 28</div><div class="s">3 in corso · 1 verifica non superata</div></div>
+          <div class="card"><div class="k">Clienti</div><div class="v">28</div><div class="s">1 con tema superato</div></div>
+          <div class="card"><div class="k">Guida di stile</div><div class="v">v8</div><div class="s">modificata il 28/08/2026</div></div>
+        </div>
+
+        <div class="panel">
+          <h2>Report recenti</h2>
+          <table>
+            <tr><th>Cliente</th><th>Mese</th><th>Stato</th><th>Aggiornato</th></tr>
+            <tr><td>Abbate Chiara</td><td><span class="mono">2025-12</span></td><td><span class="badge b-fail">verifica non superata</span></td><td class="t-sec">oggi 22:41</td></tr>
+            <tr><td>Bianchi Marco</td><td><span class="mono">2025-12</span></td><td><span class="badge b-run">bozza → verifica</span></td><td class="t-sec">oggi 22:39</td></tr>
+            <tr><td>Colombo Elena</td><td><span class="mono">2025-12</span></td><td><span class="badge b-run">assemblaggio Payload</span></td><td class="t-sec">oggi 22:38</td></tr>
+            <tr><td>De Luca Paolo</td><td><span class="mono">2025-12</span></td><td><span class="badge b-ok">esportato</span></td><td class="t-sec">oggi 22:30</td></tr>
+            <tr><td>Esposito Sara</td><td><span class="mono">2025-12</span></td><td><span class="badge b-ok">esportato</span> <span class="badge b-warn">tema superato</span></td><td class="t-sec">oggi 22:12</td></tr>
+          </table>
+        </div>
+        <div class="quick">
+          <button class="btn-s">Vai a Clienti</button>
+          <button class="btn-s">Apri la guida di stile</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

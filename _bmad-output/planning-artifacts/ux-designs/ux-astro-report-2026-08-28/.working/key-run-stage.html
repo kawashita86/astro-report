@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>astro-report — Report run</title>
+<!--
+  Spine sections illustrated:
+    EXPERIENCE.md → Report Run Lifecycle (six-node stage track; stages -> visible state; non-blocking; Gate failure is a destination)
+    EXPERIENCE.md → Component Patterns (Stage track poll reads only; Confirm modal for Rigenera)
+    EXPERIENCE.md → State Patterns (in-progress long-running; error = Gate-failure panel not toast)
+    DESIGN.md → stage-track tokens, panel, badge-mono, button-primary/danger, contextual tabs
+  Two load-bearing states, side by side:
+    A) run advancing (draft_ready, gate active)
+    B) run failed the Gate (destination screen with per-violation cards)
+-->
+<style>
+  :root{
+    --surface-base:#FFFFFF;--surface-sunken:#F6F5FA;--surface-nav:#F7F6FB;--surface-raised:#FFFFFF;
+    --ink-primary:#141221;--ink-secondary:#585472;--ink-tertiary:#8A85A0;
+    --border-hairline:#E6E3F0;--border-strong:#CFC9E0;
+    --p50:#F5F3FA;--p100:#EBE7F5;--p300:#B3A4DB;--p700:#42297A;--p600:#573A97;
+    --link:#5B3FA0;--focus:#8F79C6;
+    --success:#1F7A4D;--warning:#B45309;
+    --danger:#B42318;--danger-s:#FBEBE9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#33303c;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;color:var(--ink-primary)}
+  h2.cap{color:#c9c4d6;font-size:13px;font-weight:600;margin:0 0 10px;max-width:1180px;margin-inline:auto}
+  .frame{max-width:1180px;margin:0 auto 28px;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4);background:var(--surface-base)}
+  .chrome{background:#e8e6ee;padding:8px 12px;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border-hairline)}
+  .chrome i{width:11px;height:11px;border-radius:50%;background:#c8c4d4;display:block}
+  .chrome .url{margin-left:12px;font-size:12px;color:#6b6580;background:#fff;border-radius:6px;padding:3px 10px;font-family:ui-monospace,Menlo,monospace}
+  .app{display:flex;min-height:520px}
+  .side{width:240px;flex:none;background:var(--surface-nav);border-right:1px solid var(--border-hairline);display:flex;flex-direction:column;padding:16px 12px}
+  .brand{font-weight:700;font-size:15px;color:var(--p700);padding:6px 10px 16px}
+  .nav a{display:flex;padding:8px 10px;border-radius:6px;font-size:14px;font-weight:600;color:var(--ink-secondary);text-decoration:none;margin-bottom:2px}
+  .nav a.active{background:var(--p100);color:var(--p700);box-shadow:inset 3px 0 0 var(--p700)}
+  .side .foot{margin-top:auto;border-top:1px solid var(--border-hairline);padding-top:12px}
+  .side .foot a{color:var(--ink-secondary);font-size:13px;text-decoration:none;display:block;padding:6px 10px}
+  .toggle{font-size:12px;color:var(--ink-tertiary);padding:6px 10px}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .phead{background:var(--surface-base);border-bottom:1px solid var(--border-hairline);padding:20px 32px 0}
+  .crumb{font-size:12px;color:var(--ink-secondary);margin-bottom:6px}
+  h1{font-size:28px;font-weight:700;color:var(--p700);margin:0 0 14px;letter-spacing:-.01em}
+  .tabs{display:flex;gap:20px}
+  .tabs a{font-size:14px;font-weight:600;color:var(--ink-secondary);text-decoration:none;padding:10px 2px;border-bottom:2px solid transparent}
+  .tabs a.active{color:var(--p700);border-color:var(--p700)}
+  .body{padding:28px 32px}
+  /* stage track */
+  .track{display:flex;align-items:flex-start;gap:0;margin:6px 0 26px}
+  .node{flex:1;text-align:center;position:relative}
+  .node .dot{width:16px;height:16px;border-radius:9999px;background:var(--border-strong);margin:0 auto;position:relative;z-index:1}
+  .node.done .dot{background:var(--success)}
+  .node.active .dot{background:var(--p700);box-shadow:0 0 0 4px var(--p100)}
+  .node.failed .dot{background:var(--danger);box-shadow:0 0 0 4px var(--danger-s)}
+  .node:not(:last-child):after{content:"";position:absolute;top:7px;left:50%;width:100%;height:2px;background:var(--border-hairline)}
+  .node.done:not(:last-child):after{background:var(--success)}
+  .node .lbl{font-size:12px;color:var(--ink-secondary);margin-top:8px;line-height:1.35}
+  .node.active .lbl{color:var(--p700);font-weight:600}
+  .node.failed .lbl{color:var(--danger);font-weight:600}
+  .now{font-size:15px;color:var(--ink-primary);margin-bottom:6px}
+  .now b{color:var(--p700)}
+  .hint{font-size:13px;color:var(--ink-secondary)}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--surface-sunken);color:var(--ink-secondary);padding:1px 6px;border-radius:6px}
+  .actions{display:flex;gap:10px;margin-top:22px}
+  .btn{font:inherit;font-weight:600;font-size:14px;border-radius:10px;padding:9px 16px;border:1px solid transparent}
+  .btn-p{background:var(--p700);color:#fff}
+  .btn-s{background:var(--surface-base);color:var(--p700);border-color:var(--border-strong)}
+  .btn-d{background:var(--danger);color:#fff}
+  /* gate panel */
+  .gpanel{border:1px solid var(--border-hairline);border-left:3px solid var(--danger);border-radius:14px;padding:22px;background:var(--surface-raised)}
+  .gpanel h3{margin:0 0 4px;font-size:18px;color:var(--danger)}
+  .gpanel .reason{font-size:13px;color:var(--ink-secondary);margin-bottom:16px}
+  .viol{border:1px solid var(--border-hairline);border-radius:10px;padding:14px;margin-bottom:12px}
+  .viol .vh{font-size:13px;font-weight:600;color:var(--ink-primary);margin-bottom:6px}
+  .viol .vh span{color:var(--ink-secondary);font-weight:400}
+  .viol blockquote{margin:8px 0;padding:8px 12px;border-left:3px solid var(--border-strong);background:var(--surface-sunken);font-size:14px;color:var(--ink-primary);font-style:italic}
+  .viol .vd{font-size:13px;color:var(--ink-secondary)}
+  .viol .cited{margin-top:8px;font-size:12px;color:var(--ink-tertiary)}
+  .toc{font-size:12px;color:var(--link);text-decoration:underline;margin-top:6px;display:inline-block}
+</style>
+</head>
+<body>
+
+<h2 class="cap">A — Run in corso: la pipeline avanza lato server, il poll legge solo lo stato (stage: bozza pronta, verifica attiva)</h2>
+<div class="frame">
+  <div class="chrome"><i></i><i></i><i></i><span class="url">astro-report.internal/report-runs/a3f9c1…</span></div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand">astro-report</div>
+      <nav class="nav"><a href="#">Home</a><a class="active" href="#">Clienti</a><a href="#">Guida di stile</a><a href="#">Corpus</a><a href="#">Backup</a></nav>
+      <div class="foot"><div class="toggle">Tema: chiaro · scuro</div><a href="#">Esci</a></div>
+    </aside>
+    <main class="main">
+      <div class="phead">
+        <div class="crumb">Clienti / Abbate Chiara / <span class="mono">2025-12</span></div>
+        <h1>Report — dicembre 2025</h1>
+        <div class="tabs"><a href="#">Anagrafica</a><a href="#">Tema</a><a class="active" href="#">Report</a></div>
+      </div>
+      <div class="body">
+        <div class="track">
+          <div class="node done"><div class="dot"></div><div class="lbl">Tema natale</div></div>
+          <div class="node done"><div class="dot"></div><div class="lbl">Transiti</div></div>
+          <div class="node done"><div class="dot"></div><div class="lbl">Payload</div></div>
+          <div class="node done"><div class="dot"></div><div class="lbl">Bozza</div></div>
+          <div class="node active"><div class="dot"></div><div class="lbl">Verifica di fondatezza</div></div>
+          <div class="node"><div class="dot"></div><div class="lbl">Esportazione</div></div>
+        </div>
+        <div class="now">In corso: <b>Verifica di fondatezza</b></div>
+        <div class="hint">Puoi lasciare questa pagina — il report continua. Torna quando vuoi da Home o dalla scheda Report del cliente.</div>
+        <div class="actions">
+          <button class="btn btn-s">Vedi Payload</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<h2 class="cap">B — Destinazione «verifica non superata»: un riquadro per ogni violazione, con citazioni come chip mono e link alla Sezione</h2>
+<div class="frame">
+  <div class="chrome"><i></i><i></i><i></i><span class="url">astro-report.internal/report-runs/a3f9c1…/draft</span></div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand">astro-report</div>
+      <nav class="nav"><a href="#">Home</a><a class="active" href="#">Clienti</a><a href="#">Guida di stile</a><a href="#">Corpus</a><a href="#">Backup</a></nav>
+      <div class="foot"><div class="toggle">Tema: chiaro · scuro</div><a href="#">Esci</a></div>
+    </aside>
+    <main class="main">
+      <div class="phead">
+        <div class="crumb">Clienti / Abbate Chiara / <span class="mono">2025-12</span></div>
+        <h1>Report — dicembre 2025</h1>
+        <div class="tabs"><a href="#">Anagrafica</a><a href="#">Tema</a><a class="active" href="#">Report</a></div>
+      </div>
+      <div class="body">
+        <div class="track">
+          <div class="node done"><div class="dot"></div><div class="lbl">Tema natale</div></div>
+          <div class="node done"><div class="dot"></div><div class="lbl">Transiti</div></div>
+          <div class="node done"><div class="dot"></div><div class="lbl">Payload</div></div>
+          <div class="node done"><div class="dot"></div><div class="lbl">Bozza</div></div>
+          <div class="node failed"><div class="dot"></div><div class="lbl">Verifica non superata</div></div>
+          <div class="node"><div class="dot"></div><div class="lbl">Esportazione</div></div>
+        </div>
+
+        <div class="gpanel">
+          <h3>Verifica di fondatezza non superata</h3>
+          <div class="reason">1 violazione su 42 affermazioni. Rigenerando si sostituisce l'intero report; il contatore di rigenerazioni passa a 1.</div>
+
+          <div class="viol">
+            <div class="vh">Affermazione chiusa, citazione vuota <span>— Sezione 6 · Giorni favorevoli</span></div>
+            <blockquote>«Il 14 Marte in Ariete sostiene le decisioni pratiche.»</blockquote>
+            <div class="vd">La frase contiene un termine del vocabolario chiuso (pianeta, numerale del giorno) ma non cita alcuna voce del Payload.</div>
+            <div class="cited">Voci citate: <em>nessuna</em></div>
+            <a class="toc" href="#">Vai alla Sezione 6 nella bozza ↓</a>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-p">Rigenera</button>
+          <button class="btn btn-s">Vedi Payload</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

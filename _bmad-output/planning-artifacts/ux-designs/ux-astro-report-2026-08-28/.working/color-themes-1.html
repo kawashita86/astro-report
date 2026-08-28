@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>astro-report — palette di riferimento</title>
+<!--
+  Governed by DESIGN.md → Colors, Typography, Elevation, Shapes.
+  The palette is DECIDED (not a chooser): one indigo ramp anchored at
+  primary-700 #42297A, plus four semantics, authored light + dark.
+  This page is the token reference the build lifts hex values from.
+
+  LIGHT                                   DARK
+  surface-base    #FFFFFF                 surface-base    #161320
+  surface-sunken  #F6F5FA                 surface-sunken  #100E18
+  surface-raised  #FFFFFF                 surface-raised  #211C2E
+  surface-nav     #F7F6FB                 surface-nav     #1B1726
+  ink-primary     #141221  (15.8:1)       ink-primary     #ECE9F4
+  ink-secondary   #585472  (7.4:1)        ink-secondary   #A9A2BC
+  ink-tertiary    #8A85A0  (4.6:1)        ink-tertiary    #7B7590
+  border-hairline #E6E3F0                 border-hairline #322B44
+  border-strong   #CFC9E0                 border-strong   #463D5E
+  primary-50  #F5F3FA   primary-500 #6F52B0   primary-800 #341F60
+  primary-100 #EBE7F5   primary-600 #573A97   primary-900 #241542
+  primary-200 #D5CCEC   primary-700 #42297A   primary-950 #170D2C
+  primary-300 #B3A4DB   (anchor: buttons, h1/h2, active nav, stage dot)
+  primary-400 #8F79C6   link #5B3FA0 (8.5:1)  focus-ring #8F79C6
+  success #1F7A4D / #E7F4EC      warning #B45309 / #FBF0E1
+  danger  #B42318 / #FBEBE9      info    #42297A / #EBE7F5
+  DARK interactive lifts: link #B3A4DB, primary text/dots #8F79C6,
+  success #34D399, warning #FBBF24, danger #F87171.
+-->
+<style>
+  :root{
+    --surface-base:#FFFFFF; --surface-sunken:#F6F5FA; --surface-raised:#FFFFFF; --surface-nav:#F7F6FB;
+    --ink-primary:#141221; --ink-secondary:#585472; --ink-tertiary:#8A85A0;
+    --border-hairline:#E6E3F0; --border-strong:#CFC9E0;
+    --p50:#F5F3FA;--p100:#EBE7F5;--p200:#D5CCEC;--p300:#B3A4DB;--p400:#8F79C6;
+    --p500:#6F52B0;--p600:#573A97;--p700:#42297A;--p800:#341F60;--p900:#241542;--p950:#170D2C;
+    --link:#5B3FA0; --focus:#8F79C6;
+    --success:#1F7A4D;--success-s:#E7F4EC;--warning:#B45309;--warning-s:#FBF0E1;
+    --danger:#B42318;--danger-s:#FBEBE9;--info:#42297A;--info-s:#EBE7F5;
+    --on-primary:#FFFFFF;
+  }
+  .dark{
+    --surface-base:#161320; --surface-sunken:#100E18; --surface-raised:#211C2E; --surface-nav:#1B1726;
+    --ink-primary:#ECE9F4; --ink-secondary:#A9A2BC; --ink-tertiary:#7B7590;
+    --border-hairline:#322B44; --border-strong:#463D5E;
+    --p300:#B3A4DB;--p400:#8F79C6;--p500:#6F52B0;--p600:#7A5FC0;--p700:#8F79C6;
+    --link:#B3A4DB; --focus:#B3A4DB;
+    --success:#34D399;--success-s:#10331F;--warning:#FBBF24;--warning-s:#3A2A0A;
+    --danger:#F87171;--danger-s:#3A1512;--info:#8F79C6;--info-s:#241542;
+    --on-primary:#F5F3FA;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#2a2733;color:#141221;padding:32px;line-height:1.5}
+  h1.page{color:#fff;font-size:20px;margin:0 0 4px}
+  p.lede{color:#c9c4d6;margin:0 0 28px;font-size:13px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  .pane{background:var(--surface-base);border-radius:14px;overflow:hidden;border:1px solid var(--border-hairline)}
+  .pane-h{padding:12px 20px;border-bottom:1px solid var(--border-hairline);font-size:13px;font-weight:600;color:var(--ink-secondary);letter-spacing:.02em;text-transform:uppercase}
+  .pane-b{padding:20px}
+  .section-t{font-size:13px;font-weight:600;color:var(--ink-secondary);margin:18px 0 8px}
+  .section-t:first-child{margin-top:0}
+  .ramp{display:flex;border-radius:8px;overflow:hidden;border:1px solid var(--border-hairline)}
+  .ramp span{flex:1;height:44px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:3px;font-size:9px;font-family:ui-monospace,Menlo,monospace}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{display:flex;align-items:center;gap:8px;padding:5px 10px 5px 6px;border:1px solid var(--border-hairline);border-radius:9999px;font-size:12px;color:var(--ink-primary);background:var(--surface-raised)}
+  .dot{width:16px;height:16px;border-radius:9999px;flex:none}
+  .sn{margin-top:18px;border:1px solid var(--border-hairline);border-radius:10px;background:var(--surface-raised);overflow:hidden}
+  .sn-h{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border-hairline)}
+  .sn-h b{font-size:15px;color:var(--ink-primary)}
+  .badge{font-size:11px;padding:2px 10px;border-radius:9999px;font-weight:600}
+  .b-ok{background:var(--success-s);color:var(--success)}
+  .b-warn{background:var(--warning-s);color:var(--warning)}
+  .b-run{background:var(--p100);color:var(--p700)}
+  .sn-b{padding:14px 16px}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border-hairline);font-size:14px;color:var(--ink-primary)}
+  .row:last-child{border-bottom:0}
+  .row .meta{color:var(--ink-secondary);font-size:12px}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--surface-sunken);color:var(--ink-secondary);padding:1px 6px;border-radius:6px}
+  .btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+  .btn{font:inherit;font-size:14px;font-weight:600;border-radius:10px;padding:9px 16px;border:1px solid transparent;cursor:default}
+  .btn-p{background:var(--p700);color:var(--on-primary)}
+  .btn-s{background:var(--surface-base);color:var(--p700);border-color:var(--border-strong)}
+  .btn-g{background:transparent;color:var(--ink-secondary)}
+  .banner{margin-top:14px;display:flex;gap:10px;padding:11px 14px;border-radius:10px;border-left:3px solid var(--warning);background:var(--warning-s);color:var(--warning);font-size:13px}
+  .link{color:var(--link);text-decoration:underline}
+</style>
+</head>
+<body>
+<h1 class="page">astro-report — palette di riferimento</h1>
+<p class="lede">Un'unica scala indigo ancorata a primary-700 #42297A, quattro semantiche, tema chiaro e scuro. Registro: grave, letterato, esatto — strumento privato, non prodotto.</p>
+
+<div class="grid">
+  <!-- LIGHT -->
+  <div class="pane">
+    <div class="pane-h">Tema chiaro</div>
+    <div class="pane-b">
+      <div class="section-t">Scala primaria (indigo, ~254°)</div>
+      <div class="ramp">
+        <span style="background:var(--p50)">50</span><span style="background:var(--p100)">100</span>
+        <span style="background:var(--p200)">200</span><span style="background:var(--p300)">300</span>
+        <span style="background:var(--p400);color:#fff">400</span><span style="background:var(--p500);color:#fff">500</span>
+        <span style="background:var(--p600);color:#fff">600</span><span style="background:var(--p700);color:#fff">700</span>
+        <span style="background:var(--p800);color:#fff">800</span><span style="background:var(--p900);color:#fff">900</span>
+      </div>
+      <div class="section-t">Semantiche</div>
+      <div class="chips">
+        <span class="chip"><span class="dot" style="background:var(--success)"></span>success · esportato</span>
+        <span class="chip"><span class="dot" style="background:var(--warning)"></span>warning · superato / non aggiornato</span>
+        <span class="chip"><span class="dot" style="background:var(--danger)"></span>danger · verifica non superata</span>
+        <span class="chip"><span class="dot" style="background:var(--info)"></span>info · nota procedurale</span>
+      </div>
+      <div class="section-t">Testo</div>
+      <div class="chips">
+        <span class="chip"><span class="dot" style="background:var(--ink-primary)"></span>ink-primary 15.8:1</span>
+        <span class="chip"><span class="dot" style="background:var(--ink-secondary)"></span>ink-secondary 7.4:1</span>
+        <span class="chip"><span class="dot" style="background:var(--link)"></span>link 8.5:1</span>
+      </div>
+
+      <div class="sn">
+        <div class="sn-h"><b>Rossi Anna</b><span class="badge b-run">in corso</span></div>
+        <div class="sn-b">
+          <div class="row"><span>2025-12 <span class="mono">a3f9c1</span></span><span class="meta">bozza → verifica</span></div>
+          <div class="row"><span>2025-11</span><span class="badge b-ok">esportato</span></div>
+          <div class="row"><span>2025-10</span><span class="badge b-warn">tema superato</span></div>
+          <div class="btns">
+            <button class="btn btn-p">Nuovo report</button>
+            <button class="btn btn-s">Vedi tema</button>
+            <button class="btn btn-g">Correggi</button>
+          </div>
+          <div class="banner">Backup non aggiornato — esistono nuovi report dall'ultimo backup. <a class="link" href="#">Esegui backup ora</a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DARK -->
+  <div class="pane dark" style="background:var(--surface-base);color:var(--ink-primary)">
+    <div class="pane-h">Tema scuro</div>
+    <div class="pane-b">
+      <div class="section-t">Scala primaria</div>
+      <div class="ramp">
+        <span style="background:var(--p50)">50</span><span style="background:var(--p100)">100</span>
+        <span style="background:var(--p200)">200</span><span style="background:var(--p300)">300</span>
+        <span style="background:var(--p400)">400</span><span style="background:var(--p500);color:#fff">500</span>
+        <span style="background:var(--p600);color:#fff">600</span><span style="background:var(--p700)">700</span>
+        <span style="background:var(--p800);color:#fff">800</span><span style="background:var(--p900);color:#fff">900</span>
+      </div>
+      <div class="section-t">Semantiche</div>
+      <div class="chips">
+        <span class="chip"><span class="dot" style="background:var(--success)"></span>success</span>
+        <span class="chip"><span class="dot" style="background:var(--warning)"></span>warning</span>
+        <span class="chip"><span class="dot" style="background:var(--danger)"></span>danger</span>
+        <span class="chip"><span class="dot" style="background:var(--info)"></span>info</span>
+      </div>
+      <div class="section-t">Testo</div>
+      <div class="chips">
+        <span class="chip"><span class="dot" style="background:var(--ink-primary)"></span>ink-primary</span>
+        <span class="chip"><span class="dot" style="background:var(--ink-secondary)"></span>ink-secondary</span>
+        <span class="chip"><span class="dot" style="background:var(--link)"></span>link</span>
+      </div>
+
+      <div class="sn">
+        <div class="sn-h"><b>Rossi Anna</b><span class="badge b-run">in corso</span></div>
+        <div class="sn-b">
+          <div class="row"><span>2025-12 <span class="mono">a3f9c1</span></span><span class="meta">bozza → verifica</span></div>
+          <div class="row"><span>2025-11</span><span class="badge b-ok">esportato</span></div>
+          <div class="row"><span>2025-10</span><span class="badge b-warn">tema superato</span></div>
+          <div class="btns">
+            <button class="btn btn-p">Nuovo report</button>
+            <button class="btn btn-s">Vedi tema</button>
+            <button class="btn btn-g">Correggi</button>
+          </div>
+          <div class="banner">Backup non aggiornato — esistono nuovi report dall'ultimo backup. <a class="link" href="#">Esegui backup ora</a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

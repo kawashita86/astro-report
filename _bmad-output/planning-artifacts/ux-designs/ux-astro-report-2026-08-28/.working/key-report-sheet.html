@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>astro-report — report</title>
+<!--
+  Spine sections illustrated:
+    EXPERIENCE.md → Key Flows #4 (review + export a passed Report)
+    EXPERIENCE.md → Report Run Lifecycle (gate_passed: View Report, export, disposition, regeneration note)
+    DESIGN.md → report-sheet component (720px, body-read, heading-weight Section titles, 32px gaps)
+    DESIGN.md → Layout & Spacing (airy reading rhythm distinct from list density); badge-mono; button-primary/secondary
+  Canonical state: passed report, in-page Section nav with scroll-spy, export bar.
+-->
+<style>
+  :root{
+    --surface-base:#FFFFFF;--surface-sunken:#F6F5FA;--surface-nav:#F7F6FB;--surface-raised:#FFFFFF;
+    --ink-primary:#141221;--ink-secondary:#585472;--ink-tertiary:#8A85A0;
+    --border-hairline:#E6E3F0;--border-strong:#CFC9E0;
+    --p50:#F5F3FA;--p100:#EBE7F5;--p700:#42297A;
+    --link:#5B3FA0;--focus:#8F79C6;
+    --success:#1F7A4D;--success-s:#E7F4EC;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#33303c;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;color:var(--ink-primary)}
+  .frame{max-width:1180px;margin:0 auto;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4);background:var(--surface-base)}
+  .chrome{background:#e8e6ee;padding:8px 12px;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border-hairline)}
+  .chrome i{width:11px;height:11px;border-radius:50%;background:#c8c4d4;display:block}
+  .chrome .url{margin-left:12px;font-size:12px;color:#6b6580;background:#fff;border-radius:6px;padding:3px 10px;font-family:ui-monospace,Menlo,monospace}
+  .app{display:flex;min-height:640px}
+  .side{width:240px;flex:none;background:var(--surface-nav);border-right:1px solid var(--border-hairline);display:flex;flex-direction:column;padding:16px 12px}
+  .brand{font-weight:700;font-size:15px;color:var(--p700);padding:6px 10px 16px}
+  .nav a{display:flex;padding:8px 10px;border-radius:6px;font-size:14px;font-weight:600;color:var(--ink-secondary);text-decoration:none;margin-bottom:2px}
+  .nav a.active{background:var(--p100);color:var(--p700);box-shadow:inset 3px 0 0 var(--p700)}
+  .side .foot{margin-top:auto;border-top:1px solid var(--border-hairline);padding-top:12px}
+  .side .foot a{color:var(--ink-secondary);font-size:13px;text-decoration:none;display:block;padding:6px 10px}
+  .toggle{font-size:12px;color:var(--ink-tertiary);padding:6px 10px}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .phead{background:var(--surface-base);border-bottom:1px solid var(--border-hairline);padding:20px 32px 0}
+  .crumb{font-size:12px;color:var(--ink-secondary);margin-bottom:6px}
+  h1{font-size:28px;font-weight:700;color:var(--p700);margin:0 0 14px;letter-spacing:-.01em}
+  .tabs{display:flex;gap:20px}
+  .tabs a{font-size:14px;font-weight:600;color:var(--ink-secondary);text-decoration:none;padding:10px 2px;border-bottom:2px solid transparent}
+  .tabs a.active{color:var(--p700);border-color:var(--p700)}
+  .exportbar{display:flex;align-items:center;gap:10px;padding:14px 32px;background:var(--surface-sunken);border-bottom:1px solid var(--border-hairline);font-size:13px;color:var(--ink-secondary)}
+  .exportbar .ok{background:var(--success-s);color:var(--success);font-size:11px;font-weight:600;padding:2px 10px;border-radius:9999px}
+  .btn{font:inherit;font-weight:600;font-size:13px;border-radius:10px;padding:8px 14px;border:1px solid transparent;white-space:nowrap}
+  .exportbar .ok{white-space:nowrap}
+  .btn-p{background:var(--p700);color:#fff}
+  .btn-s{background:var(--surface-base);color:var(--p700);border-color:var(--border-strong)}
+  .btn-g{background:transparent;color:var(--ink-secondary)}
+  .reading{display:flex;gap:32px;padding:28px 32px;justify-content:center}
+  .toc{width:190px;flex:none;position:sticky;top:20px;align-self:flex-start;font-size:13px}
+  .toc div{color:var(--ink-secondary);padding:5px 0}
+  .toc div.on{color:var(--p700);font-weight:600;border-left:2px solid var(--p700);padding-left:10px;margin-left:-12px}
+  .sheet{max-width:720px;flex:1;background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:14px;padding:48px}
+  .sheet .note{font-size:13px;color:var(--ink-tertiary);margin-bottom:28px}
+  .sheet h2{font-size:16px;font-weight:600;color:var(--ink-primary);margin:32px 0 10px}
+  .sheet h2:first-of-type{margin-top:0}
+  .sheet p{font-size:16px;line-height:28px;margin:0 0 14px;color:var(--ink-primary)}
+  .sheet ul{font-size:16px;line-height:28px;padding-left:22px;margin:0 0 14px}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--surface-sunken);color:var(--ink-secondary);padding:1px 6px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="chrome"><i></i><i></i><i></i><span class="url">astro-report.internal/report-runs/9b21e0…/report</span></div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand">astro-report</div>
+      <nav class="nav"><a href="#">Home</a><a class="active" href="#">Clienti</a><a href="#">Guida di stile</a><a href="#">Corpus</a><a href="#">Backup</a></nav>
+      <div class="foot"><div class="toggle">Tema: chiaro · scuro</div><a href="#">Esci</a></div>
+    </aside>
+    <main class="main">
+      <div class="phead">
+        <div class="crumb">Clienti / Rossi Anna / <span class="mono">2025-12</span></div>
+        <h1>Report — dicembre 2025</h1>
+        <div class="tabs"><a href="#">Anagrafica</a><a href="#">Tema</a><a class="active" href="#">Report</a></div>
+      </div>
+      <div class="exportbar">
+        <span class="ok">verifica superata</span>
+        <span>dopo 1 rigenerazione · Payload <span class="mono">9b21e0</span> · guida di stile v8</span>
+        <span style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-p">Esporta PDF</button>
+          <button class="btn btn-s">Scarica Markdown</button>
+          <button class="btn btn-g">Segna come inviato</button>
+        </span>
+      </div>
+      <div class="reading">
+        <nav class="toc" aria-label="Sezioni">
+          <div class="on">1 · Quadro del mese</div>
+          <div>2 · Amore</div>
+          <div>3 · Lavoro</div>
+          <div>4 · Denaro</div>
+          <div>5 · Benessere</div>
+          <div>6 · Giorni favorevoli</div>
+          <div>7 · Giorni di attenzione</div>
+          <div>8 · Sintesi</div>
+        </nav>
+        <article class="sheet">
+          <div class="note">Report generato il 27/11/2025 18:04 · efemeridi <span class="mono">sepl_18 · a9f2…</span></div>
+          <h2>1 · Quadro del mese</h2>
+          <p>Dicembre si apre con il Sole che transita la tua sesta casa e mette al centro le abitudini quotidiane e il lavoro concreto. È un mese in cui i risultati arrivano dalla costanza più che dagli slanci, e le decisioni prese con calma reggono meglio di quelle improvvise.</p>
+          <p>La Luna nuova del 20 cade nella tua settima casa: un momento utile per chiarire un rapporto importante, di lavoro o personale, senza forzare i tempi.</p>
+          <h2>2 · Amore</h2>
+          <p>Venere resta favorevole per gran parte del mese e sostiene i legami già solidi. Se una relazione ha attraversato tensioni, la seconda metà di dicembre offre l'occasione per ricucire con un gesto semplice.</p>
+          <h2>3 · Lavoro</h2>
+          <p>Marte accompagna un progetto che richiede pazienza. Evita di misurare i progressi giorno per giorno: la direzione è quella giusta anche quando sembra lenta.</p>
+        </article>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>
