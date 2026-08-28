@@ -66,6 +66,7 @@ development_status:
   3-7-project-the-two-day-lists-by-code-so-a-day-cannot-be-misfile: done
   3-8-freeze-the-payload-so-any-report-can-be-reproduced-years-lat: done
   3-9-read-the-facts-behind-a-month-entry-by-entry: done
+  3-10-advance-a-report-run-without-blocking-the-request: backlog
   epic-3-retrospective: done
 
   epic-4: in-progress
@@ -111,6 +112,18 @@ development_status:
   8-4-project-storage-growth-against-the-free-tier-ceiling: done
   8-5-restore-from-a-backup-for-real: done
   epic-8-retrospective: done
+
+  epic-9: backlog
+  9-1-the-application-shell: backlog
+  9-2-a-home-dashboard-instead-of-a-404: backlog
+  9-3-the-clienti-list-and-the-client-scoped-tabs: backlog
+  9-4-client-create-correct-and-delete-restyled: backlog
+  9-5-a-stage-track-i-can-watch-and-a-gate-failure-i-can-read: backlog
+  9-6-the-report-reading-sheet-and-the-payload-view-made-readable: backlog
+  9-7-the-style-guide-and-corpus-screens-restyled: backlog
+  9-8-feedback-and-state-primitives: backlog
+  9-9-italian-everywhere-and-the-accessibility-floor: backlog
+  epic-9-retrospective: optional
 action_items:
   - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"
     epic: 1
