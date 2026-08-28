@@ -5,10 +5,12 @@ Story 1.4. There is exactly one configured principal (``AUTH_PASSWORD_HASH`` in
 expiry timestamp the cookie's signature protects from tampering. Losing the
 process loses no session state, because there was never any to lose.
 
-The allowlist below is the *only* place unauthenticated routes are declared.
-``AuthMiddleware`` reads it directly, and so does the test that walks
-``app.routes`` to prove nothing outside it is reachable anonymously -- a route
-is authenticated by default, not by the next author remembering a guard.
+The allowlist below is the *only* place unauthenticated routes are declared:
+two exact paths (``/healthz``, ``/login``) plus the ``/static/`` path-prefix
+that lets the vendored shell assets load before sign-in. ``AuthMiddleware``
+reads both directly, and so does the test that walks ``app.routes`` to prove
+nothing outside them is reachable anonymously -- a route is authenticated by
+default, not by the next author remembering a guard.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from shell.config import Settings
 
 __all__ = [
     "ALLOWLIST",
+    "ALLOWLIST_PREFIXES",
     "SESSION_COOKIE_NAME",
     "SESSION_MAX_AGE_SECONDS",
     "AuthMiddleware",
@@ -42,6 +45,13 @@ __all__ = [
 #: The one and only declared set of routes servable without a session. Extend
 #: this, not a second list somewhere else, to expose a new unauthenticated route.
 ALLOWLIST: frozenset[str] = frozenset({"/healthz", "/login"})
+
+#: Path *prefixes* servable without a session -- separate from the exact-match
+#: ``ALLOWLIST`` above. Only the vendored shell assets live here, so ``/login``
+#: is styled before anyone signs in. The trailing slash is load-bearing: the
+#: match needs ``/static/`` followed by a path segment, so the bare ``/static``
+#: mount path itself stays behind auth like any other route.
+ALLOWLIST_PREFIXES: tuple[str, ...] = ("/static/",)
 
 #: The cookie the session token travels in.
 SESSION_COOKIE_NAME = "session"
@@ -154,7 +164,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # would get a 401 here before it could ever redirect to `/healthz`.
         # `ALLOWLIST` itself stays canonical (no trailing slash).
         normalized_path = request.url.path.rstrip("/") or "/"
-        if request.url.path in ALLOWLIST or normalized_path in ALLOWLIST:
+        if (
+            request.url.path in ALLOWLIST
+            or normalized_path in ALLOWLIST
+            or request.url.path.startswith(ALLOWLIST_PREFIXES)
+        ):
             return await call_next(request)
 
         settings: Settings = request.app.state.settings

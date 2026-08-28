@@ -342,9 +342,10 @@ def test_a_chart_computed_under_the_running_config_shows_no_warning_banner(
 ) -> None:
     """The equal-hash path over HTTP: the response has no ``role="alert"``
     element, no ``config-stale-warning`` id and none of the warning sentence,
-    while the wheel itself still renders. Byte-for-byte equality of the
-    surrounding markup with the pre-item-11 template is pinned separately by
-    ``test_chart_wheel_template_is_byte_identical_when_config_is_not_stale``."""
+    while the wheel itself still renders. The shell-level invariants (one
+    ``<html lang="it">``, wheel present) are pinned separately by
+    ``test_the_equal_hash_path_renders_the_wheel_in_the_shell_with_no_warning``.
+    """
     seeded = _seed_client_with_chart(db_session)
 
     response = authenticated_client.get(f"/clients/{seeded.id}/chart")
@@ -357,41 +358,26 @@ def test_a_chart_computed_under_the_running_config_shows_no_warning_banner(
     assert "<svg" in body
 
 
-def test_chart_wheel_template_is_byte_identical_when_config_is_not_stale() -> None:
-    """Item 11's Boundaries: "The equal-hash path renders byte-identically to
-    today (no banner element)." Render ``chart_wheel.html`` directly with
-    ``config_stale=False`` and assert it equals the exact markup the template
-    produced before the ``{% if config_stale %}`` block was added."""
-    from pathlib import Path
+def test_the_equal_hash_path_renders_the_wheel_in_the_shell_with_no_warning(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.1 obsoleted the pre-item-11 byte-for-byte snapshot: the wheel
+    now renders inside the shared ``base.html`` shell. The invariant that
+    outlives the snapshot is semantic -- the equal-hash path renders 200 with
+    the wheel and *no* stale-config banner, in exactly one ``<html lang="it">``
+    document."""
+    seeded = _seed_client_with_chart(db_session)
 
-    from jinja2 import Environment, FileSystemLoader
+    response = authenticated_client.get(f"/clients/{seeded.id}/chart")
 
-    templates_dir = Path(chart_wheel.__file__).resolve().parent / "templates"
-    env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=True)
-    rendered = env.get_template("chart_wheel.html").render(
-        client=type("_C", (), {"name": "Ada Lovelace"})(),
-        svg="<svg>WHEEL</svg>",
-        config_stale=False,
-    )
-
-    expected = (
-        '<!doctype html>\n'
-        '<html lang="en">\n'
-        "  <head>\n"
-        '    <meta charset="utf-8" />\n'
-        '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
-        '    <meta name="robots" content="noindex, nofollow" />\n'
-        "    <title>Chart wheel — Ada Lovelace — astro-report</title>\n"
-        "  </head>\n"
-        "  <body>\n"
-        "    <main>\n"
-        "      <h1>Chart wheel — Ada Lovelace</h1>\n"
-        "      <svg>WHEEL</svg>\n"
-        "    </main>\n"
-        "  </body>\n"
-        "</html>"
-    )
-    assert rendered.rstrip("\n") == expected
+    assert response.status_code == 200
+    body = response.text
+    assert 'role="alert"' not in body
+    assert "config-stale-warning" not in body
+    assert "computed with a different computation config" not in body
+    assert "<svg" in body
+    assert body.lower().count("<html") == 1
+    assert '<html lang="it">' in body
 
 
 # --- Client name is escaped in the rendered SVG ---------------------------------------

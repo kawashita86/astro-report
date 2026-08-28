@@ -1,13 +1,6 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Reports — {{ client.name }} — astro-report</title>
-  </head>
-  <body>
-    <main>
+{% extends "base.html" %}
+{% block title %}Reports — {{ client.name }} — astro-report{% endblock %}
+{% block content %}
       <h1>Reports for {{ client.name }}</h1>
 
       {% if backup_stale %}
@@ -31,6 +24,4 @@
       {% else %}
       <p>No Reports yet for this Client.</p>
       {% endif %}
-    </main>
-  </body>
-</html>
+{% endblock %}

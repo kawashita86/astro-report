@@ -1,17 +1,9 @@
-{% if not request.headers.get("hx-request") %}
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Report run — astro-report</title>
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  </head>
-  <body>
-    <main>
+{% extends "_bare.html" if request.headers.get("hx-request") else "base.html" %}
+{% block title %}Report run — astro-report{% endblock %}
+{% block page_header %}
       <h1>Report run — {{ run.month }}</h1>
-{% endif %}
+{% endblock %}
+{% block content %}
       <div
         id="run-status"
         {% if not run.failed_at %}
@@ -35,8 +27,4 @@
         <p><a href="/report-runs/{{ run.id }}/report">View Report</a></p>
         {% endif %}
       </div>
-{% if not request.headers.get("hx-request") %}
-    </main>
-  </body>
-</html>
-{% endif %}
+{% endblock %}

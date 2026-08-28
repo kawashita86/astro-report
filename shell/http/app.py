@@ -29,6 +29,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, Request, Response, status
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import create_engine
 from sqlmodel import Session
@@ -62,6 +63,13 @@ __all__ = [
 ]
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+
+#: The vendored, committed front-end assets the shell serves: `tokens.css`
+#: (the DESIGN.md token set), `htmx.min.js` (the 2.0.4 build, formerly a CDN
+#: `<script>` in one template), and `shell.js` (the theme toggle + drawer).
+#: Mounted at `/static` and reachable anonymously via
+#: ``shell.http.auth.ALLOWLIST_PREFIXES`` so pre-auth `/login` loads styled.
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 #: A generous ceiling on the /login POST body: no legitimate password needs
 #: anywhere near this many bytes. Rejecting an oversized body before reading
@@ -141,6 +149,7 @@ def create_app(settings: Settings) -> FastAPI:
     application.include_router(style_guide_router)
     application.include_router(backup_router)
     application.include_router(corpus_router)
+    application.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 

@@ -1,0 +1,66 @@
+# Epic 9 Context: Rebuild the operator interface against a real design contract
+
+<!-- Compiled from planning artifacts. Edit freely. Regenerate with compile-epic-context if planning docs change. -->
+
+## Goal
+
+Turn sixteen standalone, unstyled full-HTML pages into one styled application: a persistent Italian-language shell with a sidebar, light and dark themes, density-appropriate forms and reading views, and real feedback (loaders, toasts, a live stage track). This is a presentation-layer rebuild only — it touches server-rendered templates, a vendored token stylesheet, a vendored HTMX, and one new `/` route. No domain (`core/`) code, no functional requirements, and no data-model change. The epic realises the binding UX design contract (EXPERIENCE.md + DESIGN.md) and, together with Story 3.10, the "watch a report run progress" capability. The WeasyPrint PDF export template is explicitly out of scope — it is a client deliverable and deliberately does not inherit the design system.
+
+## Stories
+
+- Story 9.1: The application shell — one styled layout every page extends
+- Story 9.2: A home dashboard instead of a 404
+- Story 9.3: The Clienti list and the client-scoped tabs
+- Story 9.4: Client create, correct and delete — restyled, with a real delete guard
+- Story 9.5: A stage track to watch, and a Gate failure that can be read
+- Story 9.6: The report reading sheet and the Payload view, made readable
+- Story 9.7: The Style Guide and Corpus screens, restyled
+- Story 9.8: Feedback and state primitives — toasts, loaders, empty states, inline errors
+- Story 9.9: Italian everywhere, and the accessibility floor
+
+## Requirements & Constraints
+
+- **Behaviour is frozen.** Every route contract, FR behaviour, and data model is unchanged. Only presentation, navigation, feedback, and the run-advance trigger (Story 3.10) change. Epic 6 export/disposition, Epic 7 corpus/pairing, and Style Guide versioning (save forks an immutable new version; generation refuses with no version) all carry over untouched.
+- **Progressive enhancement is mandatory.** Every destructive and data-writing action works with JavaScript disabled (full-page POST + redirect + inline banner). JS only upgrades: live stage polling, toasts, in-place disclosure, theme toggle, focus management. Never a broken state without JS.
+- **Full Italian UI.** Every visible string is Italian per the EXPERIENCE.md label map. Domain concepts have fixed Italian labels (Cliente, Tema natale, Report, Payload, Bozza, Verifica di fondatezza, Sezione, Affermazione, Guida di stile, Corpus); a synonym is a defect. Dates display `dd/MM/yyyy`, times `HH:mm`, timestamps `dd/MM/yyyy HH:mm`. `YYYY-MM` codes, hashes, and UUIDs stay Latin-alphanumeric and always render as mono chips. Native `date`/`time` pickers are kept and inherit `<html lang="it">` — do not build a custom date widget.
+- **Accessibility floor: WCAG 2.1 AA.** One `h1` per screen, ordered headings, `nav`/`main` landmarks, a skip-to-content link before the sidebar. Every action keyboard-operable; a visible focus ring on every interactive element, never removed; the only focus traps are the modal and drawer, each restoring focus to its trigger on close. Interactive targets ≥ 24×24px. Layout holds at 200% zoom / 400% reflow with no horizontal page scroll; wide tables and the Payload view scroll inside their own container. `prefers-reduced-motion` disables the stage-dot pulse, skeleton sheen, smooth-scroll, and toast slide.
+- **Contrast floors (both themes):** body text ≥ 7:1, secondary ≥ 4.5:1, non-text UI (borders, stage dots, focus ring) ≥ 3:1.
+- **Success criteria:** no standalone-HTML template remains; `/` serves an authenticated dashboard; the backup-stale banner is global; starting a run returns immediately and the stage view advances one step per poll; keyboard-only and reduced-motion passes both succeed; no English string in the rendered UI; `uv run pytest` green.
+
+## Technical Decisions
+
+- **One base template.** Every page extends a single `base.html`; no page ships its own `<html>`/`<head>`. A test asserts no rendered page has a second `<html>`. `<html lang="it">` is set.
+- **Vendored assets, loaded once.** A design-token stylesheet (`static/tokens.css` — the `#42297A` 50–950 indigo ramp, semantic colours, the Inter nine-role type scale, the 4px spacing scale, radius and elevation scales, all as CSS custom properties) and `static/htmx.min.js` are vendored in-repo and pulled once from the base layout. No per-template CDN `<script>`/`<link>` remains. Stack is unchanged: FastAPI + Jinja2 + HTMX 2.x, server-rendered, no SPA; small vanilla JS for toasts, theme toggle, modal focus-trap, click-to-copy.
+- **Themes.** Light and dark both authored in DESIGN.md; tokens redefined under `prefers-color-scheme` and overridable via a `data-theme` attribute set by a sidebar toggle.
+- **AD-20 (non-blocking run driver) — delivered by Story 3.10, consumed here.** The runner exposes a single `advance` function doing at most one stage transition then returning; invoked only from `GET /report-runs/{run_id}` — never a thread, task, queue, or cron. `POST /clients/{id}/report-runs` creates the `ReportRun` row and returns immediately without advancing; the first stage runs on the first poll. Concurrent polls are single-flighted by a Postgres transaction-scoped advisory lock on the run id — a caller that cannot take the lock returns the current stage. The `draft_ready` advance makes the Generator call inside its own poll request (10–40s + backoff); the response never chains a second stage. A closed tab pauses the run at its checkpoint; it resumes on the next poll. Story 9.5 is read-only against the stage AD-20 persists.
+- **AD-15 (single principal), unchanged.** Every route stays authenticated by default; the unauthenticated allowlist (`/login`, `/healthz`) is unchanged and its test must still pass. The new `/` route is authenticated — an unauthenticated request redirects to sign-in. No account menu, roles, or sharing.
+- **AD-17 (durability staleness), logic unchanged, surfaced globally.** The backup-stale warning shows whenever the newest Report postdates the last recorded export; Epic 9 promotes it from one deep screen to a persistent global banner at the top of the content column on every screen, clearing when a backup is recorded (`/backup?record=1`).
+- **AD-10 (checkpointed run), unchanged.** Regeneration replaces the whole Report, never one Section, and increments `regeneration_count`; the count is always displayed.
+- **Density split.** Lists/tables ~1120px, compact 40px rows, hairline dividers, ghost row-actions, no per-row card. Forms ~560px, label-above-input, ~24px field rhythm, helper text below. Report sheet 720px at `body-read`, 32px gaps between the eight Sections. Payload/draft/Gate views ~960px, typed disclosure. Dashboard ~1120px card grid.
+- **Structure via hairline borders and surface tints, not shadow.** Elevation (one overlay level + modal scrim) is reserved for toasts, modals, menus, popovers.
+- **Out of scope:** `report_export.html` (WeasyPrint, Georgia serif) stays exactly as-is; a check must confirm it is untouched.
+
+## UX & Interaction Patterns
+
+- **Shell.** Persistent 240px sidebar: Home, Clienti, Guida di stile, Corpus, Backup; one active item with a 3px left marker + tint fill; a theme toggle and `Esci` pinned to the bottom. Below 900px it becomes a focus-trapped off-canvas drawer from a header menu button (`Esc`/scrim-click close, focus returns to trigger). A sticky page header holds breadcrumb, the one `h1`, and the screen's single primary action. Active sidebar item and breadcrumb always agree; focus moves to the `h1` after a full-page navigation.
+- **Home dashboard.** Recent `ReportRun`s by Client and month with current stage or terminal status as a badge; the global backup-stale banner; quick actions to Clienti and Guida di stile.
+- **Clienti list + tabs.** Client-side name filter (no server round-trip); an empty result shows an inline "Nessun cliente corrisponde a '…'." line, not the list empty state. Superseded charts badged on the row. Whole row links to the detail route; row-action buttons stop propagation and stay in tab order. A selected Client shows a contextual tab row — Anagrafica / Tema / Report — each its own route (real links, not JS tabs), active tab from the path.
+- **Forms.** On submit the primary button disables and spins; fields lock. Server validation errors re-render with per-field messages via `aria-describedby` + `danger` border, plus a form-level summary that takes focus and links to each failed field. Success is a `success` toast (JS) or a dismissible inline banner (no-JS), past tense and specific.
+- **Birthplace disambiguation** is an in-form sub-state, not a new screen: the typed value is preserved in a hidden field; the candidate picker is a `fieldset`/`legend` radio group. On correction the birthplace field is never prefilled — it renders empty with a "retype it, even to reconfirm" helper.
+- **Confirm modal.** Focus-trapped, initial focus on cancel; `Esc`/scrim-click cancel; the confirm button carries the verb, not "OK". Delete Client states in Italian exactly what is removed (including a retained superseded chart when one exists) and keeps the `danger` button disabled until Francesco types the Client's exact name (trimmed, case-sensitive). Supersede is a plain confirm — no typed name — because the prior chart is retained.
+- **Stage track.** Six nodes: tema natale, transiti, Payload, bozza, verifica di fondatezza, esportazione — each pending / active / done / failed, with an Italian caption naming the current stage. HTMX polls at a fixed 2s cadence while visible, pauses when the tab is hidden, stops on any terminal stage, backs off on failure (5s then 15s, manual "Riprova" after the second failure). Starting a run lands on the stage view immediately; reopening shows the true current stage and resumes — no lost work implied.
+- **Gate failure is a destination, not a toast.** `/draft` renders a `danger` panel headed "Verifica di fondatezza non superata" with one card per violation — kind, the Sezione, the offending sentence as a blockquote, the detail, cited entry IDs as mono chips (or "nessuna") — each card linking to its Sezione in the draft below. Primary action "Rigenera" (whole-Report replace, increments the count, via a confirm that says so). A non-Gate failure instead shows the failed node in `danger` and names the stage that failed and why.
+- **Report sheet.** 720px, `body-read`, eight Section titles at `heading` weight with 32px gaps, an in-page section nav that scroll-spies the active Section, a `small` regeneration-count note, and the Epic 6 export bar (PDF / Markdown / disposition) unchanged.
+- **Payload view.** Typed disclosure per Section (`<details>`/`<summary>`, works without JS, state not persisted), collapsed beyond the first, replacing the recursive `<dl>`/`<ul>` dump.
+- **Toasts.** Top-right `aria-live` region (`polite`; `assertive` for `danger`): success auto-dismisses ~5s with hover-to-pause, warning/danger persist with a close control, at most 3 visible, FIFO. Never the sole carrier of information needed later.
+- **Loaders / empty states.** Skeleton matching the final layout for a known-shape HTMX region; inline button spinner + `aria-busy` for a single indeterminate action. Each list surface (Clienti, a Client's Reports, Corpus, Style Guide before v1, dashboard recent runs) has one Italian-line empty state + one primary action; the Style Guide pre-seed state says generation is blocked until a version is saved.
+- **Style Guide / Corpus.** Rendered readable at `body-read`; `<pre>` only for literal code. The editor carries an `info` banner that saving forks a new version. Corpus entry text clamps to ~6 lines with a working Expand control; paired/unpaired composition counts shown.
+
+## Cross-Story Dependencies
+
+- **The epic depends on Epics 1–7 being done** (they are) and on **Story 3.10 (AD-20)** landing first — Story 9.5's stage view reads the stage that Story 3.10's poll-driven `advance` persists.
+- **Build order is fixed: 9.1 first**, because every other 9.x extends the shell, token stylesheet, and base layout it creates. Then 9.2 → 9.9 in order.
+- **9.8 (feedback/state primitives) underpins earlier screens** — toasts, skeletons, empty states, inline form-validation are used by 9.2–9.7. Build minimal versions inline and consolidate shared component partials in 9.8, or pull 9.8's primitives forward as needed.
+- **9.9 (Italian sweep + a11y floor) is a cross-cutting finishing pass** over every screen from 9.1–9.8; each earlier story should already meet the label map and a11y floor, with 9.9 as the audit and gap-fill.
+- **9.5 pairs with Epic 3 Story 3.5** (original HTMX polling view, re-flowed) and **Epic 5 Story 5.5** (original Gate-failure view, re-flowed) — behaviour of both unchanged.
+- Francesco reviews each rendered screen against DESIGN.md / `mockups/` and signs off the Italian copy against the EXPERIENCE.md label map before a story is accepted.

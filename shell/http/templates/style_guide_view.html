@@ -1,17 +1,8 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Style Guide v{{ style_guide.version }} — astro-report</title>
-  </head>
-  <body>
-    <main>
+{% extends "base.html" %}
+{% block title %}Style Guide v{{ style_guide.version }} — astro-report{% endblock %}
+{% block content %}
       <h1>Style Guide -- version {{ style_guide.version }}</h1>
       <p>Created {{ style_guide.created_at }}. Read-only -- prior versions are never edited.</p>
       <p><a href="/style-guide">Back to history</a></p>
       <pre>{{ style_guide.content }}</pre>
-    </main>
-  </body>
-</html>
+{% endblock %}

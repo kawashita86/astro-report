@@ -1,13 +1,6 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Add a past report — astro-report</title>
-  </head>
-  <body>
-    <main>
+{% extends "base.html" %}
+{% block title %}Add a past report — astro-report{% endblock %}
+{% block content %}
       <h1>Add a past report</h1>
       {% if error %}
       <p role="alert">{{ error }}</p>
@@ -70,6 +63,4 @@
 
         <button type="submit">Add to corpus</button>
       </form>
-    </main>
-  </body>
-</html>
+{% endblock %}

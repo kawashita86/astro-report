@@ -1,0 +1,483 @@
+/*
+ * astro-report design tokens — vendored, loaded once from base.html.
+ *
+ * Every value here is transcribed verbatim from
+ * _bmad-output/planning-artifacts/ux-designs/ux-astro-report-2026-08-28/DESIGN.md
+ * (frontmatter `colors:` / `typography:` / `spacing:` / `rounded:` maps and the
+ * `## Elevation & Depth` table). No hex is invented here; DESIGN.md is the
+ * single source of truth.
+ *
+ * Theme model: light values live on bare `:root`. The `-dark` values are
+ * transcribed both as their own `--<key>-dark` custom properties on `:root`
+ * (so every DESIGN.md colour key exists as a property) and re-bound onto the
+ * active token names under `@media (prefers-color-scheme: dark)
+ * :root:not([data-theme="light"])` and under `:root[data-theme="dark"]`, so a
+ * manual sidebar toggle wins in both directions. No token is defined only
+ * inside a media/attribute block.
+ *
+ * No @import, no external font, no runtime fetch.
+ */
+
+:root {
+  /* ---- Colours: light (DESIGN.md frontmatter `colors:`) ---- */
+  --surface-base: #FFFFFF;
+  --surface-sunken: #F6F5FA;
+  --surface-raised: #FFFFFF;
+  --surface-nav: #F7F6FB;
+  --ink-primary: #141221;
+  --ink-secondary: #585472;
+  --ink-tertiary: #8A85A0;
+  --ink-disabled: #B7B2C6;
+  --ink-on-primary: #FFFFFF;
+  --border-hairline: #E6E3F0;
+  --border-strong: #CFC9E0;
+  --primary-50: #F5F3FA;
+  --primary-100: #EBE7F5;
+  --primary-200: #D5CCEC;
+  --primary-300: #B3A4DB;
+  --primary-400: #8F79C6;
+  --primary-500: #6F52B0;
+  --primary-600: #573A97;
+  --primary-700: #42297A;
+  --primary-800: #341F60;
+  --primary-900: #241542;
+  --primary-950: #170D2C;
+  --link: #5B3FA0;
+  --focus-ring: #8F79C6;
+  --success: #1F7A4D;
+  --success-surface: #E7F4EC;
+  --warning: #B45309;
+  --warning-surface: #FBF0E1;
+  --danger: #B42318;
+  --danger-surface: #FBEBE9;
+  --info: #42297A;
+  --info-surface: #EBE7F5;
+
+  /* ---- Colours: dark values, transcribed as their own properties ---- */
+  --surface-base-dark: #161320;
+  --surface-sunken-dark: #100E18;
+  --surface-raised-dark: #211C2E;
+  --surface-nav-dark: #1B1726;
+  --ink-primary-dark: #ECE9F4;
+  --ink-secondary-dark: #A9A2BC;
+  --ink-tertiary-dark: #7B7590;
+  --ink-disabled-dark: #5A5570;
+  --ink-on-primary-dark: #F5F3FA;
+  --border-hairline-dark: #322B44;
+  --border-strong-dark: #463D5E;
+  --primary-300-dark: #B3A4DB;
+  --primary-400-dark: #8F79C6;
+  --primary-500-dark: #6F52B0;
+  --primary-600-dark: #7A5FC0;
+  --primary-700-dark: #8F79C6;
+  --link-dark: #B3A4DB;
+  --focus-ring-dark: #B3A4DB;
+  --success-dark: #34D399;
+  --success-surface-dark: #10331F;
+  --warning-dark: #FBBF24;
+  --warning-surface-dark: #3A2A0A;
+  --danger-dark: #F87171;
+  --danger-surface-dark: #3A1512;
+  --info-dark: #8F79C6;
+  --info-surface-dark: #241542;
+
+  /* ---- Typography (DESIGN.md frontmatter `typography:`) ---- */
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    monospace;
+
+  --font-display-size: 28px;
+  --font-display-line: 34px;
+  --font-display-weight: 700;
+  --font-display-tracking: -0.01em;
+
+  --font-title-size: 20px;
+  --font-title-line: 28px;
+  --font-title-weight: 600;
+  --font-title-tracking: -0.005em;
+
+  --font-heading-size: 16px;
+  --font-heading-line: 22px;
+  --font-heading-weight: 600;
+
+  --font-body-size: 15px;
+  --font-body-line: 23px;
+  --font-body-weight: 400;
+
+  --font-body-read-size: 16px;
+  --font-body-read-line: 28px;
+  --font-body-read-weight: 400;
+
+  --font-label-size: 14px;
+  --font-label-line: 20px;
+  --font-label-weight: 600;
+
+  --font-small-size: 13px;
+  --font-small-line: 18px;
+  --font-small-weight: 400;
+
+  --font-mono-size: 13px;
+  --font-mono-line: 18px;
+  --font-mono-weight: 400;
+
+  /* ---- Spacing: 4px base (DESIGN.md frontmatter `spacing:`) ---- */
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-base: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+  --space-xxxl: 64px;
+
+  /* ---- Radius (DESIGN.md frontmatter `rounded:`) ---- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* ---- Elevation (DESIGN.md `## Elevation & Depth`) ---- */
+  --elevation-flat: none;
+  --elevation-overlay: 0 8px 24px rgba(20, 18, 33, 0.12),
+    0 2px 6px rgba(20, 18, 33, 0.08);
+
+  /* ---- App-shell dimensions (DESIGN.md `components.app-shell`) ---- */
+  --sidebar-width: 240px;
+  --content-pad: var(--space-xl);
+  --content-pad-narrow: var(--space-base);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-base: #161320;
+    --surface-sunken: #100E18;
+    --surface-raised: #211C2E;
+    --surface-nav: #1B1726;
+    --ink-primary: #ECE9F4;
+    --ink-secondary: #A9A2BC;
+    --ink-tertiary: #7B7590;
+    --ink-disabled: #5A5570;
+    --ink-on-primary: #F5F3FA;
+    --border-hairline: #322B44;
+    --border-strong: #463D5E;
+    --primary-300: #B3A4DB;
+    --primary-400: #8F79C6;
+    --primary-500: #6F52B0;
+    --primary-600: #7A5FC0;
+    --primary-700: #8F79C6;
+    --link: #B3A4DB;
+    --focus-ring: #B3A4DB;
+    --success: #34D399;
+    --success-surface: #10331F;
+    --warning: #FBBF24;
+    --warning-surface: #3A2A0A;
+    --danger: #F87171;
+    --danger-surface: #3A1512;
+    --info: #8F79C6;
+    --info-surface: #241542;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface-base: #161320;
+  --surface-sunken: #100E18;
+  --surface-raised: #211C2E;
+  --surface-nav: #1B1726;
+  --ink-primary: #ECE9F4;
+  --ink-secondary: #A9A2BC;
+  --ink-tertiary: #7B7590;
+  --ink-disabled: #5A5570;
+  --ink-on-primary: #F5F3FA;
+  --border-hairline: #322B44;
+  --border-strong: #463D5E;
+  --primary-300: #B3A4DB;
+  --primary-400: #8F79C6;
+  --primary-500: #6F52B0;
+  --primary-600: #7A5FC0;
+  --primary-700: #8F79C6;
+  --link: #B3A4DB;
+  --focus-ring: #B3A4DB;
+  --success: #34D399;
+  --success-surface: #10331F;
+  --warning: #FBBF24;
+  --warning-surface: #3A2A0A;
+  --danger: #F87171;
+  --danger-surface: #3A1512;
+  --info: #8F79C6;
+  --info-surface: #241542;
+
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+ * Minimal reset
+ * ------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-base);
+  color: var(--ink-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-line);
+  -webkit-font-smoothing: antialiased;
+}
+
+img {
+  max-width: 100%;
+}
+
+a {
+  color: var(--link);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Content headings inherit the DESIGN.md nine-role scale. These are bare
+ * element rules; every shell class (`.app-sidebar__brand` etc.) sets its own
+ * size and wins on specificity. */
+h1 {
+  font-size: var(--font-display-size);
+  line-height: var(--font-display-line);
+  font-weight: var(--font-display-weight);
+  letter-spacing: var(--font-display-tracking);
+  color: var(--primary-700);
+  margin: 0 0 var(--space-base);
+}
+
+h2 {
+  font-size: var(--font-title-size);
+  line-height: var(--font-title-line);
+  font-weight: var(--font-title-weight);
+  letter-spacing: var(--font-title-tracking);
+}
+
+h3 {
+  font-size: var(--font-heading-size);
+  line-height: var(--font-heading-line);
+  font-weight: var(--font-heading-weight);
+}
+
+/* Sign-in has no sidebar/header: give its lone column a centred measure. */
+.auth-view {
+  max-width: 360px;
+  margin: 0 auto;
+  padding-top: var(--space-xxl);
+}
+
+/* ---------------------------------------------------------------------------
+ * Application shell — the one styled layout every operator page extends.
+ * Reference: mockups/key-home.html, mockups/key-clienti.html.
+ * ------------------------------------------------------------------------- */
+
+.skip-link {
+  position: absolute;
+  left: var(--space-sm);
+  top: var(--space-sm);
+  z-index: 100;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface-raised);
+  color: var(--link);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+  transform: translateY(-150%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  width: var(--sidebar-width);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-base) var(--space-md);
+  background: var(--surface-nav);
+  border-right: 1px solid var(--border-hairline);
+}
+
+.app-sidebar__brand {
+  padding: var(--space-sm) var(--space-sm) var(--space-base);
+  font-size: var(--font-label-size);
+  font-weight: 700;
+  color: var(--primary-700);
+}
+
+.app-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+}
+
+.app-sidebar__nav a {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding: var(--space-sm) var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-label-line);
+  color: var(--ink-secondary);
+  text-decoration: none;
+}
+
+.app-sidebar__nav a:hover {
+  background: var(--primary-50);
+  color: var(--ink-primary);
+}
+
+.app-sidebar__nav a.is-active {
+  background: var(--primary-100);
+  color: var(--primary-700);
+  box-shadow: inset 3px 0 0 var(--primary-700);
+}
+
+.app-sidebar__foot {
+  margin-top: auto;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.app-sidebar__theme-toggle {
+  appearance: none;
+  text-align: left;
+  font: inherit;
+  font-size: var(--font-small-size);
+  color: var(--ink-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-sm);
+  cursor: pointer;
+}
+
+.app-sidebar__theme-toggle:hover {
+  background: var(--surface-sunken);
+}
+
+.app-sidebar__signout {
+  font-size: var(--font-small-size);
+  color: var(--ink-secondary);
+  text-decoration: none;
+  padding: var(--space-sm) var(--space-sm);
+  border-radius: var(--radius-sm);
+}
+
+.app-sidebar__signout:hover {
+  background: var(--surface-sunken);
+}
+
+.app-scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(20, 18, 33, 0.45);
+}
+
+.app-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: none;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--content-pad-narrow);
+  border-bottom: 1px solid var(--border-hairline);
+  background: var(--surface-base);
+}
+
+.app-header__menu {
+  appearance: none;
+  font: inherit;
+  min-height: 24px;
+  min-width: 24px;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--surface-base);
+  color: var(--primary-700);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.app-main > main {
+  flex: 1 1 auto;
+  padding: var(--content-pad);
+}
+
+@media (max-width: 1199px) {
+  .app-main > main {
+    padding: var(--content-pad-narrow);
+  }
+}
+
+/* Below 900px the sidebar leaves the flow and becomes an off-canvas drawer
+ * opened from the header menu button (DESIGN.md `## Layout & Spacing`). */
+@media (max-width: 899px) {
+  .app-header {
+    display: flex;
+  }
+
+  .app-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 150ms ease;
+  }
+
+  .app-shell.is-drawer-open .app-sidebar {
+    transform: translateX(0);
+  }
+
+  .app-shell.is-drawer-open .app-scrim {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar {
+    transition: none;
+  }
+
+  * {
+    scroll-behavior: auto;
+  }
+}

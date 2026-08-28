@@ -1,13 +1,6 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Report draft — astro-report</title>
-  </head>
-  <body>
-    <main>
+{% extends "base.html" %}
+{% block title %}Report draft — astro-report{% endblock %}
+{% block content %}
       <h1>Report draft</h1>
 
       {% if run %}
@@ -43,6 +36,4 @@
         {% endif %}
       </section>
       {% endfor %}
-    </main>
-  </body>
-</html>
+{% endblock %}

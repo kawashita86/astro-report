@@ -1,13 +1,6 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Delete Client — astro-report</title>
-  </head>
-  <body>
-    <main>
+{% extends "base.html" %}
+{% block title %}Delete Client — astro-report{% endblock %}
+{% block content %}
       <h1>Delete Client</h1>
       {% if error %}
       <p role="alert">{{ error }}</p>
@@ -25,6 +18,4 @@
         <input type="hidden" name="confirmed" value="1" />
         <button type="submit">Confirm delete</button>
       </form>
-    </main>
-  </body>
-</html>
+{% endblock %}

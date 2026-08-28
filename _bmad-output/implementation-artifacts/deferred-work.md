@@ -675,3 +675,33 @@ the spec that surfaced it. Append only.
   summary: `tests/test_latency_record.py` now times a full `_drive` drain (many `advance()` calls plus a commit per stage) rather than a single poll's latency, so the Story 8.3 latency harness no longer measures the metric AD-20 makes operator-visible — one poll's wall time, especially the `draft_ready` poll that carries the real Generator call plus AD-9 backoff.
   evidence: Under the pre-AD-20 driver a fully-local run finished inside the start request, so an end-to-end `drive()` timing was a reasonable latency proxy. AD-20 splits completion across >=5 polls; per-poll latency is now the thing Francesco waits on. Spec-3-10 only required keeping the harness compiling/passing (`update its direct `drive` import to `advance` + drain`), not redefining what Story 8.3 measures. Surfaced by the blind-hunter review of this change.
   triage: defer (blind-hunter review of spec-3-10)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-1-the-application-shell.md`
+  summary: The new sidebar "Esci" link is a plain `GET /login` that never clears the session cookie, so signing out leaves a valid session alive until its 24h expiry.
+  evidence: `base.html` renders `<a class="app-sidebar__signout" href="/login">Esci</a>`. There is no logout route in the codebase and Story 9.1's spec forbids new routes (`Never: No new route`), so a real CSRF-safe `POST /logout` that deletes the cookie needs its own small story (fits AD-15's single-principal auth work). Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-1-the-application-shell)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-1-the-application-shell.md`
+  summary: `static/tokens.css` carries the dark palette in three parallel hardcoded copies — `--<key>-dark` properties on `:root` that nothing references, plus the same hexes re-typed under `@media (prefers-color-scheme: dark)` and under `:root[data-theme="dark"]`.
+  evidence: The `--*-dark` properties (lines ~57-82) are never read with `var()`; the two dark blocks re-hardcode identical hexes rather than referencing them. Dark mode works, so this is a DRY/maintainability smell, not a bug. The redundancy was driven by the spec's `Always` clause requiring "a CSS custom property for every token in DESIGN.md's `colors:` map" plus `test_tokens_css_defines_a_custom_property_for_every_design_colour_key`. A clean fix (drop the dead props, make the media/attribute blocks the single dark source, relax the completeness test) is a small follow-up better done once a browser/visual dark-mode check exists to catch regressions. Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-1-the-application-shell)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-1-the-application-shell.md`
+  summary: The <900px off-canvas drawer implements a Tab/Esc focus loop but not full modal-dialog semantics — no `aria-modal`/`role="dialog"`, the rest of the page is never `inert`/`aria-hidden` while it is open, and background scroll is not locked.
+  evidence: `shell.js` cycles focus within `[data-app-sidebar]` and closes on Esc/scrim, which meets Story 9.1's "focus-trapped drawer" AC, but background content stays in the accessibility tree and scrolls behind the scrim. Story 9.9 ("Italian everywhere, and the accessibility floor") explicitly owns the modal/drawer trap audit — fold this hardening there. Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-1-the-application-shell)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-1-the-application-shell.md`
+  summary: The vendored shell assets (`tokens.css`, `shell.js`, `htmx.min.js`) are referenced by bare unversioned `/static/...` paths, so after a vendored-asset change an operator can sit on stale CSS/JS with only `StaticFiles` ETag revalidation as protection.
+  evidence: `base.html` hardcodes the `/static/...` strings. `StaticFiles` sends ETag/Last-Modified so revalidation (304) works, but there is no content-hash query string or build id for a hard cache-bust. Low urgency for a single-operator internal tool on auto-deploy; worth a follow-up (a `?v=<hash>` helper or a Jinja `url_for('static', ...)` with a version param). Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-1-the-application-shell)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-1-the-application-shell.md`
+  summary: The drawer's runtime behaviour (focus trap, Esc-to-close, scrim click, focus restoration, close-on-widen) is only pinned by source-string greps in `tests/test_http_shell.py`, not by a real DOM/browser test.
+  evidence: The project's test stack is pytest + Starlette `TestClient` with no browser-automation dependency, so a behavioural drawer/theme-toggle test needs new infrastructure (Playwright or similar). Story 9.9's accessibility-floor pass will need the same infra for its keyboard-only sweep — introduce it there and backfill drawer/toggle behavioural tests. Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-1-the-application-shell)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-1-the-application-shell.md`
+  summary: `ruff format --check .` reports ~71 files repo-wide would be reformatted by the installed ruff 0.16.3 — the tree was last formatted with an older ruff and has drifted. Not caused by Story 9.1 (its new/edited files are format-clean; the diffs are in untouched pre-existing blocks).
+  evidence: `.venv/bin/python -m ruff check .` is clean; only `ruff format --check` diverges, and only in code Story 9.1 did not touch. Fix is a one-time repo-wide `ruff format` commit plus pinning ruff in `pyproject.toml` dev deps so the formatter version stops drifting. Surfaced incidentally while verifying this change.
+  triage: defer (verification of spec-9-1-the-application-shell)

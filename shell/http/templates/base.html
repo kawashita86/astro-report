@@ -1,0 +1,104 @@
+{#
+  The one layout every operator page extends (Story 9.1). After this story no
+  operator template carries its own <!doctype>/<html>/<head>; `_bare.html` is
+  the only other permitted layout, used so an HTMX fragment response emits no
+  document skeleton.
+
+  Chrome copy is Italian from the start (EXPERIENCE.md): the five nav areas,
+  the theme toggle, and Esci. Screen body copy stays as-is until Story 9.9.
+#}
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{% block title %}astro-report{% endblock %}</title>
+    {# Apply the saved theme BEFORE the stylesheet paints, to avoid a flash.
+       Only a validated value is honoured; anything else falls back to
+       prefers-color-scheme. #}
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="/static/tokens.css" />
+    <script src="/static/htmx.min.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Vai al contenuto</a>
+    <div class="app-shell" data-app-shell>
+      {% block sidebar %}
+      {% set path = request.url.path %}
+      <nav
+        id="app-sidebar"
+        class="app-sidebar"
+        data-app-sidebar
+        aria-label="Navigazione principale"
+      >
+        <div class="app-sidebar__brand">astro-report</div>
+        <div class="app-sidebar__nav">
+          <a
+            href="/"
+            {% if path == "/" %}class="is-active" aria-current="page"{% endif %}
+            >Home</a
+          >
+          <a
+            href="/clients"
+            {% if path.startswith("/clients") or path.startswith("/report-runs") %}class="is-active" aria-current="page"{% endif %}
+            >Clienti</a
+          >
+          <a
+            href="/style-guide"
+            {% if path.startswith("/style-guide") %}class="is-active" aria-current="page"{% endif %}
+            >Guida di stile</a
+          >
+          <a
+            href="/corpus"
+            {% if path.startswith("/corpus") %}class="is-active" aria-current="page"{% endif %}
+            >Corpus</a
+          >
+          <a
+            href="/backup"
+            {% if path.startswith("/backup") %}class="is-active" aria-current="page"{% endif %}
+            >Backup</a
+          >
+        </div>
+        <div class="app-sidebar__foot">
+          <button
+            type="button"
+            class="app-sidebar__theme-toggle"
+            data-theme-toggle
+            aria-pressed="false"
+          >
+            Tema chiaro / scuro
+          </button>
+          <a class="app-sidebar__signout" href="/login">Esci</a>
+        </div>
+      </nav>
+      {% endblock %}
+      <div class="app-scrim" data-app-scrim></div>
+      <div class="app-main">
+        {% block app_header %}
+        <div class="app-header">
+          <button
+            type="button"
+            class="app-header__menu"
+            data-nav-toggle
+            aria-controls="app-sidebar"
+            aria-expanded="false"
+          >
+            Menu
+          </button>
+        </div>
+        {% endblock %}
+        <main id="main-content" class="{% block main_class %}{% endblock %}" tabindex="-1">
+          {% block page_header %}{% endblock %}
+          {% block content %}{% endblock %}
+        </main>
+      </div>
+    </div>
+    <script src="/static/shell.js" defer></script>
+  </body>
+</html>

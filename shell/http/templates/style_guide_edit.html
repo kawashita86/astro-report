@@ -1,13 +1,6 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Edit Style Guide — astro-report</title>
-  </head>
-  <body>
-    <main>
+{% extends "base.html" %}
+{% block title %}Edit Style Guide — astro-report{% endblock %}
+{% block content %}
       <h1>Edit Style Guide</h1>
       {% if error %}
       <p role="alert">{{ error }}</p>
@@ -19,6 +12,4 @@
 
         <button type="submit">Save new version</button>
       </form>
-    </main>
-  </body>
-</html>
+{% endblock %}

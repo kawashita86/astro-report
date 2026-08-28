@@ -1,34 +1,28 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Report payload — astro-report</title>
-  </head>
-  <body>
-    <main>
-      <h1>Report payload</h1>
+{% extends "base.html" %}
+{% block title %}Report payload — astro-report{% endblock %}
 
-      {% macro render_value(value) -%}
-        {%- if value is mapping -%}
-          <dl>
-            {%- for key, item in value.items() -%}
-              {%- if key != "id" -%}
-                <div><dt>{{ key }}</dt><dd>{{ render_value(item) }}</dd></div>
-              {%- endif -%}
-            {%- endfor -%}
-          </dl>
-        {%- elif value is sequence and value is not string -%}
-          <ul>
-            {%- for item in value -%}
-              <li>{{ render_value(item) }}</li>
-            {%- endfor -%}
-          </ul>
-        {%- else -%}
-          {{- value if value is not none else "" -}}
+{% macro render_value(value) -%}
+  {%- if value is mapping -%}
+    <dl>
+      {%- for key, item in value.items() -%}
+        {%- if key != "id" -%}
+          <div><dt>{{ key }}</dt><dd>{{ render_value(item) }}</dd></div>
         {%- endif -%}
-      {%- endmacro %}
+      {%- endfor -%}
+    </dl>
+  {%- elif value is sequence and value is not string -%}
+    <ul>
+      {%- for item in value -%}
+        <li>{{ render_value(item) }}</li>
+      {%- endfor -%}
+    </ul>
+  {%- else -%}
+    {{- value if value is not none else "" -}}
+  {%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+      <h1>Report payload</h1>
 
       {% for section_name, section in payload.sections.items() %}
       <section>
@@ -64,6 +58,4 @@
       </section>
       {% endif %}
       {% endfor %}
-    </main>
-  </body>
-</html>
+{% endblock %}

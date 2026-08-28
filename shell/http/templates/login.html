@@ -1,13 +1,9 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>Sign in — astro-report</title>
-  </head>
-  <body>
-    <main>
+{% extends "base.html" %}
+{% block title %}Sign in — astro-report{% endblock %}
+{% block sidebar %}{% endblock %}
+{% block app_header %}{% endblock %}
+{% block main_class %}auth-view{% endblock %}
+{% block content %}
       <h1>Sign in</h1>
       {% if error %}
       <p role="alert">Incorrect password.</p>
@@ -24,6 +20,4 @@
         />
         <button type="submit">Sign in</button>
       </form>
-    </main>
-  </body>
-</html>
+{% endblock %}
