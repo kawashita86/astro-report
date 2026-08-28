@@ -31,7 +31,7 @@ from core.gate.classify import is_claim
 from core.types.gate import GateResult, GateViolation, GateVocabulary
 from core.types.generation import GeneratedDraft, Sentence
 
-__all__ = ["run_gate"]
+__all__ = ["TRANSLATABLE_VOCABULARY", "run_gate"]
 
 #: The two Sections whose dates are code-projected upstream (Story 3.7) --
 #: mirrors ``shell/adapters/gemini/generator.py``'s ``_DATE_TOKEN_SECTIONS``.
@@ -153,6 +153,22 @@ _DATE_FIELD_BY_KIND: dict[str, str] = {
     "station": "station_at",
     "ingress": "crossed_at",
     "lunation": "occurred_at",
+}
+
+#: The Italian words this module can translate into a Payload-comparable
+#: value, keyed by the ``GateVocabulary`` word-list field each one must stay
+#: in lockstep with (epic-5-retro-item-41). Pure derived data -- a
+#: comprehension over the three translation maps above, no I/O, ``run_gate()``
+#: stays byte-for-byte deterministic -- exposed so ``shell/gate.py``'s loader
+#: can cross-check the shipped vocabulary against it at startup and refuse to
+#: start on a ``planets``/``signs``/``casa_ordinals`` word this module has no
+#: translation for (which ``is_claim()`` would still flag as a Claim, leaving
+#: that category checked as an empty asserted set and able to pass
+#: ungrounded).
+TRANSLATABLE_VOCABULARY: dict[str, frozenset[str]] = {
+    "planets": frozenset(_BODY_MAP),
+    "signs": frozenset(_SIGN_MAP),
+    "casa_ordinals": frozenset(_CASA_ORDINAL_TO_HOUSE),
 }
 
 

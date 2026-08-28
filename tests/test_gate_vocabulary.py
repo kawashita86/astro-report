@@ -247,12 +247,88 @@ def test_revising_the_vocabulary_bumps_version_and_changes_content_hash(
 
     revised_data = dict(_VALID_VOCABULARY)
     revised_data["version"] = 2
-    revised_data["planets"] = [*_VALID_VOCABULARY["planets"], "chirone"]  # type: ignore[misc]
+    # A content edit that keeps the three closed word lists in lockstep with
+    # core/gate/run.py's translation maps (epic-5-retro-item-41): adding a
+    # planets/signs/casa_ordinals word without a matching map entry is now a
+    # hard load-time failure, exercised by its own tests below.
+    revised_data["retrogrado"] = "retrocesso"
     revised = load_gate_vocabulary(_write(tmp_path, revised_data))
 
     assert revised.version == 2
     assert revised.version != original.version
     assert revised.content_hash != original.content_hash
+
+
+# --- epic-5-retro-item-41: vocabulary word sets must stay in lockstep with
+#     core/gate/run.py's translation maps --------------------------------------
+
+
+def test_a_vocabulary_word_with_no_translation_map_entry_refuses_to_start(
+    tmp_path: Path,
+) -> None:
+    """A ``planets``/``signs``/``casa_ordinals`` word absent from
+    ``core/gate/run.py``'s matching translation map makes
+    ``load_gate_vocabulary()`` refuse to start, naming the unpaired word --
+    otherwise ``is_claim()`` would flag it as a Claim while ``run_gate()``
+    silently has no translation and checks that category as an empty
+    asserted set (epic-5-retro Finding 4)."""
+    data = dict(_VALID_VOCABULARY)
+    data["planets"] = [*_VALID_VOCABULARY["planets"], "chirone"]  # type: ignore[misc]
+
+    with pytest.raises(GateVocabularyError) as raised:
+        load_gate_vocabulary(_write(tmp_path, data))
+
+    message = str(raised.value)
+    assert "chirone" in message
+    assert "planets" in message
+
+
+def test_a_translation_map_key_with_no_vocabulary_word_refuses_to_start(
+    tmp_path: Path,
+) -> None:
+    """The reverse direction -- a translation-map key with no matching
+    vocabulary word -- is latent drift, reported too so the two artifacts
+    stay provably in lockstep (epic-5-retro-item-41)."""
+    data = dict(_VALID_VOCABULARY)
+    data["casa_ordinals"] = [
+        "prima",
+        "seconda",
+        "terza",
+        "quarta",
+        "quinta",
+        "sesta",
+        "settima",
+        "ottava",
+        "nona",
+        "decima",
+        "undicesima",
+    ]  # "dodicesima" deliberately dropped
+
+    with pytest.raises(GateVocabularyError) as raised:
+        load_gate_vocabulary(_write(tmp_path, data))
+
+    message = str(raised.value)
+    assert "dodicesima" in message
+    assert "casa_ordinals" in message
+
+
+def test_the_shipped_vocabulary_word_sets_equal_the_translation_map_keysets() -> None:
+    """With ``core/gate/vocabulary.it.json`` as shipped, every
+    ``planets``/``signs``/``casa_ordinals`` word has a translation-map entry
+    in ``core/gate/run.py`` and vice versa (epic-5-retro-item-41).
+
+    Parses the shipped file directly rather than going through
+    ``load_gate_vocabulary()`` -- the loader now *raises* on divergence, so
+    routing through it would degenerate this test to "load did not raise".
+    Reading the raw JSON keeps it a real, independent cross-check even if the
+    loader's guard logic were itself wrong."""
+    from core.gate.run import TRANSLATABLE_VOCABULARY
+
+    raw = json.loads(DEFAULT_VOCABULARY_PATH.read_text(encoding="utf-8"))
+
+    assert frozenset(raw["planets"]) == TRANSLATABLE_VOCABULARY["planets"]
+    assert frozenset(raw["signs"]) == TRANSLATABLE_VOCABULARY["signs"]
+    assert frozenset(raw["casa_ordinals"]) == TRANSLATABLE_VOCABULARY["casa_ordinals"]
 
 
 # --- Frozen -------------------------------------------------------------------

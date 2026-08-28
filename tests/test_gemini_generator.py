@@ -582,6 +582,27 @@ def test_a_date_shaped_word_elsewhere_is_not_flagged_as_a_date_token() -> None:
     assert draft.energia_generale[0].text == "Un transito di gennaio continua a farsi sentire."
 
 
+# --- epic-4-retro-item-31: prompt construction raises before the network call ---
+
+
+def test_a_prompt_construction_failure_surfaces_as_a_typed_generation_error() -> None:
+    """``_build_system_instruction``/``_build_prompt`` sit inside their own
+    ``try`` now (epic-4-retro-item-31): a non-``GenerationError`` raised
+    while building the prompt (here a payload value ``canonical_json_bytes``
+    cannot serialize) becomes ``GenerationError(step="prompt_construction")``
+    ``from`` the original, never a raw ``TypeError`` -- and the provider is
+    never reached."""
+    client = _FakeGeminiClient(response=_draft_response())
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    with pytest.raises(GenerationError) as caught:
+        generator.generate({"unserializable": object()}, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert caught.value.step == "prompt_construction"
+    assert isinstance(caught.value.__cause__, TypeError)
+    assert client.calls == []
+
+
 # --- Matrix row: Gemini call raises or times out -----------------------------
 
 

@@ -103,9 +103,23 @@ def _render_prose(sentences: tuple[Sentence, ...]) -> dict[str, Any]:
 
 
 def _entry_date(entry: dict[str, Any]) -> str:
+    """The ISO datetime string naming "the day" for one day-list entry,
+    keyed off its ``"kind"`` tag.
+
+    An unrecognized or missing ``"kind"`` is an impossible-state guard, not
+    input validation: ``project_day_lists()`` emits only the three kinds in
+    ``_DATE_FIELD_BY_KIND`` (``aspect``/``lunation``/``station``), so a
+    fourth one means ``freeze_payload()``/``project_day_lists()`` produced
+    something impossible. Raised as ``RuntimeError`` to match
+    ``shell/http/routes/report_runs.py``'s existing
+    ``RuntimeError``-on-impossible-state convention
+    (``_load_passed_report_bundle``, ``view_report_draft``'s own missing-row
+    branches), never a bare ``ValueError`` that would read like a user-input
+    error (epic-4-retro-item-32).
+    """
     field = _DATE_FIELD_BY_KIND.get(entry.get("kind"))
     if field is None:
-        raise ValueError(f"day-list entry has an unrecognized or missing 'kind': {entry!r}")
+        raise RuntimeError(f"day-list entry has an unrecognized or missing 'kind': {entry!r}")
     return entry[field]
 
 

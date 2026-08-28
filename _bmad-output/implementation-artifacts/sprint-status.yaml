@@ -334,7 +334,7 @@ action_items:
       which also settles whether _section_subtree's None-value AttributeError path
       is reachable"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
   - id: "epic-4-retro-item-30-add-a-runtime-test-proving-recordedrespo"
     epic: 4
@@ -342,7 +342,7 @@ action_items:
       I/O (e.g. a socket-blocking fixture), not just the current import-time namespace
       check"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
   - id: "epic-4-retro-item-31-verify-the-exact-try-except-span-in-gemi"
     epic: 4
@@ -350,7 +350,7 @@ action_items:
       wraps prompt construction, not only the network call, so every failure mode
       surfaces as a typed GenerationError"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
   - id: "epic-4-retro-item-32-verify-whether-_entry_date-s-bare-valuee"
     epic: 4
@@ -358,7 +358,7 @@ action_items:
       day-list kind (shell/http/draft_view.py:105) is caught anywhere up through view_report_draft,
       and add a guard if not"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
   - id: "epic-4-retro-item-33-add-a-deterministic-tiebreak-to-derive_t"
     epic: 4
@@ -407,7 +407,7 @@ action_items:
       of recomputing run_gate() against the live vocabulary -- closes the gap Story
       5.5 named and Story 5.6 built the fix for but never wired in."
     owner: "dev loop"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
   - id: "epic-5-retro-item-39-guard-the-two-write-stage-function-patte"
     epic: 5
@@ -428,7 +428,7 @@ action_items:
       the false-positive rate of these two Claim triggers before Epic 6 exposes this
       to real client-facing reports."
     owner: "dev loop"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
   - id: "epic-5-retro-item-41-validate-vocabulary-it-json-s-planets-si"
     epic: 5
@@ -437,7 +437,7 @@ action_items:
       maps at load time (shell/gate.py), so a future vocabulary revision that adds
       an untranslated word fails loudly instead of silently under-checking that category."
     owner: "dev loop"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-08-25.md"
   - id: "epic-5-retro-item-42-add-a-defensive-try-except-around-core-g"
     epic: 5

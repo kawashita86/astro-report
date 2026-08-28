@@ -24,7 +24,13 @@ from core.types.day_lists import DayLists
 from core.types.gate import GateResult, GateViolation
 from core.types.generation import GeneratedDraft, Sentence
 from core.types.payload import Payload, SectionPayload
-from core.types.transits import Ingress, Lunation, Station, TransitAspectEvent
+from core.types.transits import (
+    Ingress,
+    Lunation,
+    StandingRetrograde,
+    Station,
+    TransitAspectEvent,
+)
 from shell.adapters.generation.validation import (
     _DATE_TOKEN_PATTERN as _GENERATOR_DATE_TOKEN_PATTERN,
 )
@@ -773,3 +779,91 @@ def test_gate_date_token_pattern_matches_the_generators_hand_duplicated_copy() -
     silent drift between the two copies (code-review finding #9)."""
     assert _GATE_DATE_TOKEN_PATTERN.pattern == _GENERATOR_DATE_TOKEN_PATTERN.pattern
     assert _GATE_DATE_TOKEN_PATTERN.flags == _GENERATOR_DATE_TOKEN_PATTERN.flags
+
+
+# --- epic-5-retro-item-40: an accepted classify false positive reaching run_gate --
+
+
+def test_a_mundane_casa_ordinal_sentence_citing_a_house_free_entry_is_an_invented_fact() -> (
+    None
+):
+    """epic-5-retro-item-40 / epic-5-retro Finding 3: a mundane "seconda
+    casa" sentence ("la mia seconda casa al mare") is classified as a house
+    Claim (``casa`` + an ordinal co-occur) and, citing an Aspect -- a kind
+    that exposes no house fact -- ``run_gate()`` returns an ``invented_fact``
+    violation. The practical cost is an unnecessary regeneration / bound
+    failure (Story 5.4) for prose that made no astronomical claim. This
+    characterizes the accepted false-positive cost; AD-8 forbids fixing it
+    with a narrower heuristic."""
+    aspect = TransitAspectEvent(
+        transiting_body="venus",
+        natal_point="sun",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 5, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+
+    draft = _draft(
+        amore=(Sentence(text="Ho preso la mia seconda casa al mare.", entry_ids=(aspect_id,)),)
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["invented_fact"]
+
+
+def test_a_bare_duration_number_citing_a_date_free_entry_is_an_invented_fact() -> None:
+    """epic-5-retro-item-40: "per i prossimi 3 giorni" is classified as a
+    day-of-month Claim (the trigger fires on any bare 1-31). Citing a
+    ``StandingRetrograde`` -- a kind that exposes no date fact -- ``run_gate()``
+    returns an ``invented_fact`` violation for a sentence that asserts no
+    date at all. Characterizes the accepted false-positive cost (AD-8), does
+    not fix it."""
+    retrograde = StandingRetrograde(
+        body="mercury",
+        retrograde_start_utc=datetime(2026, 1, 1, tzinfo=UTC),
+        retrograde_end_utc=datetime(2026, 1, 31, tzinfo=UTC),
+    )
+    populated = SectionPayload(
+        profile=None,
+        aspects=(),
+        stations=(),
+        standing_retrogrades=(retrograde,),
+        ingresses=(),
+        lunations=(),
+    )
+    payload = Payload(
+        energia_generale=populated,
+        amore=_empty_section(),
+        lavoro=_empty_section(),
+        denaro=_empty_section(),
+        benessere=_empty_section(),
+        consiglio_finale=_empty_section(),
+    )
+    frozen = freeze_payload(
+        payload,
+        DayLists(giorni_favorevoli=(), giorni_di_attenzione=()),
+        config=_CONFIG,
+        sections_config=_SECTIONS_CONFIG,
+        ephemeris_identity=_EPHEMERIS_IDENTITY,
+    )
+    retrograde_id = _find_id(
+        frozen["sections"]["energia_generale"]["standing_retrogrades"],
+        kind="standing_retrograde",
+    )
+
+    draft = _draft(
+        amore=(
+            Sentence(text="Per i prossimi 3 giorni rallenta.", entry_ids=(retrograde_id,)),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["invented_fact"]

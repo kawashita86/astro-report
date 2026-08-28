@@ -86,3 +86,26 @@ def test_a_sentence_leaning_on_a_fact_without_naming_it_is_not_a_claim() -> None
 
 def test_classification_is_case_insensitive() -> None:
     assert is_claim("MARTE è nella tua decima CASA.", VOCABULARY) is True
+
+
+# --- epic-5-retro-item-40: measured false positives of the day-of-month and
+#     casa+ordinal triggers on ordinary, non-astrological Italian --------------
+
+
+def test_a_bare_1_to_31_number_used_as_a_duration_is_a_false_positive_claim() -> None:
+    """epic-5-retro-item-40 / epic-5-retro Finding 3: the ``day_of_month``
+    trigger fires on ANY bare 1-31 numeral anywhere in the sentence, so a
+    plain duration ("per i prossimi 3 giorni") is classified as a Claim even
+    though it asserts no date. This is a documented, accepted design cost --
+    AD-8 forbids a narrower heuristic. This test locks the behavior as a
+    regression tripwire; it does not endorse it."""
+    assert is_claim("Per i prossimi 3 giorni rallenta.", VOCABULARY) is True
+
+
+def test_mundane_casa_plus_ordinal_is_a_false_positive_claim() -> None:
+    """epic-5-retro-item-40: "casa" is ordinary Italian for "home"; paired
+    with an ordinal in a mundane, non-astrological sentence ("la mia seconda
+    casa al mare") it still trips the house-Claim trigger by lexical
+    co-occurrence alone. Same accepted design cost as the day-of-month case
+    above -- characterized here, not fixed."""
+    assert is_claim("Ho preso la mia seconda casa al mare.", VOCABULARY) is True

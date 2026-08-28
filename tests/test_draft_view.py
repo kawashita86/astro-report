@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from core.types.generation import GeneratedDraft, Sentence
 from shell.adapters.postgres.report_draft import _json_safe as _draft_json_safe
 from shell.http.draft_view import (
@@ -165,6 +167,34 @@ def test_render_draft_does_not_mutate_its_inputs() -> None:
 
 
 # --- deserialize_generated_draft round trip -------------------------------------------
+
+
+def test_a_day_list_entry_with_an_unrecognized_kind_raises_runtime_error() -> None:
+    """epic-4-retro-item-32: ``project_day_lists()`` emits only
+    ``aspect``/``lunation``/``station`` kinds, so a fourth ``kind`` in a
+    day-list entry means ``freeze_payload()`` produced something impossible.
+    ``_entry_date`` raises ``RuntimeError`` (an impossible-state guard,
+    consistent with ``report_runs.py``'s other data-integrity guards), never
+    a bare ``ValueError`` that would read like input validation."""
+    payload = {
+        "day_lists": {
+            "giorni_favorevoli": [
+                {
+                    "id": "bogus-1",
+                    "kind": "quasar",
+                    "perfected_at": "2026-01-10T15:00:00+00:00",
+                }
+            ],
+            "giorni_di_attenzione": [],
+        }
+    }
+
+    with pytest.raises(RuntimeError) as caught:
+        render_draft(_a_draft(), payload, iana_zone=_IANA_ZONE)
+
+    # Exactly RuntimeError, not the bare builtin ValueError it used to raise.
+    assert type(caught.value) is RuntimeError
+    assert "kind" in str(caught.value)
 
 
 def test_deserialize_generated_draft_round_trips_a_stored_draft() -> None:

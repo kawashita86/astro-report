@@ -115,8 +115,16 @@ class GeminiGenerator:
         theme_previous: ReportTheme | None,
         theme_current: ReportTheme,
     ) -> GeneratedDraft:
-        system_instruction = _build_system_instruction(style_guide)
-        prompt = _build_prompt(payload, theme_previous, theme_current)
+        try:
+            system_instruction = _build_system_instruction(style_guide)
+            prompt = _build_prompt(payload, theme_previous, theme_current)
+        except GenerationError:
+            raise
+        except Exception as error:
+            raise GenerationError(
+                "prompt_construction",
+                f"building the system instruction / prompt failed: {error}",
+            ) from error
 
         try:
             raw = self._client.generate_content(

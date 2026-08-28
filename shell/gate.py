@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from core.errors import GateVocabularyError
+from core.gate.run import TRANSLATABLE_VOCABULARY
 from core.types.gate import GateVocabulary
 
 __all__ = ["DEFAULT_VOCABULARY_PATH", "load_gate_vocabulary"]
@@ -116,6 +117,46 @@ def _read_string(data: dict[str, Any], field: str) -> tuple[str | None, str | No
     return raw, None
 
 
+def _check_translation_coverage(
+    parsed_lists: tuple[frozenset[str] | None, ...],
+) -> list[str]:
+    """Cross-check the three closed word lists against ``core/gate/run.py``'s
+    hardcoded translation maps (``TRANSLATABLE_VOCABULARY``), both directions
+    (epic-5-retro-item-41).
+
+    A ``planets``/``signs``/``casa_ordinals`` word with no matching map entry
+    is the dangerous case: ``is_claim()`` flags it as a Claim while
+    ``run_gate()`` has no translation, so that category is checked as an
+    empty asserted set and can pass ungrounded. A map key with no matching
+    vocabulary word is only latent drift. Both are reported so the two
+    artifacts stay provably in lockstep.
+
+    ``parsed_lists`` is the ``planets``/``signs``/``casa_ordinals`` frozensets
+    in ``_STRING_LIST_FIELDS`` order; a list that failed to parse comes
+    through as ``None`` and only *that* category is skipped (its shape error
+    is already reported) -- every list that did parse is still checked, so
+    one load attempt names every offender at once.
+    """
+    problems: list[str] = []
+    for field, words in zip(_STRING_LIST_FIELDS, parsed_lists, strict=True):
+        if words is None:
+            continue
+        translatable = TRANSLATABLE_VOCABULARY[field]
+        untranslated = sorted(words - translatable)
+        if untranslated:
+            problems.append(
+                f"{field} has word(s) with no translation-map entry in core/gate/run.py: "
+                f"{', '.join(untranslated)}."
+            )
+        orphan_keys = sorted(translatable - words)
+        if orphan_keys:
+            problems.append(
+                f"core/gate/run.py's translation map for {field} has key(s) with no matching "
+                f"vocabulary word: {', '.join(orphan_keys)}."
+            )
+    return problems
+
+
 def _read_day_of_month_pattern(data: dict[str, Any]) -> tuple[str | None, str | None]:
     value, error = _read_string(data, "day_of_month_pattern")
     if error is not None or value is None:
@@ -168,6 +209,7 @@ def load_gate_vocabulary(path: Path = DEFAULT_VOCABULARY_PATH) -> GateVocabulary
         )
         if problem is not None
     ]
+    problems += _check_translation_coverage((planets, signs, casa_ordinals))
     if problems:
         raise GateVocabularyError(
             f"Refusing to start: {path} is not a valid gate vocabulary.\n"
