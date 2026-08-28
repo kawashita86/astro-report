@@ -200,7 +200,7 @@ action_items:
       chart_wheel.html (do not refuse). The wheel stays a verification aid; the
       frozen Report has its own hash in ReportPayload."
     owner: "dev loop"
-    status: open
+    status: done
     decided_on: 2026-08-28
     decision: "Warn, do not refuse, do not defer. Non-blocking banner on hash
       mismatch."
@@ -224,7 +224,7 @@ action_items:
     epic: 2
     action: "Link create_client's and correct_client's success response to GET /clients/{id}/chart"
     owner: "dev loop"
-    status: open
+    status: done
     decided_on: 2026-08-28
     decision: "Do it. Trivial UX link, directly serves epic 2's stated purpose
       (get a natal chart I can verify). Unblocked for the dev loop."
@@ -252,7 +252,7 @@ action_items:
       despite frozen=True) and that content_hash is the identity/cache key to use.
       No hashability is added -- see item 6."
     owner: "dev loop"
-    status: open
+    status: done
     decided_on: 2026-08-28
     decision: "Do not add hashability (item 6). Residual: correct the docstring so it
       no longer implies the type is hashable, and point readers at content_hash."
@@ -518,7 +518,7 @@ action_items:
       eight-Sections-plus-client-name content model as the PDF route, text/markdown
       body, writes an ExportRecord with format=\"markdown\"."
     owner: "dev loop"
-    status: ready-for-dev
+    status: done
     decided_on: 2026-08-28
     decision: "Schedule the Markdown follow-up spec (requirement kept, not descoped).
       epic-6-context.md annotated to note Markdown ships post-epic as spec-6-2b."
@@ -540,7 +540,7 @@ action_items:
       download; POST declined). No behavior change. The /backup half is already done
       (retro-C item 49: backup_record write gated behind ?record=1)."
     owner: "dev loop"
-    status: open
+    status: done
     decided_on: 2026-08-28
     decision: "Accept + document as deviation. /export/pdf incidental hit writes a
       harmless extra ExportRecord; run.stage advance is monotonic; no PII risk
@@ -554,7 +554,7 @@ action_items:
       and minimal print CSS in report_export.html -- it currently shows raw keys like
       energia_generale with no styling."
     owner: "dev loop"
-    status: open
+    status: done
     decided_on: 2026-08-28
     decision: "Do both now (title map + minimal print CSS), one small change. The
       shared snake_case -> Italian-title map is the reusable part."
@@ -697,7 +697,7 @@ action_items:
       required field is absent or not the required value. Bundle with the item-62
       _release_validation.py follow-up."
     owner: "dev loop"
-    status: open
+    status: done
     decided_on: 2026-08-28
     decision: "Confirmed the per-record field design: rehearsed_against=\"real-postgres\"
       for restore-rehearsal.md, sitting_confirmed=true for latency.md (bespoke field

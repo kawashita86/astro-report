@@ -3,6 +3,32 @@
   <head>
     <meta charset="utf-8" />
     <title>Report — {{ client_name }}</title>
+    <style>
+      @page {
+        margin: 2cm;
+      }
+      body {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 12pt;
+        line-height: 1.5;
+        color: #000;
+      }
+      h1 {
+        font-size: 20pt;
+        margin: 0 0 1.5rem;
+      }
+      h2 {
+        font-size: 14pt;
+        margin: 1.5rem 0 0.5rem;
+        page-break-after: avoid;
+      }
+      section {
+        page-break-inside: avoid;
+      }
+      ul {
+        padding-left: 1.2rem;
+      }
+    </style>
   </head>
   <body>
     <main>
@@ -10,7 +36,7 @@
 
       {% for section_name in section_order %}
       <section>
-        <h2>{{ section_name }}</h2>
+        <h2>{{ section_titles[section_name] }}</h2>
         {% if section_name in list_section_names %}
         <ul>
           {% for item in draft[section_name] %}

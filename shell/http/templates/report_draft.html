@@ -31,7 +31,7 @@
 
       {% for section_name in section_order %}
       <section>
-        <h2>{{ section_name }}</h2>
+        <h2>{{ section_titles[section_name] }}</h2>
         {% if section_name in list_section_names %}
         <ul>
           {% for item in draft[section_name] %}

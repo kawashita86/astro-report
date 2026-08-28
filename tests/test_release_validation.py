@@ -17,6 +17,7 @@ import pytest
 
 from tests._release_validation import (
     assert_not_stale,
+    assert_outcome_permits_release,
     assert_record_not_stale,
     extract_toml_block,
 )
@@ -72,6 +73,49 @@ def test_assert_record_not_stale_passes_a_fresh_date_through() -> None:
     assert_record_not_stale(
         {"checked": datetime.date(2000, 1, 1)},
         max_age_days=10_000_000,
+        record_label="example",
+    )
+
+
+# --- assert_outcome_permits_release (epic-8-retro-item-65) --------------------------
+
+
+def test_outcome_permits_release_passes_when_pass_and_the_evidence_field_matches() -> None:
+    assert_outcome_permits_release(
+        {"outcome": "pass", "sitting_confirmed": True},
+        evidence_field="sitting_confirmed",
+        evidence_value=True,
+        record_label="example",
+    )
+
+
+def test_outcome_permits_release_fails_naming_the_step_when_evidence_is_missing() -> None:
+    with pytest.raises(AssertionError, match="sitting_confirmed"):
+        assert_outcome_permits_release(
+            {"outcome": "pass"},
+            evidence_field="sitting_confirmed",
+            evidence_value=True,
+            record_label="example",
+        )
+
+
+def test_outcome_permits_release_fails_when_pass_but_the_evidence_value_is_wrong() -> None:
+    with pytest.raises(AssertionError, match="not 'real-postgres'"):
+        assert_outcome_permits_release(
+            {"outcome": "pass", "rehearsed_against": "in-process-sqlite"},
+            evidence_field="rehearsed_against",
+            evidence_value="real-postgres",
+            record_label="example",
+        )
+
+
+def test_outcome_permits_release_is_a_noop_when_outcome_is_not_pass() -> None:
+    # `outcome != "pass"` is the caller's own assertion to block release on;
+    # this helper only guards the `pass` claim, so it must not fire here.
+    assert_outcome_permits_release(
+        {"outcome": "blocked", "sitting_confirmed": False},
+        evidence_field="sitting_confirmed",
+        evidence_value=True,
         record_label="example",
     )
 

@@ -16,6 +16,8 @@ from shell.adapters.postgres.report_draft import _json_safe as _draft_json_safe
 from shell.http.draft_view import (
     LIST_SECTION_NAMES,
     PROSE_SECTION_NAMES,
+    SECTION_ORDER,
+    SECTION_TITLES,
     deserialize_generated_draft,
     render_draft,
 )
@@ -152,6 +154,34 @@ def test_an_uncited_day_list_entry_still_renders_date_only_never_dropped() -> No
 
 def test_render_draft_covers_exactly_the_two_list_sections() -> None:
     assert set(LIST_SECTION_NAMES) == {"giorni_favorevoli", "giorni_di_attenzione"}
+
+
+# --- SECTION_TITLES <-> SECTION_ORDER parity (epic-6-retro-item-50) -----------------
+
+
+def test_section_titles_has_exactly_one_italian_heading_per_section_order_name() -> None:
+    """The shared ``snake_case -> Italian-title`` map is the single source of
+    truth for section headings across ``report.html`` / ``report_draft.html`` /
+    ``report_export.html`` / the Markdown export. It must have exactly one
+    entry per ``SECTION_ORDER`` name -- so a future ``GeneratedDraft`` field
+    (picked up automatically by ``SECTION_ORDER``) cannot ship without an
+    Italian heading, and no stale key lingers after a field is removed.
+    """
+    assert tuple(SECTION_TITLES) == SECTION_ORDER
+    assert set(SECTION_TITLES) == set(SECTION_ORDER)
+    for name, title in SECTION_TITLES.items():
+        assert isinstance(title, str) and title.strip(), name
+        assert title[:1] == title[:1].upper(), title  # sentence-cased
+
+    # Not a naive `.replace("_", " ").title()` transform: Italian title casing
+    # keeps interior prepositions/articles lowercase ("Giorni di attenzione").
+    naive = {name: name.replace("_", " ").title() for name in SECTION_ORDER}
+    assert naive != SECTION_TITLES
+
+
+def test_section_titles_keeps_italian_lowercase_prepositions() -> None:
+    assert SECTION_TITLES["giorni_di_attenzione"] == "Giorni di attenzione"
+    assert SECTION_TITLES["giorni_favorevoli"] == "Giorni favorevoli"
 
 
 def test_render_draft_does_not_mutate_its_inputs() -> None:

@@ -320,7 +320,18 @@ async def create_client(
     )
     session.commit()
 
-    return Response(content=f"Client {client.id} created.", media_type="text/plain")
+    # A minimal HTML fragment, not plain text: keeps the "created." wording
+    # the two success tests assert on and adds a link straight to the new
+    # Client's chart-verification view (epic-2-retro-item-14) -- an inline
+    # anchor, not a redirect, so the response stays 200 and still names the
+    # outcome (a 303 would be followed to the SVG page and lose both).
+    return Response(
+        content=(
+            f"Client {client.id} created. "
+            f'<a href="/clients/{client.id}/chart">View chart</a>'
+        ),
+        media_type="text/html",
+    )
 
 
 @router.get("/clients/{client_id}/edit", include_in_schema=False)
@@ -507,7 +518,16 @@ async def correct_client(
     )
     session.commit()
 
-    return Response(content=f"Client {client.id} corrected.", media_type="text/plain")
+    # See create_client: a minimal HTML fragment keeping the "corrected."
+    # wording plus an inline link to the chart view (epic-2-retro-item-14),
+    # not a redirect.
+    return Response(
+        content=(
+            f"Client {client.id} corrected. "
+            f'<a href="/clients/{client.id}/chart">View chart</a>'
+        ),
+        media_type="text/html",
+    )
 
 
 @router.get("/clients/{client_id}/delete", include_in_schema=False)

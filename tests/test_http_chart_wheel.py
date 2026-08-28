@@ -304,6 +304,96 @@ def test_after_two_corrections_the_wheel_renders_the_current_chart_of_three(
         ), "the wheel must not render a superseded chart's Sun"
 
 
+# --- Stale computation-config warning banner (epic-2 retro item 11) ------------------
+
+
+def test_a_chart_computed_under_a_drifted_config_shows_a_non_blocking_warning(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Item 11: when ``stored_chart.computation_config_content_hash`` differs
+    from the running ``app.state.computation_config.content_hash`` the wheel
+    still renders 200 (never refuses) with a non-blocking warning banner --
+    the wheel is a verification aid, and silence would be dishonest after a
+    ``computation.toml`` edit.
+    """
+    seeded = _seed_client_with_chart(db_session)
+    stored_chart = db_session.exec(
+        select(StoredNatalChart).where(StoredNatalChart.client_id == seeded.id)
+    ).one()
+    stored_chart.computation_config_content_hash = "0" * 64  # not the running hash
+    db_session.add(stored_chart)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/clients/{seeded.id}/chart")
+
+    assert response.status_code == 200
+    body = response.text
+    assert 'role="alert"' in body
+    assert 'id="config-stale-warning"' in body
+    assert "computed with a different computation config" in body
+    # The wheel still renders, and the warning precedes it (banner above the
+    # SVG, per the story: it must be seen before the chart is trusted).
+    assert "<svg" in body
+    assert body.index("config-stale-warning") < body.index("<svg")
+
+
+def test_a_chart_computed_under_the_running_config_shows_no_warning_banner(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """The equal-hash path over HTTP: the response has no ``role="alert"``
+    element, no ``config-stale-warning`` id and none of the warning sentence,
+    while the wheel itself still renders. Byte-for-byte equality of the
+    surrounding markup with the pre-item-11 template is pinned separately by
+    ``test_chart_wheel_template_is_byte_identical_when_config_is_not_stale``."""
+    seeded = _seed_client_with_chart(db_session)
+
+    response = authenticated_client.get(f"/clients/{seeded.id}/chart")
+
+    assert response.status_code == 200
+    body = response.text
+    assert 'role="alert"' not in body
+    assert "config-stale-warning" not in body
+    assert "computed with a different computation config" not in body
+    assert "<svg" in body
+
+
+def test_chart_wheel_template_is_byte_identical_when_config_is_not_stale() -> None:
+    """Item 11's Boundaries: "The equal-hash path renders byte-identically to
+    today (no banner element)." Render ``chart_wheel.html`` directly with
+    ``config_stale=False`` and assert it equals the exact markup the template
+    produced before the ``{% if config_stale %}`` block was added."""
+    from pathlib import Path
+
+    from jinja2 import Environment, FileSystemLoader
+
+    templates_dir = Path(chart_wheel.__file__).resolve().parent / "templates"
+    env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=True)
+    rendered = env.get_template("chart_wheel.html").render(
+        client=type("_C", (), {"name": "Ada Lovelace"})(),
+        svg="<svg>WHEEL</svg>",
+        config_stale=False,
+    )
+
+    expected = (
+        '<!doctype html>\n'
+        '<html lang="en">\n'
+        "  <head>\n"
+        '    <meta charset="utf-8" />\n'
+        '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+        '    <meta name="robots" content="noindex, nofollow" />\n'
+        "    <title>Chart wheel — Ada Lovelace — astro-report</title>\n"
+        "  </head>\n"
+        "  <body>\n"
+        "    <main>\n"
+        "      <h1>Chart wheel — Ada Lovelace</h1>\n"
+        "      <svg>WHEEL</svg>\n"
+        "    </main>\n"
+        "  </body>\n"
+        "</html>"
+    )
+    assert rendered.rstrip("\n") == expected
+
+
 # --- Client name is escaped in the rendered SVG ---------------------------------------
 
 

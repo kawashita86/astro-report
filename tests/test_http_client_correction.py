@@ -446,6 +446,9 @@ def test_confirmed_correction_supersedes_the_old_chart_and_updates_the_client(
 
     assert response.status_code == 200, response.text
     assert "corrected" in response.text.lower()
+    # epic-2-retro-item-14: the confirmed-correction success body links to the
+    # chart view so the freshly recomputed chart can be verified in one click.
+    assert f'href="/clients/{seeded.id}/chart"' in response.text
 
     charts = _charts_for(db_session, seeded.id)
     assert len(charts) == 2

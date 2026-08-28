@@ -15,6 +15,7 @@
         <p>Passed (regenerated {{ gate_result.regeneration_count }} times)</p>
         <p><a href="/report-runs/{{ run_id }}/payload">View Payload</a></p>
         <p><a href="/report-runs/{{ run_id }}/export/pdf">Export PDF</a></p>
+        <p><a href="/report-runs/{{ run_id }}/export/markdown">Download Markdown</a></p>
         {% if latest_export %}
         <div id="disposition">
           {% if latest_export.disposition is none %}
@@ -37,7 +38,7 @@
 
       {% for section_name in section_order %}
       <section>
-        <h2>{{ section_name }}</h2>
+        <h2>{{ section_titles[section_name] }}</h2>
         {% if section_name in list_section_names %}
         <ul>
           {% for item in draft[section_name] %}

@@ -60,9 +60,20 @@ class Bodies:
 class Rulers:
     """Traditional and modern house-ruler tables, one entry per zodiac sign.
 
-    ``MappingProxyType``, not a plain ``dict`` -- a frozen dataclass only
-    stops reassigning the *field*; without this, the dict object it points at
-    would still be mutable in place.
+    ``traditional``/``modern`` are ``MappingProxyType``, not plain ``dict`` --
+    ``frozen=True`` only stops the *field* being reassigned; without the proxy
+    the dict object it points at would still be mutable in place.
+
+    Deliberately **not hashable.** A ``MappingProxyType`` is itself
+    unhashable, so ``hash(Rulers(...))`` raises ``TypeError`` at runtime
+    despite ``frozen=True`` (and ``hash()`` on the enclosing
+    ``ComputationConfig`` raises for the same reason). This is intentional and
+    is not a gap to close: nothing keys a dict, populates a cache, or builds a
+    set on one of these values (epic-1-retro-item-6 confirmed only type-hint
+    uses). Where an identity or cache key for a configuration is wanted, use
+    ``ComputationConfig.content_hash`` -- the sha256 digest of
+    ``data/computation.toml`` -- never the object's hash
+    (epic-2-retro-item-17).
     """
 
     traditional: MappingProxyType[str, str]

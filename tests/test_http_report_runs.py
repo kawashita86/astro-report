@@ -598,6 +598,10 @@ def test_getting_the_draft_renders_prose_and_list_sections_localized_to_the_clie
     assert "Un mese equilibrato." in response.text
     assert "Venere sostiene i legami." in response.text
     assert "Ottimo per gli incontri." in response.text
+    # epic-6-retro-item-50: the draft view also renders the shared Italian
+    # headings, so `section_titles` must be threaded into its context too.
+    assert "<h2>Energia generale</h2>" in response.text
+    assert "energia_generale" not in response.text
     # ada's client.iana_zone is America/Chicago (UTC-6 in January):
     # 2026-01-10 15:00 UTC (perfected_at) -> 09:00 local.
     assert "2026-01-10 09:00:00 CST" in response.text
@@ -1206,17 +1210,19 @@ def test_getting_the_report_shows_all_eight_sections_and_the_gate_result(
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
     assert response.status_code == 200
-    for name in (
-        "energia_generale",
-        "amore",
-        "lavoro",
-        "denaro",
-        "benessere",
-        "giorni_favorevoli",
-        "giorni_di_attenzione",
-        "consiglio_finale",
+    # epic-6-retro-item-50: headings are the shared Italian titles, not the
+    # raw snake_case field names.
+    for heading in (
+        "Energia generale",
+        "Amore",
+        "Lavoro",
+        "Denaro",
+        "Benessere",
+        "Giorni favorevoli",
+        "Giorni di attenzione",
+        "Consiglio finale",
     ):
-        assert name in response.text
+        assert f"<h2>{heading}</h2>" in response.text
     assert "Un mese equilibrato." in response.text
     assert "Venere sostiene i legami." in response.text
     assert "Ottimo per gli incontri." in response.text
@@ -1344,17 +1350,17 @@ def test_getting_the_report_for_a_run_that_has_moved_past_gate_passed_into_expor
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
     assert response.status_code == 200
-    for name in (
-        "energia_generale",
-        "amore",
-        "lavoro",
-        "denaro",
-        "benessere",
-        "giorni_favorevoli",
-        "giorni_di_attenzione",
-        "consiglio_finale",
+    for heading in (
+        "Energia generale",
+        "Amore",
+        "Lavoro",
+        "Denaro",
+        "Benessere",
+        "Giorni favorevoli",
+        "Giorni di attenzione",
+        "Consiglio finale",
     ):
-        assert name in response.text
+        assert f"<h2>{heading}</h2>" in response.text
 
 
 @pytest.mark.parametrize("stage", ["gate_passed", "exported"])
@@ -1565,17 +1571,30 @@ def test_the_exported_html_contains_only_the_eight_sections_and_the_clients_name
     assert response.content == b"%PDF-fake"
     html = captured["html"]
     assert "Ada Lovelace" in html
+    # epic-6-retro-item-50: the client-facing export carries the Italian
+    # section titles, not the raw snake_case field names.
+    for heading in (
+        "Energia generale",
+        "Amore",
+        "Lavoro",
+        "Denaro",
+        "Benessere",
+        "Giorni favorevoli",
+        "Giorni di attenzione",
+        "Consiglio finale",
+    ):
+        assert f"<h2>{heading}</h2>" in html
+    # The raw snake_case keys must not leak as headings. Only the
+    # underscore-bearing names are safe canaries -- `amore` / `lavoro` /
+    # `denaro` / `benessere` are ordinary Italian words that legitimately
+    # occur in those sections' prose.
     for name in (
         "energia_generale",
-        "amore",
-        "lavoro",
-        "denaro",
-        "benessere",
         "giorni_favorevoli",
         "giorni_di_attenzione",
         "consiglio_finale",
     ):
-        assert name in html
+        assert name not in html
     assert "Un mese equilibrato." in html
     assert "Venere sostiene i legami." in html
     assert "Ottimo per gli incontri." in html
@@ -1702,6 +1721,163 @@ def test_the_report_view_links_to_the_export_pdf_route(
 
     assert response.status_code == 200
     assert f'href="/report-runs/{run.id}/export/pdf"' in response.text
+
+
+# --- spec-6-2b / epic-6 retro item 47: GET /report-runs/{run_id}/export/markdown ---
+#
+# Structurally identical to the /export/pdf route above -- same
+# _load_passed_report_bundle gate, same first-export-advances-stage /
+# every-export-writes-an-ExportRecord semantics -- so these mirror the PDF
+# cases, differing only in body (Markdown) and ExportRecord.format.
+
+
+def test_downloading_the_export_markdown_without_a_session_is_401(client: TestClient) -> None:
+    response = client.get(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/export/markdown"
+    )
+
+    assert response.status_code == 401
+
+
+def test_downloading_the_export_markdown_for_an_unknown_run_is_404(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/export/markdown"
+    )
+
+    assert response.status_code == 404
+
+
+def test_downloading_the_export_markdown_for_a_run_whose_gate_has_not_passed_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/markdown")
+
+    assert response.status_code == 404
+    assert _export_records(db_session) == []
+
+
+def test_downloading_the_export_markdown_for_a_terminally_failed_run_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/markdown")
+
+    assert response.status_code == 404
+
+
+def test_the_first_markdown_export_returns_the_file_and_advances_the_run_to_exported(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "First export" -- 200, a ``.md`` attachment downloads,
+    ``run.stage`` becomes ``"exported"``, exactly one ``ExportRecord`` row is
+    written with ``format == "markdown"``."""
+    ada = _create_client_with_real_chart(db_session, name="Ada Lovelace")
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/markdown")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/markdown; charset=utf-8"
+    assert response.headers["content-disposition"] == (
+        f'attachment; filename="report-{run.id}.md"'
+    )
+    body = response.text
+    # The eight Italian-titled Sections and the Client's name, nothing else.
+    assert body.startswith("# Ada Lovelace\n")
+    for heading in (
+        "## Energia generale",
+        "## Amore",
+        "## Lavoro",
+        "## Denaro",
+        "## Benessere",
+        "## Giorni favorevoli",
+        "## Giorni di attenzione",
+        "## Consiglio finale",
+    ):
+        assert heading in body
+    assert "Un mese equilibrato." in body
+    assert "Venere sostiene i legami." in body
+    assert "Ottimo per gli incontri." in body
+    assert str(run.id) not in body
+    assert "Gate" not in body
+    assert "Payload" not in body
+
+    assert run.stage == "exported"
+    records = _export_records(db_session)
+    assert len(records) == 1
+    assert records[0].format == "markdown"
+    assert records[0].client_id == ada.id
+
+
+def test_repeating_the_markdown_export_writes_a_new_record_but_leaves_the_stage(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Repeat export" -- ``run.stage`` stays ``"exported"``, one
+    more ``ExportRecord(format="markdown")`` row per call."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    first = authenticated_client.get(f"/report-runs/{run.id}/export/markdown")
+    second = authenticated_client.get(f"/report-runs/{run.id}/export/markdown")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.text == second.text
+    assert run.stage == "exported"
+    records = _export_records(db_session)
+    assert len(records) == 2
+    assert {record.format for record in records} == {"markdown"}
+
+
+def test_the_report_view_links_to_the_export_markdown_route(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/export/markdown"' in response.text
 
 
 # --- Story 6.3: elapsed_seconds at export time -------------------------------------

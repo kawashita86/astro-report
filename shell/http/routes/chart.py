@@ -6,9 +6,10 @@ anything built on the stored chart.
 
 Reads only: no Client, no Natal Chart and no other row is ever written here.
 An unknown Client id, or a Client with no stored chart, is a plain 404 --
-no new domain error type (the story's Boundaries & Constraints). Nothing
-built by this or a later story ever links to this route from a Report or
-export artifact (FR-5).
+no new domain error type (the story's Boundaries & Constraints). The
+``create_client`` / ``correct_client`` success pages now link here as a
+one-click verification shortcut (epic-2-retro-item-14); FR-5 still holds --
+no Report or export artifact ever links to this route.
 
 Authenticated by default: nothing here is named in
 ``shell.http.auth.ALLOWLIST``, so ``AuthMiddleware`` guards this route
@@ -57,6 +58,19 @@ def chart_wheel_view(
     if stored_chart is None:
         raise HTTPException(status_code=404)
 
+    # Warn (never refuse) when the chart was computed under a different
+    # `computation.toml` than the one now running: stored planetary positions
+    # are shown as-is, but natal aspects are recomputed below at today's
+    # `orbs.natal`, so a config edit since the chart was stored can make the
+    # rendered aspects disagree with the stored ones. The frozen Report keeps
+    # its own hash in `ReportPayload`; this wheel is only a verification aid,
+    # so a non-blocking banner (`chart_wheel.html`) is the right signal
+    # (epic-2-retro-item-11). The equal-hash path renders exactly as before.
+    config_stale = (
+        stored_chart.computation_config_content_hash
+        != request.app.state.computation_config.content_hash
+    )
+
     subject = chart_wheel.build_subject(client, stored_chart)
     orb = request.app.state.computation_config.orbs.natal
     chart_data = ChartDataFactory.create_natal_chart_data(
@@ -65,5 +79,7 @@ def chart_wheel_view(
     svg = ChartDrawer(chart_data).generate_svg_string()
 
     return _templates.TemplateResponse(
-        request, "chart_wheel.html", {"client": client, "svg": svg}
+        request,
+        "chart_wheel.html",
+        {"client": client, "svg": svg, "config_stale": config_stale},
     )

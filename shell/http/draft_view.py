@@ -27,6 +27,7 @@ __all__ = [
     "LIST_SECTION_NAMES",
     "PROSE_SECTION_NAMES",
     "SECTION_ORDER",
+    "SECTION_TITLES",
     "deserialize_generated_draft",
     "render_draft",
 ]
@@ -56,6 +57,28 @@ LIST_SECTION_NAMES: tuple[str, ...] = ("giorni_favorevoli", "giorni_di_attenzion
 #: Section 8, ``consiglio_finale``, ahead of Sections 6-7 -- wrong for prose
 #: meant to be read aloud as a script, in order).
 SECTION_ORDER: tuple[str, ...] = tuple(field.name for field in dataclass_fields(GeneratedDraft))
+
+#: The Italian display heading for each ``SECTION_ORDER`` name -- the single
+#: source of truth for section headings across ``report.html``,
+#: ``report_draft.html``, ``report_export.html`` and the Markdown export
+#: (``shell/http/report_markdown.py``), so those four never drift
+#: (epic-6-retro-item-50). An explicit dict, not a
+#: ``.replace("_", " ").title()`` transform: Italian title casing keeps
+#: prepositions and articles lowercase ("Giorni di attenzione", not "Giorni Di
+#: Attenzione"), which a generic transform gets wrong. Exactly one entry per
+#: ``SECTION_ORDER`` name -- a missing key is a ``KeyError`` at render time,
+#: and ``tests/test_draft_view.py`` binds the two together so a future
+#: ``GeneratedDraft`` field cannot silently ship without an Italian heading.
+SECTION_TITLES: dict[str, str] = {
+    "energia_generale": "Energia generale",
+    "amore": "Amore",
+    "lavoro": "Lavoro",
+    "denaro": "Denaro",
+    "benessere": "Benessere",
+    "giorni_favorevoli": "Giorni favorevoli",
+    "giorni_di_attenzione": "Giorni di attenzione",
+    "consiglio_finale": "Consiglio finale",
+}
 
 #: The date field that names "the day" for one day-list entry, keyed by the
 #: entry's own ``"kind"`` tag (``core/payload/freeze.py``'s ``_tag_event``,

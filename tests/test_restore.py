@@ -60,7 +60,12 @@ from shell.restore import (
     load_backup,
     restore_backup,
 )
-from tests._release_validation import REPO_ROOT, assert_record_not_stale, load_record_meta
+from tests._release_validation import (
+    REPO_ROOT,
+    assert_outcome_permits_release,
+    assert_record_not_stale,
+    load_record_meta,
+)
 from tests.test_runner_driver import _create_client_and_chart, _drive
 
 RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "restore-rehearsal.md"
@@ -813,6 +818,7 @@ _EXPECTED_KEYS = {
     "rows_restored",
     "report_reopened",
     "claims_traceable",
+    "rehearsed_against",
     "outcome",
 }
 
@@ -935,7 +941,33 @@ def test_outcome_is_valid(meta: dict[str, object]) -> None:
     )
 
 
+def test_rehearsed_against_is_a_known_value(meta: dict[str, object]) -> None:
+    """epic-8-retro-item-65: the bespoke evidence field gating `outcome =
+    "pass"` must be one of the two recognised values -- a typo like
+    "real_postgres" would otherwise slip through the `outcome = "blocked"`
+    window undetected."""
+    assert meta["rehearsed_against"] in {"in-process-sqlite", "real-postgres"}, (
+        f'`rehearsed_against` must be "in-process-sqlite" or "real-postgres", '
+        f"got {meta['rehearsed_against']!r}"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="epic-8-retro-item-65: restore-rehearsal.md honestly records "
+    'outcome = "blocked" -- the operator dry-run of `python -m shell.restore` '
+    'against a real Postgres has not happened, so `rehearsed_against` is '
+    '"in-process-sqlite". When that dry-run is done and the field flips to '
+    '"real-postgres" this test passes -> xfail_strict fires an XPASS -> '
+    "remove this marker.",
+)
 def test_outcome_permits_release(meta: dict[str, object]) -> None:
+    assert_outcome_permits_release(
+        meta,
+        evidence_field="rehearsed_against",
+        evidence_value="real-postgres",
+        record_label="restore-rehearsal",
+    )
     assert meta["outcome"] == "pass", (
         "release blocked until the restore rehearsal passes "
         f'(outcome = {meta["outcome"]!r}, expected "pass")'

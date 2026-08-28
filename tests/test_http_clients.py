@@ -301,6 +301,10 @@ def test_all_fields_unambiguous_birthplace_persists_client_and_chart(
     assert clients[0].longitude == _LONGITUDE
     assert clients[0].iana_zone == "America/Chicago"
 
+    # epic-2-retro-item-14: the success body links straight to the new
+    # Client's chart-verification view, still 200, still names the outcome.
+    assert f'href="/clients/{clients[0].id}/chart"' in response.text
+
 
 # --- Real NominatimGeocoder through create_client (epic-2 retro item 10) --------
 

@@ -84,3 +84,33 @@ def assert_record_not_stale(
         f"(parses to datetime.date), got {checked!r}"
     )
     assert_not_stale(checked, max_age_days=max_age_days, record_label=record_label)
+
+
+def assert_outcome_permits_release(
+    meta: dict[str, object],
+    *,
+    evidence_field: str,
+    evidence_value: object,
+    record_label: str,
+) -> None:
+    """Guard a release-validation record's ``outcome == "pass"`` against a
+    bespoke, per-record external-evidence field (epic-8-retro-item-65).
+
+    A record may only claim ``outcome == "pass"`` once the real external step
+    it depends on has actually been carried out and recorded as
+    ``meta[evidence_field] == evidence_value`` (e.g. ``sitting_confirmed ==
+    True`` for ``latency.md``, ``rehearsed_against == "real-postgres"`` for
+    ``restore-rehearsal.md``). This helper fails when ``outcome == "pass"``
+    but that field is missing or holds any other value, naming the pending
+    step; while ``outcome`` is anything else it is a no-op (the caller's own
+    ``outcome == "pass"`` assertion already blocks release in that case).
+    """
+    if meta.get("outcome") != "pass":
+        return
+    actual = meta.get(evidence_field)
+    assert actual == evidence_value, (
+        f'{record_label} record has outcome = "pass" but `{evidence_field}` = '
+        f"{actual!r}, not {evidence_value!r} -- the external verification step this "
+        f"field records has not been completed and signed off. Set it to "
+        f'{evidence_value!r} once it has, or keep outcome = "blocked" until then'
+    )

@@ -26,7 +26,11 @@ record-guard half (mirroring `tests/test_data_terms_record.py`). The guard stays
 red while `tables_restored` drifts from `_BACKUP_MODELS`
 (`shell/http/routes/backup.py`), while `report_reopened` or `claims_traceable`
 is anything but `true`, while `checked` / `ratified_on` are in the future or
-`ratified_by` is blank, or while `outcome` is anything other than `"pass"`.
+`ratified_by` is blank, or while `outcome` is anything other than `"pass"`. Per
+epic-8-retro-item-65 the guard also refuses `outcome = "pass"` unless
+`rehearsed_against = "real-postgres"` — the in-process SQLite round-trip alone
+is not enough for a release sign-off; the operator dry-run of `python -m
+shell.restore` against a real Postgres must have been run.
 
 ```toml
 checked = 2026-08-27
@@ -38,7 +42,8 @@ tables_restored = ["client", "corpus_entry", "export_record", "gate_result", "na
 rows_restored = 12
 report_reopened = true
 claims_traceable = true
-outcome = "pass"
+rehearsed_against = "in-process-sqlite"
+outcome = "blocked"
 ```
 
 `tables_restored` is the **sorted** list of `model.__tablename__` for every
@@ -150,14 +155,23 @@ is the remaining step before this record is a full operator sign-off.
 
 ## Outcome
 
-**`pass`** — the restore is proven to work: a complete `GET /backup` export was
-restored into an empty, foreign-key-enforcing database with full fidelity, a
-previously exported Report reopened with its Payload and Gate result intact and
-its Claims still traceable, and the under-pressure runbook above is written
-down. This is established by `tests/test_restore.py`, which runs on every change.
-The operator dry-run against a real Postgres (see *Still outstanding*) is
-recommended before release and updates this record with its real values when
-done; it is not expected to change the `pass`.
+**`blocked`** — the restore is proven to work *in process*: a complete
+`GET /backup` export was restored into an empty, foreign-key-enforcing database
+with full fidelity, a previously exported Report reopened with its Payload and
+Gate result intact and its Claims still traceable, and the under-pressure
+runbook above is written down. This is established by `tests/test_restore.py`,
+which runs on every change.
+
+What holds `outcome` at `blocked` is `rehearsed_against = "in-process-sqlite"`:
+the operator dry-run of `python -m shell.restore` against a freshly provisioned
+empty **Neon** Postgres branch (see *Still outstanding*) has not been run. Per
+epic-8-retro-item-65 the guard now refuses `outcome = "pass"` while
+`rehearsed_against` is not `"real-postgres"`, so `test_outcome_permits_release`
+is a strict `xfail` until that dry-run is done — at which point set
+`rehearsed_against = "real-postgres"`, fill in the real `source_backup` /
+`rows_restored` / `checked` / `ratified_*` values, set `outcome = "pass"`, and
+remove the `xfail` marker. The in-process round-trip is not expected to be
+contradicted by that run.
 
 ## Re-rehearse triggers
 

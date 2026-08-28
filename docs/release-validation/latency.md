@@ -9,7 +9,10 @@ never measured. This file is the durable, dated record of that measurement. The
 machine-readable block below is parsed by `tests/test_latency_record.py`; the
 guard suite stays red while a measured p90 sits outside its recorded budget,
 while a recorded budget drifts from `epics.md`'s NFR-5 / NFR-10, or while
-`outcome` is anything other than `"pass"`.
+`outcome` is anything other than `"pass"`. Per epic-8-retro-item-65 the guard
+also refuses `outcome = "pass"` unless `sitting_confirmed = true` — AC-4's
+human half (Francesco's forty-report one-sitting produce → review → export)
+must actually have happened, not just the machine half.
 
 ```toml
 checked = 2026-08-27
@@ -24,7 +27,8 @@ report_p90_seconds = 119
 month_scan_budget_seconds = 10
 month_scan_p90_seconds = 1
 session_reports = 40
-outcome = "pass"
+sitting_confirmed = false
+outcome = "blocked"
 ```
 
 ## Result
@@ -194,22 +198,27 @@ the UI — is confirmed separately:
 
 ## Outcome
 
-**`pass`** — the full-month-scan p90 and the single-generation-call per-Report
-p90 are both measured and within their NFR budgets; PRD Assumptions 3 and 4 are
-resolved with the measured values. The one open risk — a real Report that needs
-a citation- or Gate-driven regeneration can exceed the 3-minute budget — is
-recorded above as a Known limitation with a defined re-measurement against
-post-launch traffic, and is accepted for release.
+**`blocked`** — the *measurements* are done and within budget: the
+full-month-scan p90 and the single-generation-call per-Report p90 are both
+measured and within their NFR budgets, and PRD Assumptions 3 and 4 are resolved
+with the measured values. The one open measurement risk — a real Report that
+needs a citation- or Gate-driven regeneration can exceed the 3-minute budget —
+is recorded above as a Known limitation with a defined re-measurement against
+post-launch traffic.
 
-Ratified by Francesco on 2026-08-27, confirming the measured values, the
+What holds `outcome` at `blocked` is **AC-4's human half**: one real produce →
+review → export sitting of forty Reports through the UI (see Throughput, marked
+PENDING) has not happened. The machine half (40 `drive()` runs to `gate_passed`,
+zero failures) is proven above, but `sitting_confirmed = false` in the block
+above until Francesco runs that sitting and signs it off. Per
+epic-8-retro-item-65 the guard now refuses `outcome = "pass"` while
+`sitting_confirmed` is false, so `test_outcome_permits_release` is a strict
+`xfail` until the sitting is done — at which point flip `sitting_confirmed` to
+`true`, set `outcome = "pass"`, and remove the `xfail` marker.
+
+Measurements ratified by Francesco on 2026-08-27 (the measured values, the
 single-call composition, and the decision to record the regeneration risk
-rather than revise the budget.
-
-AC-4's human half — one real produce → review → export sitting of forty Reports
-through the UI — is **still outstanding** (see Throughput, marked PENDING). The
-machine half (40 `drive()` runs to `gate_passed`, zero failures) is proven
-above; `outcome = "pass"` reflects the measurements taken, not that the UI
-sitting has happened.
+rather than revise the budget); release sign-off waits on the sitting.
 
 ## Re-measure trigger
 

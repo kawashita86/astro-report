@@ -47,10 +47,12 @@ from shell.http.app import get_session
 from shell.http.draft_view import (
     LIST_SECTION_NAMES,
     SECTION_ORDER,
+    SECTION_TITLES,
     deserialize_generated_draft,
     render_draft,
 )
 from shell.http.payload_view import localize_payload
+from shell.http.report_markdown import render_report_markdown
 from shell.ports.generator import Generator
 from shell.runner.driver import drive
 
@@ -353,6 +355,7 @@ def view_report_draft(
         "draft": rendered,
         "section_order": SECTION_ORDER,
         "list_section_names": LIST_SECTION_NAMES,
+        "section_titles": SECTION_TITLES,
     }
     if run.failed_at is not None:
         stored_gate_result = session.exec(
@@ -423,6 +426,7 @@ def view_report(
             "draft": bundle.rendered,
             "section_order": SECTION_ORDER,
             "list_section_names": LIST_SECTION_NAMES,
+            "section_titles": SECTION_TITLES,
             "run_id": run_id,
             "run": bundle.run,
             "gate_result": stored_gate_result,
@@ -465,6 +469,19 @@ def download_report_pdf(
     (Story 6.3) is computed here, from ``run.created_at`` (Client selection)
     to now, never estimated later; its ``disposition`` starts ``NULL`` and is
     set afterward, in one click, by ``record_export_disposition`` below.
+
+    **Accepted GET-with-side-effects deviation (epic-6-retro-item-49).** This
+    route mutates on ``GET``: every hit writes an ``ExportRecord`` row, the
+    first advances ``run.stage``, and it commits -- on any ``GET``, including
+    an incidental one from a browser prefetch or a crawler. That is accepted,
+    not a bug, on the same rationale already ratified for ``GET /backup`` (a
+    plain-link download; moving it to ``POST`` was declined): an incidental
+    hit only writes a harmless extra ``ExportRecord``, and the ``run.stage``
+    advance is monotonic and idempotent, so there is no analogue here of the
+    staleness-warning-clearing risk that motivated gating ``/backup``'s
+    ``backup_record`` write behind ``?record=1``. ``download_report_markdown``
+    below carries the same deviation. To be folded into ``docs/decisions/``
+    once retro item 66 (start that index) lands.
     """
     bundle = _load_passed_report_bundle(session, run_id)
 
@@ -474,6 +491,7 @@ def download_report_pdf(
             "draft": bundle.rendered,
             "section_order": SECTION_ORDER,
             "list_section_names": LIST_SECTION_NAMES,
+            "section_titles": SECTION_TITLES,
         }
     )
     pdf_bytes = html_to_pdf(export_html)
@@ -491,6 +509,60 @@ def download_report_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="report-{run_id}.pdf"'},
+    )
+
+
+@router.get("/report-runs/{run_id}/export/markdown", include_in_schema=False)
+def download_report_markdown(
+    run_id: UUID, request: Request, session: Session = Depends(get_session)
+) -> Response:
+    """Download a passed Report's eight Sections plus the Client's name as a
+    standalone Markdown file (spec-6-2b, epic-6 retrospective item 47) -- the
+    plain-text sibling of :func:`download_report_pdf`, for pasting into an
+    email or a message without the PDF round-trip.
+
+    Structurally identical to :func:`download_report_pdf`: the same
+    ``_load_passed_report_bundle`` gate (404 on "no such run" / "Gate hasn't
+    passed yet", ``RuntimeError`` on any row it implies being missing once a
+    ``Report`` exists), the same first-export-advances-``run.stage``-to-
+    ``"exported"``-once and every-export-writes-one-``ExportRecord`` semantics,
+    the same ``elapsed_seconds`` computed from ``run.created_at``. Only the
+    body serializer (``render_report_markdown`` instead of ``html_to_pdf``)
+    and ``ExportRecord.format`` (``"markdown"``) differ. ``ExportRecord.format``
+    already stores an arbitrary string, so no schema change and no migration.
+
+    The Markdown body carries only the eight Italian-titled Sections and the
+    Client's name -- no chart wheel, no Payload, no Gate result, no run
+    identifier, no internal metadata. It is the plain-text counterpart of
+    ``report_export.html`` with the same section set and ordering; the
+    per-entry layout is not line-for-line identical (an uncited day entry
+    renders date-only in Markdown -- see ``render_report_markdown``). The
+    accepted GET-with-side-effects deviation recorded on
+    :func:`download_report_pdf` (retro item 49) applies here verbatim.
+    """
+    bundle = _load_passed_report_bundle(session, run_id)
+
+    markdown_body = render_report_markdown(
+        bundle.rendered,
+        client_name=bundle.client.name,
+        section_order=SECTION_ORDER,
+        list_section_names=LIST_SECTION_NAMES,
+        section_titles=SECTION_TITLES,
+    )
+
+    if bundle.run.stage != "exported":
+        bundle.run.stage = "exported"
+        session.add(bundle.run)
+    elapsed_seconds = int((datetime.now(UTC) - bundle.run.created_at).total_seconds())
+    store_export_record(
+        session, report=bundle.report, format="markdown", elapsed_seconds=elapsed_seconds
+    )
+    session.commit()
+
+    return Response(
+        content=markdown_body,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="report-{run_id}.md"'},
     )
 
 

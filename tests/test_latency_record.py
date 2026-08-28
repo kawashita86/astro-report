@@ -32,7 +32,12 @@ import re
 
 import pytest
 
-from tests._release_validation import REPO_ROOT, assert_record_not_stale, load_record_meta
+from tests._release_validation import (
+    REPO_ROOT,
+    assert_outcome_permits_release,
+    assert_record_not_stale,
+    load_record_meta,
+)
 
 RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "latency.md"
 EPICS_FILE = REPO_ROOT / "_bmad-output" / "planning-artifacts" / "epics.md"
@@ -68,6 +73,7 @@ _EXPECTED_KEYS = {
     "month_scan_p90_seconds",
     "month_scan_budget_seconds",
     "session_reports",
+    "sitting_confirmed",
     "outcome",
 }
 
@@ -161,7 +167,31 @@ def test_outcome_is_valid(meta: dict[str, object]) -> None:
     )
 
 
+def test_sitting_confirmed_is_a_bool(meta: dict[str, object]) -> None:
+    """epic-8-retro-item-65: the bespoke evidence field gating `outcome =
+    "pass"` must be a real TOML boolean -- a typo like a string "false" would
+    otherwise slip through the whole `outcome = "blocked"` window undetected."""
+    assert isinstance(meta["sitting_confirmed"], bool), (
+        f"`sitting_confirmed` must be a TOML boolean (true/false), got "
+        f"{meta['sitting_confirmed']!r}"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="epic-8-retro-item-65: latency.md honestly records outcome = "
+    '"blocked" -- AC-4\'s human half (Francesco\'s forty-report one-sitting '
+    "produce -> review -> export) has not happened, so `sitting_confirmed` is "
+    "false. When that sitting is done and the field flips to true this test "
+    "passes -> xfail_strict fires an XPASS -> remove this marker.",
+)
 def test_outcome_permits_release(meta: dict[str, object]) -> None:
+    assert_outcome_permits_release(
+        meta,
+        evidence_field="sitting_confirmed",
+        evidence_value=True,
+        record_label="latency",
+    )
     assert meta["outcome"] == "pass", (
         "release blocked until latency is measured, budgets reconciled and the "
         f'record ratified (outcome = {meta["outcome"]!r}, expected "pass")'
@@ -404,6 +434,7 @@ def test_measure_latency(capsys: pytest.CaptureFixture[str]) -> None:
             f"month_scan_budget_seconds = {_MONTH_SCAN_BUDGET_SECONDS}",
             f"month_scan_p90_seconds = {month_scan_p90_seconds}",
             f"session_reports = {_RUN_COUNT}",
+            "sitting_confirmed = false",
             'outcome = "blocked"',
             "```",
             "",

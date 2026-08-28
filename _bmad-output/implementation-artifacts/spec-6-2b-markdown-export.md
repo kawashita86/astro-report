@@ -2,7 +2,7 @@
 title: 'Export a passed Report to Markdown'
 type: 'feature'
 created: '2026-08-28'
-status: 'ready-for-dev'
+status: 'done'
 review_loop_iteration: 0
 context:
   - '_bmad-output/implementation-artifacts/spec-6-2-export-a-passed-report-to-pdf-and-markdown.md'

@@ -9,6 +9,14 @@
   <body>
     <main>
       <h1>Chart wheel — {{ client.name }}</h1>
+      {%- if config_stale %}
+      <p role="alert" id="config-stale-warning">
+        Warning: this chart was computed with a different computation config
+        than the one now running. Stored planetary positions are shown as-is,
+        but natal aspects are recomputed at the current orb settings, so they
+        may not match the stored chart. Correct the Client to recompute it.
+      </p>
+      {%- endif %}
       {{ svg | safe }}
     </main>
   </body>
