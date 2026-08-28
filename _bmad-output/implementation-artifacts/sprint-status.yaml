@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 08-27-2026 22:30
+last_updated: 2026-08-28
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -208,7 +208,7 @@ action_items:
       and correct_client_and_chart() instead of the current verbatim-duplicated construction
       block"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-08-17.md"
   - id: "epic-2-retro-item-14-link-create_client-s-and-correct_client"
     epic: 2
@@ -254,7 +254,7 @@ action_items:
       implementations (aspects.py:212,260; stations.py:183,201; ingresses.py:210,248;
       lunations.py:185,229) into one shared helper module"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-08-20.md"
   - id: "epic-3-retro-item-20-give-report_run_poll-html-get-report-run"
     epic: 3
@@ -297,7 +297,7 @@ action_items:
       (shell/adapters/local/generator.py) doesn't reach into the Gemini adapter's
       namespace, and test_never_imports_google_genai verifies the boundary it names"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-08-22.md"
   - id: "epic-4-retro-item-25-reject-a-future-dated-gemini_data_terms_"
     epic: 4
@@ -532,7 +532,7 @@ action_items:
       -> ReportDraft -> ReportPayload -> Client + render_draft block (view_report_payload/view_report_draft/view_report/download_report_pdf).
       Bundle with epic-2-retro-item-13."
     owner: "whoever next touches report_runs.py"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-52-broaden-real-foreign-key-enforcement-acr"
     epic: 6
@@ -541,7 +541,7 @@ action_items:
       6.4 regression), and promote shell/adapters/postgres/report_run.py::_UTCDateTime
       to an explicit shared module now that 3 adapter modules import it."
     owner: "dev loop"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-08-27.md"
   - id: "epic-6-retro-item-53-document-operator-handling-of-the-get-ba"
     epic: 6
@@ -557,7 +557,7 @@ action_items:
       engine fixture so the FR-29 corpus_entry cascade tests exercise real DB-level
       FK enforcement (client_id FK has no ON DELETE clause). Fold into epic-6-retro-item-52."
     owner: "dev loop"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
   - id: "epic-7-retro-item-55-re-prioritise-epic-6-retro-item-46-as-ga"
     epic: 7
@@ -593,7 +593,7 @@ action_items:
       copied verbatim across clients.py, style_guide.py and corpus.py, before a 4th
       form route needs it. Bundle with epic-2-retro-item-13 / epic-6-retro-item-51."
     owner: "dev loop"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-08-27.md"
   - id: "epic-8-retro-item-59-run-the-story-8-5-operator-restore-rehea"
     epic: 8
@@ -628,7 +628,7 @@ action_items:
       / test_latency_record.py / test_storage_growth_record.py / test_restore.py;
       add a shared checked max-age staleness assertion."
     owner: "whoever next adds a release-validation record"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-08-27.md"
   - id: "epic-8-retro-item-63-give-the-opt-in-measurement-harnesses-te"
     epic: 8
