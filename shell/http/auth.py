@@ -147,7 +147,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if request.url.path in ALLOWLIST:
+        # Match the allowlist against the path with any trailing slash
+        # trimmed: a health checker (Render's own included) or a hand-typed
+        # probe routinely hits `/healthz/`, and Starlette's slash-redirect
+        # runs in the router -- *after* this middleware -- so `/healthz/`
+        # would get a 401 here before it could ever redirect to `/healthz`.
+        # `ALLOWLIST` itself stays canonical (no trailing slash).
+        normalized_path = request.url.path.rstrip("/") or "/"
+        if request.url.path in ALLOWLIST or normalized_path in ALLOWLIST:
             return await call_next(request)
 
         settings: Settings = request.app.state.settings

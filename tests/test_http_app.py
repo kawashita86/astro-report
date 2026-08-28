@@ -187,6 +187,18 @@ def test_healthz_needs_no_credentials(client: TestClient) -> None:
     assert response.status_code == 204
 
 
+def test_healthz_with_a_trailing_slash_is_not_rejected_by_auth(client: TestClient) -> None:
+    """A health checker (Render's included) or a hand-typed probe that hits
+    `/healthz/` must not get the middleware's empty-body 401: the allowlist
+    check tolerates a trailing slash, then Starlette redirects to the
+    canonical `/healthz`. A 401 here would fail the deploy's health check."""
+    response = client.get("/healthz/", headers={}, follow_redirects=False)
+
+    assert response.status_code != 401
+    response = client.get("/healthz/", headers={})
+    assert response.status_code == 204
+
+
 # --- Nothing else is exposed without authentication ---------------------------
 
 
