@@ -1,7 +1,7 @@
 /*
  * astro-report application-shell behaviour — first-party, no dependencies.
  *
- * Three jobs, all progressive enhancements over a shell that already works
+ * Five jobs, all progressive enhancements over a shell that already works
  * without JavaScript:
  *
  *   1. Theme toggle — flip `data-theme` on <html>, persist the choice to
@@ -18,6 +18,23 @@
  *      in `[data-client-filter]` hides non-matching `[data-client-row]`s, keeps
  *      `[data-client-count]` at `{shown} di {total}`, and swaps the table for
  *      an inline no-match line when nothing matches. No server round-trip.
+ *
+ *   4. Delete-confirm modal (Story 9.4) — intercept the `[data-delete-client]`
+ *      trigger on the Anagrafica screen, open the inline `[data-delete-modal]`
+ *      instead of navigating, trap focus with initial focus on `Annulla`
+ *      (`[data-delete-cancel]`), close on Esc / scrim click / cancel and
+ *      restore focus to the trigger. The `danger` submit
+ *      (`[data-delete-submit]`) stays disabled until the trimmed
+ *      `[data-delete-confirm]` value exactly equals the modal's
+ *      `data-client-name` (both sides trimmed). Opening the modal closes the
+ *      drawer and makes the rest of the page `inert` / `aria-hidden`; closing
+ *      it clears the typed value, re-disables the submit, undoes the inerting,
+ *      and restores focus to the trigger. The route contract is untouched —
+ *      the no-JS path is the restyled `GET /clients/{id}/delete` page.
+ *
+ *   5. Form-level error summary — on a 422 re-render, move focus to the
+ *      focusable `role="alert"` `.banner--danger` so a keyboard / screen
+ *      reader user lands on the error.
  *
  * All shell transitions are disabled by tokens.css under
  * `prefers-reduced-motion`; this file adds no scripted animation.
@@ -225,5 +242,181 @@
     // keystroke — run once now so the rows, the count, and the no-match line
     // always match the field's current contents.
     applyFilter();
+  }
+
+  /* ---- 4. Delete-confirm modal (Story 9.4) ------------------------------- */
+
+  var deleteScrim = document.querySelector("[data-delete-modal]");
+  if (deleteScrim) {
+    var deleteTrigger = document.querySelector("[data-delete-client]");
+    var deleteCancel = deleteScrim.querySelector("[data-delete-cancel]");
+    var deleteSubmit = deleteScrim.querySelector("[data-delete-submit]");
+    var deleteConfirmField = deleteScrim.querySelector("[data-delete-confirm]");
+    var deleteReturnFocusTo = null;
+    var expectedName = (deleteScrim.dataset.clientName || "").trim();
+
+    var deleteModalOpen = function () {
+      return !deleteScrim.hidden;
+    };
+
+    var deleteFocusables = function () {
+      return Array.prototype.filter.call(
+        deleteScrim.querySelectorAll(FOCUSABLE),
+        function (el) {
+          return el.offsetParent !== null || el === document.activeElement;
+        }
+      );
+    };
+
+    // Take the rest of the page out of the a11y tree / tab order while the
+    // modal is open: `inert` where supported, `aria-hidden` as the fallback.
+    // Everything except the modal scrim itself.
+    var backgroundInertTargets = function () {
+      var targets = [];
+      var sidebar = document.querySelector("[data-app-sidebar]");
+      var header = document.querySelector(".app-header");
+      if (sidebar) {
+        targets.push(sidebar);
+      }
+      if (header) {
+        targets.push(header);
+      }
+      var mainContent = document.getElementById("main-content");
+      if (mainContent) {
+        Array.prototype.forEach.call(mainContent.children, function (child) {
+          if (child !== deleteScrim) {
+            targets.push(child);
+          }
+        });
+      }
+      return targets;
+    };
+
+    var setBackgroundInert = function (on) {
+      backgroundInertTargets().forEach(function (el) {
+        if (on) {
+          el.setAttribute("inert", "");
+          el.setAttribute("aria-hidden", "true");
+        } else {
+          el.removeAttribute("inert");
+          el.removeAttribute("aria-hidden");
+        }
+      });
+    };
+
+    var syncDeleteSubmit = function () {
+      if (!deleteSubmit || !deleteConfirmField) {
+        return;
+      }
+      // Typed-name gate: browser-only friction, never enforced server-side.
+      deleteSubmit.disabled = deleteConfirmField.value.trim() !== expectedName;
+    };
+
+    var closeDeleteModal = function () {
+      if (!deleteModalOpen()) {
+        return;
+      }
+      deleteScrim.hidden = true;
+      setBackgroundInert(false);
+      document.removeEventListener("keydown", onDeleteKeydown, true);
+      // Reset the friction: the next open starts from a blank field and a
+      // disabled submit even if the operator typed the full name last time.
+      if (deleteConfirmField) {
+        deleteConfirmField.value = "";
+      }
+      if (deleteSubmit) {
+        deleteSubmit.disabled = true;
+      }
+      if (
+        deleteReturnFocusTo &&
+        typeof deleteReturnFocusTo.focus === "function"
+      ) {
+        deleteReturnFocusTo.focus();
+      }
+      deleteReturnFocusTo = null;
+    };
+
+    var openDeleteModal = function () {
+      if (deleteModalOpen()) {
+        return;
+      }
+      // The <900px drawer's own capturing keydown trap must not compete with
+      // the modal's — close it first.
+      closeDrawer();
+      deleteReturnFocusTo =
+        deleteTrigger ||
+        (document.activeElement &&
+        typeof document.activeElement.focus === "function"
+          ? document.activeElement
+          : null);
+      deleteScrim.hidden = false;
+      setBackgroundInert(true);
+      document.addEventListener("keydown", onDeleteKeydown, true);
+      // Initial focus lands on cancel, never on the destructive button.
+      if (deleteCancel) {
+        deleteCancel.focus();
+      }
+    };
+
+    function onDeleteKeydown(event) {
+      if (!deleteModalOpen()) {
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDeleteModal();
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      var items = deleteFocusables();
+      if (items.length === 0) {
+        return;
+      }
+      var first = items[0];
+      var last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    if (deleteTrigger) {
+      deleteTrigger.addEventListener("click", function (event) {
+        event.preventDefault();
+        openDeleteModal();
+      });
+    }
+
+    if (deleteCancel) {
+      deleteCancel.addEventListener("click", closeDeleteModal);
+    }
+
+    // Scrim click (outside the dialog card) cancels; a click inside does not.
+    deleteScrim.addEventListener("click", function (event) {
+      if (event.target === deleteScrim) {
+        closeDeleteModal();
+      }
+    });
+
+    if (deleteConfirmField && deleteSubmit) {
+      deleteConfirmField.addEventListener("input", syncDeleteSubmit);
+      syncDeleteSubmit();
+    }
+  }
+
+  /* ---- 5. Form-level error summary takes focus -------------------------- */
+
+  // On a 422 re-render the three client-mutation templates emit a focusable
+  // `role="alert"` `.banner--danger`; move focus to it so a keyboard / screen
+  // reader user lands on the error. This deferred script runs post-parse, so
+  // the banner (only present on the error re-render) is already in the DOM.
+  var errorSummary = document.querySelector(".banner--danger[tabindex='-1']");
+  if (errorSummary) {
+    errorSummary.focus();
   }
 })();

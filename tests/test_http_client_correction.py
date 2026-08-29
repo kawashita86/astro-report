@@ -37,7 +37,12 @@ from core.errors import EphemerisIntegrityError, PlaceResolutionError
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.place import PlaceCandidate, ResolvedPlace
 from shell.adapters.nominatim.geocoder import NominatimGeocoder
-from shell.adapters.postgres.client import Client, StoredNatalChart, create_client_with_chart
+from shell.adapters.postgres.client import (
+    Client,
+    StoredNatalChart,
+    correct_client_and_chart,
+    create_client_with_chart,
+)
 from shell.adapters.postgres.place_cache import lookup_cached_place
 from shell.config import Environment, Settings
 from shell.http.app import create_app, get_session
@@ -97,6 +102,11 @@ _CORRECTION_FORM = {
     "birth_time": "06:00",
     "birthplace": "New York, NY",
 }
+
+#: A distinctive substring of the verbatim EXPERIENCE.md Italian supersede
+#: sentence (Story 9.4) — the old English "supersede" copy assertion moved
+#: here. Lower-cased so the check is case-insensitive like the one it replaces.
+_SUPERSEDE_IT = "il tema attuale viene superato"
 
 #: The ten planets, the True Node and the South Node -- every body this
 #: project's Natal Chart computes (core/types/chart.py's own docstring).
@@ -331,6 +341,24 @@ def _seed_client_with_chart(
     return client
 
 
+def _supersede_chart(db_session: Session, app_instance: FastAPI, client: Client) -> None:
+    """Give ``client`` a superseded ``StoredNatalChart`` row (mirrors the
+    deletion suite's own ``_supersede``) so the delete modal's superseded-chart
+    clause has something to name."""
+    correct_client_and_chart(
+        db_session,
+        client=client,
+        name=client.name,
+        birth_date=client.birth_date,
+        birth_time=client.birth_time,
+        resolved_place=_NEW_RESOLVED_PLACE,
+        natal_chart=_NEW_NATAL_CHART,
+        computation_config=app_instance.state.computation_config,
+        ephemeris_identity=app_instance.state.ephemeris_identity,
+    )
+    db_session.commit()
+
+
 def _charts_for(db_session: Session, client_id) -> list[StoredNatalChart]:
     return list(
         db_session.exec(select(StoredNatalChart).where(StoredNatalChart.client_id == client_id))
@@ -385,6 +413,56 @@ def test_the_edit_form_is_prefilled_from_the_client_row_and_birthplace_is_blank(
     assert birthplace_value.group(1) == ""
 
 
+# --- Restyle + delete guard (Story 9.4) ------------------------------------------
+
+
+def test_the_correction_form_is_the_restyled_field_pattern_with_the_delete_guard(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    seeded = _seed_client_with_chart(db_session, app_instance)
+
+    response = authenticated_client.get(f"/clients/{seeded.id}/edit")
+
+    assert response.status_code == 200
+    body = response.text
+
+    # The DESIGN.md form pattern: a <=560px `.form-view`, at least one `.field`
+    # with its <label> before the <input>, and a `.btn--primary` submit.
+    assert 'class="form-view"' in body
+    assert 'class="field"' in body
+    assert body.index('<label for="name"') < body.index('name="name"')
+    assert "btn btn--primary" in body
+
+    # The Anagrafica screen carries the delete trigger and a hidden, focus-trap
+    # delete modal whose typed-name gate is armed (submit disabled) and whose
+    # `data-client-name` is the client's exact name.
+    assert "data-delete-client" in body
+    hidden_modal = re.search(r'data-delete-modal\s+data-client-name="Ada Lovelace"\s+hidden', body)
+    assert hidden_modal, "no hidden [data-delete-modal] carrying the exact client name"
+    armed_submit = re.search(r"data-delete-submit\s+disabled", body)
+    assert armed_submit, "the modal's danger submit must start disabled"
+    assert "data-delete-confirm" in body
+    assert "data-delete-cancel" in body
+
+    # A client with only a current chart: the superseded-chart clause is absent.
+    assert "incluso il tema superato" not in body
+
+
+def test_the_delete_modal_names_the_retained_superseded_chart_when_one_exists(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """I/O Matrix "Delete trigger, JS": the modal consequence carries the
+    superseded-chart clause when the Client has a retained superseded chart --
+    i.e. ``has_superseded_chart`` reaches ``client_edit.html``."""
+    seeded = _seed_client_with_chart(db_session, app_instance)
+    _supersede_chart(db_session, app_instance, seeded)
+
+    response = authenticated_client.get(f"/clients/{seeded.id}/edit")
+
+    assert response.status_code == 200
+    assert "incluso il tema superato conservato da una correzione precedente" in response.text
+
+
 # --- Unknown client id -------------------------------------------------------------
 
 
@@ -417,7 +495,7 @@ def test_unconfirmed_correction_shows_a_warning_and_persists_nothing(
     response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=_CORRECTION_FORM)
 
     assert response.status_code == 200
-    assert "supersede" in response.text.lower()
+    assert _SUPERSEDE_IT in response.text.lower()
     assert 'value="Ada Corrected"' in response.text
     assert 'name="confirmed"' in response.text
 
@@ -532,7 +610,7 @@ def test_ambiguous_birthplace_shows_the_candidate_picker_and_persists_nothing(
     assert response.status_code == 200
     assert "Springfield, Illinois, USA" in response.text
     assert "Springfield, Massachusetts, USA" in response.text
-    assert "supersede" not in response.text.lower()
+    assert _SUPERSEDE_IT not in response.text.lower()
     assert len(_charts_for(db_session, seeded.id)) == 1
 
 
@@ -602,7 +680,7 @@ def test_unchanged_birthplace_text_resolves_again_on_confirm_and_the_correction_
     form = {**_CORRECTION_FORM, "birthplace": "Fort Worth, TX"}
     warning_response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=form)
     assert warning_response.status_code == 200
-    assert "supersede" in warning_response.text.lower()
+    assert _SUPERSEDE_IT in warning_response.text.lower()
 
     confirm_form = {**form, "confirmed": "1"}
     confirm_response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=confirm_form)
@@ -644,7 +722,7 @@ def test_a_fresh_places_cache_write_from_the_warning_step_survives_and_confirm_g
     warning_response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=form)
 
     assert warning_response.status_code == 200
-    assert "supersede" in warning_response.text.lower()
+    assert _SUPERSEDE_IT in warning_response.text.lower()
     assert len(geolocator.calls) == 1
     assert lookup_cached_place(db_session, "Berlin, Germany") is not None
 

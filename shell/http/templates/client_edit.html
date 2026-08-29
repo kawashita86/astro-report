@@ -3,74 +3,140 @@
 {% block page_header %}{% include "_client_tabs.html" %}{% endblock %}
 {% block content %}
       <h1>Correct Client</h1>
+
       {% if error %}
-      <p role="alert">{{ error }}</p>
+      <div class="banner banner--danger" role="alert" tabindex="-1">
+        <span class="banner__text">{{ error }}</span>
+      </div>
       {% endif %}
 
       {% if warning %}
-      <p role="alert">
-        Applying this correction will supersede the current chart. The previous chart is kept,
-        marked superseded, and stays queryable -- but any work already generated against it may no
-        longer match. Confirm to apply.
-      </p>
-      <form method="post" action="/clients/{{ client_id }}/edit">
-        <input type="hidden" name="name" value="{{ form.name or '' }}" />
-        <input type="hidden" name="birth_date" value="{{ form.birth_date or '' }}" />
-        <input type="hidden" name="birth_time" value="{{ form.birth_time or '' }}" />
-        <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
-        {% if form.candidate %}
-        <input type="hidden" name="candidate" value="{{ form.candidate }}" />
-        {% endif %}
-        <input type="hidden" name="confirmed" value="1" />
-        <button type="submit">Confirm and apply</button>
-      </form>
+      <div class="panel panel--warning">
+        <p>Applicando questa correzione il tema attuale viene superato. Il tema precedente è conservato, contrassegnato come superato e resta consultabile — ma i report già generati su di esso potrebbero non corrispondere più.</p>
+        <form method="post" action="/clients/{{ client_id }}/edit" class="panel__actions">
+          <input type="hidden" name="name" value="{{ form.name or '' }}" />
+          <input type="hidden" name="birth_date" value="{{ form.birth_date or '' }}" />
+          <input type="hidden" name="birth_time" value="{{ form.birth_time or '' }}" />
+          <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
+          {% if form.candidate %}
+          <input type="hidden" name="candidate" value="{{ form.candidate }}" />
+          {% endif %}
+          <input type="hidden" name="confirmed" value="1" />
+          <button type="submit" class="btn btn--danger">Applica correzione</button>
+          <a class="btn btn--secondary" href="/clients/{{ client_id }}/edit">Annulla</a>
+        </form>
+      </div>
       {% else %}
-      <form method="post" action="/clients/{{ client_id }}/edit">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" required value="{{ form.name or '' }}" />
+      <div class="form-view">
+        <form method="post" action="/clients/{{ client_id }}/edit">
+          <div class="field">
+            <label for="name">Name</label>
+            <input type="text" id="name" name="name" required value="{{ form.name or '' }}" />
+          </div>
 
-        <label for="birth_date">Birth date</label>
-        <input
-          type="date"
-          id="birth_date"
-          name="birth_date"
-          required
-          value="{{ form.birth_date or '' }}"
-        />
+          <div class="field">
+            <label for="birth_date">Birth date</label>
+            <input
+              type="date"
+              id="birth_date"
+              name="birth_date"
+              required
+              value="{{ form.birth_date or '' }}"
+            />
+          </div>
 
-        <label for="birth_time">Birth time</label>
-        <input
-          type="time"
-          id="birth_time"
-          name="birth_time"
-          required
-          value="{{ form.birth_time or '' }}"
-        />
+          <div class="field">
+            <label for="birth_time">Birth time</label>
+            <input
+              type="time"
+              id="birth_time"
+              name="birth_time"
+              required
+              value="{{ form.birth_time or '' }}"
+            />
+          </div>
 
-        {% if candidates %}
-        <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
-        <fieldset>
-          <legend>More than one place matched "{{ form.birthplace or '' }}" — choose one</legend>
-          {% for candidate in candidates %}
-          <label>
-            <input type="radio" name="candidate" value="{{ candidate.value }}" required />
-            {{ candidate.display_name }}
-          </label>
-          {% endfor %}
-        </fieldset>
-        {% else %}
-        <label for="birthplace">Birthplace</label>
-        <input
-          type="text"
-          id="birthplace"
-          name="birthplace"
-          required
-          value="{{ form.birthplace or '' }}"
-        />
-        <p>Birthplace is never prefilled -- retype it, even to reconfirm the same place.</p>
-        {% endif %}
+          {% if candidates %}
+          <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
+          <fieldset class="candidate-picker">
+            <legend>More than one place matched "{{ form.birthplace or '' }}" — choose one</legend>
+            {% for candidate in candidates %}
+            <label>
+              <input type="radio" name="candidate" value="{{ candidate.value }}" required />
+              <span>{{ candidate.display_name }}</span>
+            </label>
+            {% endfor %}
+          </fieldset>
+          {% else %}
+          <div class="field">
+            <label for="birthplace">Birthplace</label>
+            <input
+              type="text"
+              id="birthplace"
+              name="birthplace"
+              required
+              value="{{ form.birthplace or '' }}"
+            />
+            <p class="field__help">
+              Birthplace is never prefilled -- retype it, even to reconfirm the same place.
+            </p>
+          </div>
+          {% endif %}
 
-        <button type="submit">Review correction</button>
-      </form>
+          <button type="submit" class="btn btn--primary">Review correction</button>
+        </form>
+      </div>
+      {% endif %}
+
+      {% if not warning %}
+      <a
+        class="btn btn--danger-ghost"
+        href="/clients/{{ client_id }}/delete"
+        data-delete-client
+        >Elimina cliente</a
+      >
+
+      <div
+        class="modal-scrim"
+        data-delete-modal
+        data-client-name="{{ client.name }}"
+        hidden
+      >
+        <div
+          class="modal"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="delete-modal-title"
+          aria-describedby="delete-modal-desc"
+        >
+          <h2 id="delete-modal-title" class="modal__title">Elimina cliente</h2>
+          <p id="delete-modal-desc" class="modal__body">Elimina definitivamente {{ client.name }} e il suo tema natale{% if has_superseded_chart %}, incluso il tema superato conservato da una correzione precedente{% endif %}. Operazione irreversibile.</p>
+          <form method="post" action="/clients/{{ client_id }}/delete" class="modal__form">
+            <input type="hidden" name="confirmed" value="1" />
+            <div class="field">
+              <label for="delete-confirm-input">Digita «{{ client.name }}» per confermare.</label>
+              <input
+                type="text"
+                id="delete-confirm-input"
+                data-delete-confirm
+                autocomplete="off"
+              />
+            </div>
+            <div class="modal__actions">
+              <button type="button" class="btn btn--secondary" data-delete-cancel>
+                Annulla
+              </button>
+              <button
+                type="submit"
+                class="btn btn--danger"
+                data-delete-submit
+                disabled
+              >
+                Elimina cliente
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
       {% endif %}
 {% endblock %}

@@ -2,53 +2,67 @@
 {% block title %}New Client — astro-report{% endblock %}
 {% block content %}
       <h1>New Client</h1>
+
       {% if error %}
-      <p role="alert">{{ error }}</p>
+      <div class="banner banner--danger" role="alert" tabindex="-1">
+        <span class="banner__text">{{ error }}</span>
+      </div>
       {% endif %}
-      <form method="post" action="/clients">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" required value="{{ form.name or '' }}" />
 
-        <label for="birth_date">Birth date</label>
-        <input
-          type="date"
-          id="birth_date"
-          name="birth_date"
-          required
-          value="{{ form.birth_date or '' }}"
-        />
+      <div class="form-view">
+        <form method="post" action="/clients">
+          <div class="field">
+            <label for="name">Name</label>
+            <input type="text" id="name" name="name" required value="{{ form.name or '' }}" />
+          </div>
 
-        <label for="birth_time">Birth time</label>
-        <input
-          type="time"
-          id="birth_time"
-          name="birth_time"
-          required
-          value="{{ form.birth_time or '' }}"
-        />
+          <div class="field">
+            <label for="birth_date">Birth date</label>
+            <input
+              type="date"
+              id="birth_date"
+              name="birth_date"
+              required
+              value="{{ form.birth_date or '' }}"
+            />
+          </div>
 
-        {% if candidates %}
-        <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
-        <fieldset>
-          <legend>More than one place matched "{{ form.birthplace or '' }}" — choose one</legend>
-          {% for candidate in candidates %}
-          <label>
-            <input type="radio" name="candidate" value="{{ candidate.value }}" required />
-            {{ candidate.display_name }}
-          </label>
-          {% endfor %}
-        </fieldset>
-        {% else %}
-        <label for="birthplace">Birthplace</label>
-        <input
-          type="text"
-          id="birthplace"
-          name="birthplace"
-          required
-          value="{{ form.birthplace or '' }}"
-        />
-        {% endif %}
+          <div class="field">
+            <label for="birth_time">Birth time</label>
+            <input
+              type="time"
+              id="birth_time"
+              name="birth_time"
+              required
+              value="{{ form.birth_time or '' }}"
+            />
+          </div>
 
-        <button type="submit">Create Client</button>
-      </form>
+          {% if candidates %}
+          <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
+          <fieldset class="candidate-picker">
+            <legend>More than one place matched "{{ form.birthplace or '' }}" — choose one</legend>
+            {% for candidate in candidates %}
+            <label>
+              <input type="radio" name="candidate" value="{{ candidate.value }}" required />
+              <span>{{ candidate.display_name }}</span>
+            </label>
+            {% endfor %}
+          </fieldset>
+          {% else %}
+          <div class="field">
+            <label for="birthplace">Birthplace</label>
+            <input
+              type="text"
+              id="birthplace"
+              name="birthplace"
+              required
+              value="{{ form.birthplace or '' }}"
+            />
+          </div>
+          {% endif %}
+
+          <button type="submit" class="btn btn--primary">Create Client</button>
+        </form>
+      </div>
 {% endblock %}

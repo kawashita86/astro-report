@@ -867,3 +867,294 @@ h3 {
   margin: 0;
   color: var(--ink-secondary);
 }
+
+/* ---------------------------------------------------------------------------
+ * PROVISIONAL — Story 9.4 (Client create / correct / delete, restyled + the
+ * delete guard). Minimal component styling for the ≤560px form measure, the
+ * label-above field, the birthplace candidate picker, the four button
+ * variants, the danger form-error banner, the warning/danger panels, and the
+ * focus-trapped delete-confirm modal. Semantic tokens only; contrast holds in
+ * both themes (panel/banner tint fills >= 3:1 non-text, their body text on the
+ * tint >= 4.5:1; button label text >= 4.5:1 — `.btn--danger` takes
+ * `--surface-base` so it stays legible on the theme-flipped `--danger` fill).
+ * No transition is declared here, so the modal opens with no scripted or CSS
+ * motion under `prefers-reduced-motion` (or ever). Story 9.8 consolidates
+ * these into shared component partials — do not build on the exact class names
+ * here. Reference: DESIGN.md `## Components` (Button / Input / Candidate
+ * picker / Panel / Modal).
+ * ------------------------------------------------------------------------- */
+
+/* Form measure: DESIGN.md density split — 560px, airy field rhythm. */
+.form-view {
+  max-width: 560px;
+}
+
+.field {
+  margin-bottom: var(--space-lg);
+}
+
+.field label {
+  display: block;
+  margin-bottom: var(--space-xs);
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-label-line);
+  color: var(--ink-secondary);
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 12px;
+  background: var(--surface-base);
+  color: var(--ink-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+/* Native date/time pickers are kept as-is (DESIGN.md) — only the box is
+ * restyled, the control itself inherits `lang="it"`. */
+.field input:focus,
+.field select:focus {
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px var(--primary-100);
+}
+
+.field__help {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+  color: var(--ink-secondary);
+}
+
+.field--invalid input,
+.field--invalid select {
+  border-color: var(--danger);
+}
+
+/* Keep the invalid cue while the field has focus — the equal-specificity
+ * `.field input:focus` rule above would otherwise repaint the border. */
+.field--invalid input:focus,
+.field--invalid select:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-surface);
+}
+
+.field__error {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+  color: var(--danger);
+}
+
+/* Birthplace candidate picker — a fieldset/legend radio group, one full-width
+ * row per candidate; the selected row gets a primary-50 fill and a primary-700
+ * left marker. Without `:has` the radio still works — only the fill/marker is
+ * dropped (acceptable progressive degradation). */
+.candidate-picker {
+  margin: 0 0 var(--space-lg);
+  padding: 0;
+  border: 0;
+}
+
+.candidate-picker legend {
+  padding: 0;
+  margin-bottom: var(--space-sm);
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-label-line);
+  color: var(--ink-secondary);
+}
+
+.candidate-picker label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: 38px;
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-sm);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--ink-primary);
+  cursor: pointer;
+}
+
+.candidate-picker label:last-child {
+  margin-bottom: 0;
+}
+
+.candidate-picker label:has(input:checked) {
+  background: var(--primary-50);
+  box-shadow: inset 3px 0 0 var(--primary-700);
+}
+
+/* Selection cue that does not need `:has` — the keyboard-focused radio's row
+ * gets a primary border (the row is the only 38px target). */
+.candidate-picker label:focus-within {
+  border-color: var(--primary-500);
+}
+
+/* Buttons — four variants (DESIGN.md `## Components` → Button). 38px min
+ * height, md radius, label text. Disabled = ink-disabled on surface-sunken,
+ * no border. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  min-height: 38px;
+  padding: var(--space-sm) var(--space-base);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-label-line);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn:disabled,
+.btn[disabled] {
+  background: var(--surface-sunken);
+  color: var(--ink-disabled);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--primary-700);
+  color: var(--ink-on-primary);
+}
+
+.btn--primary:hover {
+  background: var(--primary-600);
+}
+
+.btn--secondary {
+  background: var(--surface-base);
+  color: var(--primary-700);
+  border-color: var(--border-strong);
+}
+
+.btn--secondary:hover {
+  background: var(--primary-50);
+}
+
+.btn--danger {
+  background: var(--danger);
+  color: var(--surface-base);
+}
+
+.btn--danger:hover {
+  filter: brightness(0.94);
+}
+
+.btn--danger-ghost {
+  background: transparent;
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.btn--danger-ghost:hover {
+  background: var(--danger-surface);
+}
+
+/* Danger form-error banner — mirrors `.banner--warning` with the danger role. */
+.banner--danger {
+  background: var(--danger-surface);
+  border-left-color: var(--danger);
+  color: var(--ink-primary);
+}
+
+/* Panels — the restyled supersede warning sub-state and the no-JS delete
+ * confirm. lg radius, xl padding, -surface tint, 3px left border in the
+ * severity colour. */
+.panel {
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-raised);
+}
+
+.panel--warning {
+  background: var(--warning-surface);
+  border-left: 3px solid var(--warning);
+  color: var(--ink-primary);
+}
+
+.panel--danger {
+  background: var(--danger-surface);
+  border-left: 3px solid var(--danger);
+  color: var(--ink-primary);
+}
+
+.panel__body {
+  margin: 0 0 var(--space-base);
+  color: var(--ink-primary);
+}
+
+.panel--warning > p:first-child,
+.panel--danger > p:first-child {
+  margin-top: 0;
+}
+
+.panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  margin: 0;
+}
+
+/* Delete-confirm modal — opened by shell.js over the Anagrafica screen; the
+ * no-JS path is the restyled `/clients/{id}/delete` page. `[hidden]` must beat
+ * the grid display, so it is re-asserted here. z-index sits above the drawer
+ * sidebar (50) and its scrim (40). No transition — reduced-motion safe.
+ * `safe center` + a scrollable card keep a modal taller than a short / zoomed
+ * viewport reachable instead of clipping its top. */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: safe center;
+  padding: var(--space-base);
+  overflow-y: auto;
+  background: rgba(20, 18, 33, 0.45);
+}
+
+.modal-scrim[hidden] {
+  display: none;
+}
+
+.modal {
+  width: min(480px, 100%);
+  max-height: calc(100dvh - var(--space-base) * 2);
+  overflow-y: auto;
+  padding: var(--space-xl);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-overlay);
+}
+
+.modal__title {
+  margin: 0 0 var(--space-sm);
+  color: var(--ink-primary);
+}
+
+.modal__body {
+  margin: 0 0 var(--space-base);
+  color: var(--ink-primary);
+}
+
+.modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-md);
+}

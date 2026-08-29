@@ -1,21 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Delete Client — astro-report{% endblock %}
+{% block page_header %}
+      <p class="breadcrumb"><a href="/clients">Clienti</a> / {{ client_name }}</p>
+{% endblock %}
 {% block content %}
       <h1>Delete Client</h1>
+
       {% if error %}
-      <p role="alert">{{ error }}</p>
+      <div class="banner banner--danger" role="alert" tabindex="-1">
+        <span class="banner__text">{{ error }}</span>
+      </div>
       {% endif %}
-      <p role="alert">
-        {% if has_superseded_chart -%}
-        This will permanently delete this Client and its Natal Chart, including the superseded
-        chart kept from an earlier correction.
-        {%- else -%}
-        This will permanently delete this Client and its Natal Chart.
-        {%- endif %}
-        This cannot be undone.
-      </p>
-      <form method="post" action="/clients/{{ client_id }}/delete">
-        <input type="hidden" name="confirmed" value="1" />
-        <button type="submit">Confirm delete</button>
-      </form>
+
+      <div class="form-view">
+        <div class="panel panel--danger">
+          <p class="panel__body">Elimina definitivamente {{ client_name }} e il suo tema natale{% if has_superseded_chart %}, incluso il tema superato conservato da una correzione precedente{% endif %}. Operazione irreversibile.</p>
+          <form method="post" action="/clients/{{ client_id }}/delete" class="panel__actions">
+            <input type="hidden" name="confirmed" value="1" />
+            <button type="submit" class="btn btn--danger">Elimina cliente</button>
+            <a class="btn btn--secondary" href="/clients">Annulla</a>
+          </form>
+        </div>
+      </div>
 {% endblock %}

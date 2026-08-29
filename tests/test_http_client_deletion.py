@@ -15,6 +15,7 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -173,8 +174,16 @@ def test_the_confirmation_page_states_what_will_be_removed_and_deletes_nothing(
     response = authenticated_client.get(f"/clients/{seeded.id}/delete")
 
     assert response.status_code == 200
-    assert "Client" in response.text
-    assert "chart" in response.text.lower()
+    body = response.text
+    # The verbatim EXPERIENCE.md Italian consequence names the client and the
+    # tema natale; the confirm submit is the `.btn--danger` verb button and
+    # still posts `confirmed=1` to the unchanged route.
+    assert "Ada Lovelace" in body
+    assert "tema natale" in body.lower()
+    assert "tema superato" not in body.lower()
+    assert "btn btn--danger" in body
+    assert 'name="confirmed"' in body and 'value="1"' in body
+    assert f'action="/clients/{seeded.id}/delete"' in body
     assert db_session.get(Client, seeded.id) is not None
     assert len(_charts_for(db_session, seeded.id)) == 1
 
@@ -188,7 +197,7 @@ def test_the_confirmation_page_mentions_a_superseded_chart_when_one_exists(
     response = authenticated_client.get(f"/clients/{seeded.id}/delete")
 
     assert response.status_code == 200
-    assert "superseded" in response.text.lower()
+    assert "tema superato" in response.text.lower()
     assert len(_charts_for(db_session, seeded.id)) == 2
 
 
@@ -216,7 +225,7 @@ def test_unconfirmed_delete_still_mentions_a_superseded_chart_when_one_exists(
     response = authenticated_client.post(f"/clients/{seeded.id}/delete")
 
     assert response.status_code == 200
-    assert "superseded" in response.text.lower()
+    assert "tema superato" in response.text.lower()
     assert len(_charts_for(db_session, seeded.id)) == 2
 
 
@@ -312,7 +321,7 @@ def test_confirmed_delete_at_n2_removes_the_client_and_all_three_chart_rows(
 
     confirmation = authenticated_client.get(f"/clients/{seeded.id}/delete")
     assert confirmation.status_code == 200
-    assert "superseded" in confirmation.text.lower()
+    assert "tema superato" in confirmation.text.lower()
 
     response = authenticated_client.post(
         f"/clients/{seeded.id}/delete", data={"confirmed": "1"}
@@ -416,3 +425,28 @@ def test_the_deletion_log_line_carries_only_the_client_id(
     for message in matching:
         assert "Ada Lovelace" not in message
         assert "2026-01-01" not in message
+
+
+# --- shell.js wires the browser-only typed-name guard (Story 9.4) ----------------
+
+
+def test_shell_js_wires_the_delete_confirm_guard() -> None:
+    """The typed-name gate is a progressive enhancement in ``shell.js`` only —
+    it reads ``[data-delete-confirm]`` and toggles ``[data-delete-submit]``.
+    The route stays gated solely by ``confirmed=1`` (proved by the contract
+    tests above); this pins the client-side wiring that makes the friction
+    exist at all."""
+    js = (
+        Path(__file__).resolve().parent.parent / "shell" / "http" / "static" / "shell.js"
+    ).read_text(encoding="utf-8")
+
+    assert "[data-delete-modal]" in js
+    assert "[data-delete-client]" in js
+    assert "[data-delete-confirm]" in js
+    assert "[data-delete-submit]" in js
+    assert "[data-delete-cancel]" in js
+    # The gate compares the trimmed typed value to the modal's client name.
+    assert ".value.trim()" in js
+    assert "dataset.clientName" in js
+    # Esc closes the focus-trapped modal.
+    assert '"Escape"' in js

@@ -278,7 +278,14 @@ def test_the_form_is_served_to_an_authenticated_caller(
     response = authenticated_client.get("/clients/new")
 
     assert response.status_code == 200
-    assert b"birthplace" in response.content.lower()
+    body = response.text
+    assert "birthplace" in body.lower()
+    # Story 9.4 restyle: the DESIGN.md form pattern — a <=560px `.form-view`,
+    # label-above `.field`s, and a `.btn--primary` submit.
+    assert 'class="form-view"' in body
+    assert 'class="field"' in body
+    assert body.index('<label for="name"') < body.index('name="name"')
+    assert "btn btn--primary" in body
 
 
 # --- Happy path -------------------------------------------------------------------
@@ -419,6 +426,11 @@ def test_an_ambiguous_birthplace_shows_candidates_and_persists_nothing(
     assert response.status_code == 200
     assert "Springfield, Illinois, USA" in response.text
     assert "Springfield, Massachusetts, USA" in response.text
+    # Story 9.4: the ambiguous sub-state is the `.candidate-picker`
+    # fieldset/legend radio group, in the same restyled `.form-view`.
+    assert 'class="candidate-picker"' in response.text
+    assert "<legend>" in response.text
+    assert 'class="form-view"' in response.text
     assert _clients(db_session) == []
     assert _charts(db_session) == []
 

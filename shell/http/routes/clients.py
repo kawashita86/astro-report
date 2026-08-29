@@ -155,6 +155,7 @@ def _render_edit_form(
     request: Request,
     *,
     client: Client,
+    session: Session,
     status_code: int,
     error: str | None = None,
     form: dict[str, str] | None = None,
@@ -172,6 +173,9 @@ def _render_edit_form(
             "form": form or {},
             "candidates": _candidate_context(candidates),
             "warning": warning,
+            # Presentation-only (Story 9.4): decides whether the delete modal
+            # and the no-JS confirm page name the retained superseded chart.
+            "has_superseded_chart": _has_superseded_chart(session, client.id),
         },
         status_code=status_code,
     )
@@ -181,6 +185,7 @@ def _render_delete_form(
     request: Request,
     *,
     client_id: UUID,
+    client_name: str,
     status_code: int,
     has_superseded_chart: bool,
     error: str | None = None,
@@ -188,7 +193,12 @@ def _render_delete_form(
     return _templates.TemplateResponse(
         request,
         "client_delete.html",
-        {"client_id": client_id, "has_superseded_chart": has_superseded_chart, "error": error},
+        {
+            "client_id": client_id,
+            "client_name": client_name,
+            "has_superseded_chart": has_superseded_chart,
+            "error": error,
+        },
         status_code=status_code,
     )
 
@@ -394,7 +404,7 @@ def client_edit_form(
         "birth_time": client.birth_time.strftime("%H:%M"),
         "birthplace": "",
     }
-    return _render_edit_form(request, client=client, status_code=200, form=form)
+    return _render_edit_form(request, client=client, session=session, status_code=200, form=form)
 
 
 @router.post("/clients/{client_id}/edit", include_in_schema=False)
@@ -424,6 +434,7 @@ async def correct_client(
         return _render_edit_form(
             request,
             client=client,
+            session=session,
             status_code=422,
             error="the submitted form is too large.",
         )
@@ -431,6 +442,7 @@ async def correct_client(
         return _render_edit_form(
             request,
             client=client,
+            session=session,
             status_code=422,
             error="the submitted form is not valid UTF-8.",
         )
@@ -440,6 +452,7 @@ async def correct_client(
         return _render_edit_form(
             request,
             client=client,
+            session=session,
             status_code=422,
             error=f"Required: {', '.join(missing)}.",
             form=fields,
@@ -449,6 +462,7 @@ async def correct_client(
         return _render_edit_form(
             request,
             client=client,
+            session=session,
             status_code=422,
             error=f"name must be at most {_MAX_NAME_LENGTH} characters.",
             form=fields,
@@ -460,6 +474,7 @@ async def correct_client(
         return _render_edit_form(
             request,
             client=client,
+            session=session,
             status_code=422,
             error=f"birth_date is invalid: {error}",
             form=fields,
@@ -471,6 +486,7 @@ async def correct_client(
         return _render_edit_form(
             request,
             client=client,
+            session=session,
             status_code=422,
             error=f"birth_time is invalid: {error}",
             form=fields,
@@ -490,6 +506,7 @@ async def correct_client(
                 return _render_edit_form(
                     request,
                     client=client,
+                    session=session,
                     status_code=200,
                     form=fields,
                     candidates=resolution,
@@ -497,12 +514,18 @@ async def correct_client(
             resolved = resolution
     except PlaceResolutionError as error:
         return _render_edit_form(
-            request, client=client, status_code=422, error=str(error), form=fields
+            request,
+            client=client,
+            session=session,
+            status_code=422,
+            error=str(error),
+            form=fields,
         )
     except _CANDIDATE_DECODE_ERRORS as error:
         return _render_edit_form(
             request,
             client=client,
+            session=session,
             status_code=422,
             error=f"the chosen birthplace candidate is invalid: {error}",
             form=fields,
@@ -534,7 +557,12 @@ async def correct_client(
         )
     except (ValueError, EphemerisIntegrityError) as error:
         return _render_edit_form(
-            request, client=client, status_code=422, error=str(error), form=fields
+            request,
+            client=client,
+            session=session,
+            status_code=422,
+            error=str(error),
+            form=fields,
         )
 
     if fields.get("confirmed") != "1":
@@ -542,7 +570,12 @@ async def correct_client(
         # resolved and computed successfully are shown back with a warning,
         # nothing persisted, until resubmitted with `confirmed=1`.
         return _render_edit_form(
-            request, client=client, status_code=200, form=fields, warning=True
+            request,
+            client=client,
+            session=session,
+            status_code=200,
+            form=fields,
+            warning=True,
         )
 
     correct_client_and_chart(
@@ -582,6 +615,7 @@ def client_delete_form(
     return _render_delete_form(
         request,
         client_id=client_id,
+        client_name=client.name,
         status_code=200,
         has_superseded_chart=_has_superseded_chart(session, client_id),
     )
@@ -612,6 +646,7 @@ async def delete_client(
         return _render_delete_form(
             request,
             client_id=client_id,
+            client_name=client.name,
             status_code=422,
             has_superseded_chart=_has_superseded_chart(session, client_id),
             error="the submitted form is too large.",
@@ -620,6 +655,7 @@ async def delete_client(
         return _render_delete_form(
             request,
             client_id=client_id,
+            client_name=client.name,
             status_code=422,
             has_superseded_chart=_has_superseded_chart(session, client_id),
             error="the submitted form is not valid UTF-8.",
@@ -629,6 +665,7 @@ async def delete_client(
         return _render_delete_form(
             request,
             client_id=client_id,
+            client_name=client.name,
             status_code=200,
             has_superseded_chart=_has_superseded_chart(session, client_id),
         )
