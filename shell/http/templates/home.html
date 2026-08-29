@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Home — astro-report{% endblock %}
+{% block page_header %}
+      <div class="page-header">
+        <h1>Home</h1>
+        <a class="page-header__action" href="/clients/new">Nuovo cliente</a>
+      </div>
+{% endblock %}
+{% block content %}
+      {% if backup_stale %}
+      <div class="banner banner--warning" role="alert">
+        <span class="banner__text"
+          >Backup non aggiornato — esistono nuovi report dall'ultimo backup.</span
+        >
+        <a class="banner__action" href="/backup?record=1">Esegui backup ora</a>
+      </div>
+      {% endif %}
+
+      <section class="dash-runs" aria-labelledby="dash-runs-heading">
+        <h2 id="dash-runs-heading" class="dash-runs__heading">Report recenti</h2>
+        {% if runs %}
+        <ul class="dash-runs__list">
+          {% for run in runs %}
+          <li class="dash-run">
+            <span class="dash-run__client" title="{{ run.client_name }}"
+              >{{ run.client_name }}</span
+            >
+            <span class="badge-mono">{{ run.month }}</span>
+            <span
+              class="status-badge status-badge--{{ run.badge_variant }}"
+              {% if run.failure_reason %}title="{{ run.failure_reason }}"{% endif %}
+              >{{ run.badge_text }}</span
+            >
+            <span class="dash-run__time">{{ run.updated_at }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="dash-runs__empty">
+          Nessun report avviato.
+          <a href="/clients">Vai a Clienti per avviarne uno</a>
+        </p>
+        {% endif %}
+      </section>
+
+      <nav class="dash-quick" aria-label="Azioni rapide">
+        <a href="/clients">Vai a Clienti</a>
+        <a href="/style-guide">Apri la guida di stile</a>
+      </nav>
+{% endblock %}

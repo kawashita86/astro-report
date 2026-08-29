@@ -45,7 +45,7 @@ from core.ephemeris.chart import compute_natal_chart
 from core.errors import EphemerisIntegrityError, PlaceResolutionError
 from core.types.place import PlaceCandidate
 from shell.adapters.nominatim.geocoder import NominatimGeocoder
-from shell.adapters.postgres.backup_record import latest_backup_record
+from shell.adapters.postgres.backup_record import backup_is_stale
 from shell.adapters.postgres.client import (
     Client,
     StoredNatalChart,
@@ -610,18 +610,14 @@ def _backup_is_stale(session: Session) -> bool:
     yet: there is nothing new a backup could be missing. Otherwise, no
     ``backup_record`` row at all -> stale (the safe default for a freshly
     restored database, per this story's Boundaries).
+
+    The logic itself now lives in
+    ``shell/adapters/postgres/backup_record.py::backup_is_stale`` (Story
+    9.2), read by both this page and the Home dashboard. This name is kept
+    as a one-line delegate so ``tests/test_http_backup.py``'s existing
+    import stays valid.
     """
-    newest_report_created_at = session.exec(
-        select(Report.created_at).order_by(Report.created_at.desc())
-    ).first()
-    if newest_report_created_at is None:
-        return False
-
-    latest_backup = latest_backup_record(session)
-    if latest_backup is None:
-        return True
-
-    return newest_report_created_at > latest_backup.created_at
+    return backup_is_stale(session)
 
 
 @router.get("/clients/{client_id}/reports", include_in_schema=False)

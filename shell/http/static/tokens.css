@@ -481,3 +481,195 @@ h3 {
     scroll-behavior: auto;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * PROVISIONAL — Story 9.2 (Home dashboard). Minimal component styling for the
+ * page header row, the global backup-stale banner, the recent-runs list, and
+ * the status badge. Semantic tokens only; contrast holds in both themes
+ * (badge/banner fills are >= 3:1 non-text, their text >= 4.5:1). Story 9.8
+ * consolidates these into shared component partials — do not build on the
+ * exact class names here.
+ * ------------------------------------------------------------------------- */
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.page-header h1 {
+  margin: 0;
+}
+
+.page-header__action {
+  flex: none;
+  display: inline-block;
+  min-height: var(--space-lg);
+  padding: var(--space-sm) var(--space-base);
+  border-radius: var(--radius-md);
+  background: var(--primary-700);
+  color: var(--ink-on-primary);
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-label-line);
+  text-decoration: none;
+}
+
+.page-header__action:hover {
+  background: var(--primary-600);
+}
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  padding: var(--space-md) var(--space-base);
+  margin-bottom: var(--space-lg);
+  border-radius: var(--radius-md);
+  border-left: 3px solid;
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+}
+
+.banner--warning {
+  background: var(--warning-surface);
+  border-left-color: var(--warning);
+  color: var(--ink-primary);
+}
+
+.banner__text {
+  flex: 1 1 auto;
+}
+
+.banner__action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--space-lg);
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--warning);
+  font-weight: var(--font-label-weight);
+}
+
+.dash-runs {
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.dash-runs__heading {
+  margin: 0;
+  padding: var(--space-md) var(--space-base);
+  border-bottom: 1px solid var(--border-hairline);
+  font-size: var(--font-heading-size);
+  line-height: var(--font-heading-line);
+  font-weight: var(--font-heading-weight);
+  color: var(--ink-primary);
+}
+
+.dash-runs__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-runs__empty {
+  margin: 0;
+  padding: var(--space-md) var(--space-base);
+  color: var(--ink-secondary);
+}
+
+.dash-runs__empty a {
+  display: inline-block;
+  min-height: var(--space-lg);
+  padding: var(--space-xs) 0;
+}
+
+.dash-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  min-height: 40px;
+  padding: var(--space-sm) var(--space-base);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.dash-run:last-child {
+  border-bottom: 0;
+}
+
+.dash-run__client {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-body-size);
+  color: var(--ink-primary);
+}
+
+.dash-run__time {
+  flex: none;
+  font-size: var(--font-small-size);
+  color: var(--ink-secondary);
+}
+
+.badge-mono {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-mono-size);
+  line-height: var(--font-mono-line);
+}
+
+.status-badge {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-small-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-small-line);
+  white-space: nowrap;
+}
+
+.status-badge--neutral {
+  background: var(--surface-sunken);
+  color: var(--ink-secondary);
+}
+
+.status-badge--running {
+  background: var(--primary-100);
+  color: var(--primary-700);
+}
+
+.status-badge--success {
+  background: var(--success-surface);
+  color: var(--success);
+}
+
+.status-badge--danger {
+  background: var(--danger-surface);
+  color: var(--danger);
+}
+
+.dash-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
+}
+
+.dash-quick a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--space-lg);
+  padding: var(--space-xs) var(--space-sm);
+}

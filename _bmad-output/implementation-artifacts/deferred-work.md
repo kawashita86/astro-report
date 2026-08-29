@@ -705,3 +705,38 @@ the spec that surfaced it. Append only.
   summary: `ruff format --check .` reports ~71 files repo-wide would be reformatted by the installed ruff 0.16.3 — the tree was last formatted with an older ruff and has drifted. Not caused by Story 9.1 (its new/edited files are format-clean; the diffs are in untouched pre-existing blocks).
   evidence: `.venv/bin/python -m ruff check .` is clean; only `ruff format --check` diverges, and only in code Story 9.1 did not touch. Fix is a one-time repo-wide `ruff format` commit plus pinning ruff in `pyproject.toml` dev deps so the formatter version stops drifting. Surfaced incidentally while verifying this change.
   triage: defer (verification of spec-9-1-the-application-shell)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-2-a-home-dashboard-instead-of-a-404.md`
+  summary: The Home dashboard renders each run's `updated_at` as a bare UTC wall-clock (`strftime("%d/%m/%Y %H:%M")`), so an Italian operator sees "last updated" times 1–2h behind local time with no `Z`/`UTC` marker.
+  evidence: `shell/http/routes/home.py:111`. The codebase has no established display-timezone convention — `payload_view.py` converts-and-labels with `%Z` for provenance, but list/detail screens render stored values as-is. A correct fix (DST-aware `Europe/Rome`, applied consistently across screens) belongs with the Story 9.9 UI sweep or a shared formatting helper. Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-2-a-home-dashboard-instead-of-a-404)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-2-a-home-dashboard-instead-of-a-404.md`
+  summary: `--primary-100` has no dark-theme value in `tokens.css`, so `.status-badge--running` (and the pre-existing `.is-active` sidebar item and the `tokens.css:622` rule) render dark-mode text on a near-white `#EBE7F5` chip — likely below the WCAG AA contrast floor the epic mandates.
+  evidence: `tokens.css` redefines `--primary-700`/`--focus-ring`/`--*-surface` under both dark blocks but not `--primary-100` (only defined on bare `:root`, line 35). Story 9.2's running badge follows the existing 9.1 pairing, so this is a token-system gap surfaced (not introduced) by this change. Fix: add `--primary-100-dark` and wire it into both dark blocks; re-check every `--primary-100 + --primary-700` pairing. Owned by the Story 9.9 accessibility-floor pass. Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-2-a-home-dashboard-instead-of-a-404)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-2-a-home-dashboard-instead-of-a-404.md`
+  summary: No database index backs the Home dashboard's read paths — `ORDER BY report_run.updated_at DESC LIMIT 20` and `backup_is_stale`'s `ORDER BY report.created_at DESC LIMIT 1` (now run on every dashboard load and every Client-reports load).
+  evidence: `ReportRun.updated_at` and `Report.created_at` are plain columns (no `index=True`) in `shell/adapters/postgres/report_run.py` / `report.py`. Story 9.2's frozen scope forbids data-model changes, so the index migration is deferred. Low urgency at single-operator scale (~dozens of rows) but the right follow-up as the corpus grows. Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-2-a-home-dashboard-instead-of-a-404)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-2-a-home-dashboard-instead-of-a-404.md`
+  summary: The Home dashboard shows only the 20 most-recent runs across all Clients with no total count, no "vedi tutti" link, and no pagination, so at a month-end batch (~28 Clients) in-flight runs beyond the 20th are hidden with no indication any exist.
+  evidence: `_RECENT_LIMIT = 20` in `shell/http/routes/home.py` with a hard `.limit(...)` and no companion count query. The story AC only asks for "recent ReportRuns", so this is an enhancement, but it undercuts the dashboard's stated purpose ("what needs attention"). Consider a count/summary line or a filtered full-list view (possibly Story 9.3 scope). Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-2-a-home-dashboard-instead-of-a-404)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-2-a-home-dashboard-instead-of-a-404.md`
+  summary: Home dashboard run rows are ordered purely by `updated_at` desc, so terminal runs (`Esportato`, `Verifica non superata`) interleave with in-flight ones and the operator cannot quickly isolate what needs attention.
+  evidence: `shell/http/routes/home.py` `order_by(ReportRun.updated_at.desc(), ReportRun.id.desc())` with no state grouping/filter. Matches the mockup's flat recency list, so not a spec deviation, but a "failed / running first" grouping or a state filter would better serve the dashboard's purpose. Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-2-a-home-dashboard-instead-of-a-404)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-2-a-home-dashboard-instead-of-a-404.md`
+  summary: Home dashboard run rows are not links — the operator can see a run's status but cannot click through to `/report-runs/{run_id}` from Home, which is in tension with EXPERIENCE.md's wayfinding rule "a run in progress is reachable from Home".
+  evidence: `shell/http/templates/home.html` renders each row as plain spans. The `mockups/key-home.html` reference also shows plain `<td>` cells (no anchors) and the story AC only requires a status badge, so the implementation matches both — but "reachable from Home" reads more naturally as one-click navigable. Confirm with Francesco at screen sign-off; if wanted, link the row (whole-row or client-name + month) to the run route, mirroring `client_reports.html`. Surfaced during triage of the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-2-a-home-dashboard-instead-of-a-404)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-2-a-home-dashboard-instead-of-a-404.md`
+  summary: The backup-stale banner uses `role="alert"` (an assertive live region) for content present at page load, so a screen reader announces it on every dashboard visit; WAI-ARIA reserves `alert` for content that appears dynamically.
+  evidence: `shell/http/templates/home.html` sets `role="alert"`, matching the frozen spec and the already-shipped `client_reports.html` banner (Story 6.6). Fix both together in the Story 9.9 accessibility pass — switch to `role="status"` (polite) or a plain labelled region. Surfaced by the blind-hunter review of this change.
+  triage: defer (blind-hunter review of spec-9-2-a-home-dashboard-instead-of-a-404)

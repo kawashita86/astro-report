@@ -234,8 +234,9 @@ def test_a_valid_cookie_clears_the_checkpoint(client: TestClient) -> None:
 
     response = client.get("/")
 
-    # Past the checkpoint, "/" is simply not a registered route.
-    assert response.status_code == 404
+    # Past the checkpoint, "/" reaches its handler: Story 9.2's dashboard,
+    # a 200 rather than the middleware's anonymous empty-body 401.
+    assert response.status_code == 200
 
 
 # --- The failed-login log line carries no secrets ------------------------------

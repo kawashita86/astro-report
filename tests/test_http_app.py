@@ -225,13 +225,13 @@ def test_anonymous_requests_to_anything_outside_the_allowlist_are_uniformly_401(
     assert response.content == b""
 
 
-@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json", "/"])
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
 def test_authenticated_requests_still_get_fastapis_own_404_for_unknown_paths(
     authenticated_client: TestClient, path: str
 ) -> None:
     """Past the auth checkpoint, an unknown path is just an unknown path:
     `/docs`/`/redoc`/`/openapi.json` were never registered (`docs_url=None`
-    etc.) and `/` has no route either."""
+    etc.). `/` is no longer here — Story 9.2 registers it as the dashboard."""
     assert authenticated_client.get(path).status_code == 404
 
 
@@ -326,8 +326,10 @@ def test_the_session_cookie_is_secure_only_in_production() -> None:
 def test_a_session_from_signing_in_authenticates_later_requests(client: TestClient) -> None:
     """A cookie earned by posting the real password behaves like the
     hand-signed one `authenticated_client` uses: it clears the auth
-    checkpoint and lets an unknown path reach FastAPI's own routing."""
+    checkpoint and lets a request reach FastAPI's own routing -- proven now
+    by `GET /` returning the Story 9.2 dashboard (200) rather than the
+    middleware's anonymous 401."""
     login = client.post("/login", data={"password": AUTH_PASSWORD})
     assert SESSION_COOKIE_NAME in login.cookies
 
-    assert client.get("/").status_code == 404
+    assert client.get("/").status_code == 200

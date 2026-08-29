@@ -326,12 +326,17 @@ def test_the_allowlist_is_unchanged_and_the_prefix_is_declared_separately() -> N
     assert ALLOWLIST_PREFIXES == ("/static/",)
 
 
-def test_slash_is_still_unregistered_for_an_authenticated_caller(
+def test_slash_serves_the_dashboard_for_an_authenticated_caller(
     authenticated_client: TestClient,
 ) -> None:
-    """AC — ``/`` stays unregistered: 404 past the auth checkpoint (Story 9.2
-    adds the dashboard)."""
-    assert authenticated_client.get("/").status_code == 404
+    """AC — Story 9.2 registers ``GET /``: past the auth checkpoint it is a
+    200 dashboard rendering through ``base.html`` (one ``<html``), with the
+    single ``<h1>Home</h1>``."""
+    response = authenticated_client.get("/")
+
+    assert response.status_code == 200
+    assert exactly_one_html(response.text)
+    assert "<h1>Home</h1>" in response.text
 
 
 def test_slash_is_401_empty_body_for_an_anonymous_caller(client: TestClient) -> None:

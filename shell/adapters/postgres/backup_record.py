@@ -29,8 +29,14 @@ from sqlmodel import Field, Session, SQLModel, select
 from uuid6 import uuid7
 
 from shell.adapters.postgres.columns import _UTCDateTime
+from shell.adapters.postgres.report import Report
 
-__all__ = ["BackupRecord", "latest_backup_record", "store_backup_record"]
+__all__ = [
+    "BackupRecord",
+    "backup_is_stale",
+    "latest_backup_record",
+    "store_backup_record",
+]
 
 
 class BackupRecord(SQLModel, table=True):
@@ -55,6 +61,37 @@ def latest_backup_record(session: Session) -> BackupRecord | None:
     return session.exec(
         select(BackupRecord).order_by(BackupRecord.created_at.desc())
     ).first()
+
+
+def backup_is_stale(session: Session) -> bool:
+    """Whether the newest ``Report`` anywhere in the system postdates the
+    last recorded backup (Story 6.6) -- computed globally, not scoped to any
+    one Client, since one un-backed-up Report anywhere is the durability gap
+    this warns about.
+
+    No ``Report`` at all -> never stale, even with no ``backup_record`` row
+    yet: there is nothing new a backup could be missing. Otherwise, no
+    ``backup_record`` row at all -> stale (the safe default for a freshly
+    restored database).
+
+    Promoted here from ``shell/http/routes/clients.py::_backup_is_stale``
+    (Story 9.2): it is now read by two screens -- the Client reports page and
+    the Home dashboard -- and belongs beside ``latest_backup_record`` /
+    ``store_backup_record`` rather than imported ``_``-private across route
+    modules. ``clients.py`` keeps a one-line delegate under the old name so
+    its existing importers need no churn.
+    """
+    newest_report_created_at = session.exec(
+        select(Report.created_at).order_by(Report.created_at.desc())
+    ).first()
+    if newest_report_created_at is None:
+        return False
+
+    latest_backup = latest_backup_record(session)
+    if latest_backup is None:
+        return True
+
+    return newest_report_created_at > latest_backup.created_at
 
 
 def store_backup_record(session: Session) -> BackupRecord:
