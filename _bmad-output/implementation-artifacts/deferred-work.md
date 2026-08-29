@@ -740,3 +740,8 @@ the spec that surfaced it. Append only.
   summary: The backup-stale banner uses `role="alert"` (an assertive live region) for content present at page load, so a screen reader announces it on every dashboard visit; WAI-ARIA reserves `alert` for content that appears dynamically.
   evidence: `shell/http/templates/home.html` sets `role="alert"`, matching the frozen spec and the already-shipped `client_reports.html` banner (Story 6.6). Fix both together in the Story 9.9 accessibility pass — switch to `role="status"` (polite) or a plain labelled region. Surfaced by the blind-hunter review of this change.
   triage: defer (blind-hunter review of spec-9-2-a-home-dashboard-instead-of-a-404)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-3-the-clienti-list-and-the-client-scoped-tabs.md`
+  summary: The new breadcrumb (`_client_tabs.html` and `client_list.html`) is a `<p>` with a literal `/` separator rather than the semantic `<nav aria-label="breadcrumb"><ol>` pattern, so a screen reader announces the slash verbatim and the trail is not exposed as a navigation landmark.
+  evidence: `shell/http/templates/_client_tabs.html` renders `<p class="breadcrumb"><a href="/clients">Clienti</a> / {{ client.name }}</p>`; `client_list.html` similarly. This is the app's first breadcrumb — no house pattern existed — and the Story 9.3 CSS block is explicitly marked "PROVISIONAL — Story 9.8 consolidates". Fold a semantic breadcrumb component (`<nav aria-label="breadcrumb">` + `<ol>`/`<li>`, `/` via CSS `::before`) into the Story 9.8 shared-primitive consolidation; update the literal-string assertion in `tests/test_http_client_tabs.py` at the same time.
+  triage: defer (blind-hunter review of spec-9-3-the-clienti-list-and-the-client-scoped-tabs)

@@ -1,7 +1,7 @@
 /*
  * astro-report application-shell behaviour — first-party, no dependencies.
  *
- * Two jobs, both progressive enhancements over a shell that already works
+ * Three jobs, all progressive enhancements over a shell that already works
  * without JavaScript:
  *
  *   1. Theme toggle — flip `data-theme` on <html>, persist the choice to
@@ -13,6 +13,11 @@
  *   2. Off-canvas drawer (<900px) — open from the header menu button, trap
  *      focus while open, close on Esc or scrim click, and restore focus to the
  *      trigger on close.
+ *
+ *   3. Clienti list filter — client-side, name-only, case-insensitive. Typing
+ *      in `[data-client-filter]` hides non-matching `[data-client-row]`s, keeps
+ *      `[data-client-count]` at `{shown} di {total}`, and swaps the table for
+ *      an inline no-match line when nothing matches. No server round-trip.
  *
  * All shell transitions are disabled by tokens.css under
  * `prefers-reduced-motion`; this file adds no scripted animation.
@@ -169,5 +174,56 @@
     } else if (wideQuery.addListener) {
       wideQuery.addListener(releaseWhenWide);
     }
+  }
+
+  /* ---- 3. Clienti list filter (client-side, name-only) ------------------- */
+
+  var filterInput = document.querySelector("[data-client-filter]");
+  if (filterInput) {
+    var countRegion = document.querySelector("[data-client-count]");
+    var listTable = document.querySelector("[data-client-table]");
+    var noMatchLine = document.querySelector("[data-client-empty]");
+    var rows = Array.prototype.slice.call(
+      document.querySelectorAll("[data-client-row]")
+    );
+    var total = rows.length;
+
+    var applyFilter = function () {
+      var raw = filterInput.value;
+      var needle = raw.trim().toLowerCase();
+      var shown = 0;
+
+      for (var i = 0; i < rows.length; i++) {
+        var name = rows[i].dataset.name || "";
+        var hit = needle === "" || name.indexOf(needle) !== -1;
+        rows[i].hidden = !hit;
+        if (hit) {
+          shown++;
+        }
+      }
+
+      if (countRegion) {
+        countRegion.textContent = shown + " di " + total;
+      }
+
+      var noMatch = shown === 0 && needle !== "";
+      if (listTable) {
+        listTable.hidden = noMatch;
+      }
+      if (noMatchLine) {
+        noMatchLine.hidden = !noMatch;
+        if (noMatch) {
+          noMatchLine.textContent =
+            'Nessun cliente corrisponde a "' + raw.trim() + '".';
+        }
+      }
+    };
+
+    filterInput.addEventListener("input", applyFilter);
+
+    // A value restored by bfcache / back-navigation is present before any
+    // keystroke — run once now so the rows, the count, and the no-match line
+    // always match the field's current contents.
+    applyFilter();
   }
 })();

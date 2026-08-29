@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Chart wheel — {{ client.name }} — astro-report{% endblock %}
+{% block page_header %}{% include "_client_tabs.html" %}{% endblock %}
 {% block content %}
       <h1>Chart wheel — {{ client.name }}</h1>
       {%- if config_stale %}

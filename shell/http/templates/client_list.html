@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Clienti — astro-report{% endblock %}
+{% block page_header %}
+      <p class="breadcrumb">Clienti</p>
+      <div class="page-header">
+        <h1>Clienti</h1>
+        <a class="page-header__action" href="/clients/new">Nuovo cliente</a>
+      </div>
+{% endblock %}
+{% block content %}
+      {% if clients %}
+      <div class="list-filter">
+        <input
+          type="text"
+          data-client-filter
+          aria-label="Filtra per nome"
+          placeholder="Filtra per nome"
+          autocomplete="off"
+        />
+        <span class="list-filter__count" data-client-count aria-live="polite"
+          >{{ clients|length }} di {{ clients|length }}</span
+        >
+      </div>
+
+      <div class="list-panel" data-client-table>
+        <table aria-label="Elenco clienti">
+          <thead>
+            <tr>
+              <th scope="col">Nome</th>
+              <th scope="col">Nascita</th>
+              <th scope="col">Tema</th>
+              <th scope="col" class="list-panel__actions-col">Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in clients %}
+            <tr data-client-row data-name="{{ row.name|lower }}">
+              <td><a href="/clients/{{ row.id }}/edit">{{ row.name }}</a></td>
+              <td class="list-panel__meta">{{ row.birth_date }} · {{ row.birth_time }}</td>
+              <td>
+                {% if row.has_superseded_chart %}
+                <span class="row-badge">tema superato</span>
+                {% else %}
+                <span class="list-panel__meta">corrente</span>
+                {% endif %}
+              </td>
+              <td>
+                <span class="row-actions">
+                  <a href="/clients/{{ row.id }}/reports">Report</a>
+                  <a href="/clients/{{ row.id }}/chart">Tema</a>
+                  <a href="/clients/{{ row.id }}/edit">Correggi</a>
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="filter-empty" data-client-empty role="status" hidden></p>
+      {% else %}
+      <div class="list-empty">
+        <p>Nessun cliente.</p>
+        <a class="page-header__action" href="/clients/new">Nuovo cliente</a>
+      </div>
+      {% endif %}
+{% endblock %}

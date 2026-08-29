@@ -81,5 +81,5 @@ def chart_wheel_view(
     return _templates.TemplateResponse(
         request,
         "chart_wheel.html",
-        {"client": client, "svg": svg, "config_stale": config_stale},
+        {"client": client, "active_tab": "tema", "svg": svg, "config_stale": config_stale},
     )

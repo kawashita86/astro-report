@@ -673,3 +673,197 @@ h3 {
   min-height: var(--space-lg);
   padding: var(--space-xs) var(--space-sm);
 }
+
+/* ---------------------------------------------------------------------------
+ * PROVISIONAL — Story 9.3 (Clienti list + client-scoped tabs). Minimal
+ * component styling for the breadcrumb, the contextual tab row, the client
+ * list filter, the compact roster table, the superseded-chart row badge, the
+ * ghost row-actions, and the list / no-match empty states. Semantic tokens
+ * only; contrast holds in both themes (badge fill >= 3:1 non-text, its text
+ * >= 4.5:1; hairlines >= 3:1). Focus rings come from the global
+ * `*:focus-visible` rule and are never removed here. Story 9.8 consolidates
+ * these into shared component partials — do not build on the exact class
+ * names here. Reference: mockups/key-clienti.html.
+ * ------------------------------------------------------------------------- */
+
+.breadcrumb {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+  color: var(--ink-secondary);
+}
+
+.breadcrumb a {
+  color: var(--link);
+}
+
+/* Contextual tabs under a selected Client (Anagrafica / Tema / Report).
+ * Real full-page links; the active one carries a 2px primary underline. */
+.client-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.client-tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: var(--space-sm) var(--space-xs);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--ink-secondary);
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-label-line);
+  text-decoration: none;
+}
+
+.client-tabs a:hover {
+  color: var(--ink-primary);
+}
+
+.client-tabs a.is-active {
+  color: var(--primary-700);
+  border-bottom-color: var(--primary-700);
+}
+
+/* Client list — the name filter row (client-side only; the field is inert
+ * without JS). */
+.list-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-base);
+}
+
+.list-filter input {
+  min-height: 24px;
+  width: min(280px, 100%);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface-base);
+  color: var(--ink-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.list-filter input:focus {
+  border-color: var(--primary-500);
+}
+
+.list-filter__count {
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+  color: var(--ink-secondary);
+}
+
+/* Compact roster table: 1120px measure, 40px rows, hairline dividers, a
+ * surface-sunken hover tint (DESIGN.md density split). */
+.list-panel {
+  max-width: 1120px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+.list-panel table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.list-panel th,
+.list-panel td {
+  height: 40px;
+  padding: 0 var(--space-md);
+  text-align: left;
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--ink-primary);
+  font-size: var(--font-body-size);
+}
+
+.list-panel th {
+  height: 34px;
+  background: var(--surface-sunken);
+  color: var(--ink-secondary);
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+}
+
+.list-panel tr:last-child td {
+  border-bottom: 0;
+}
+
+.list-panel tbody tr:hover td {
+  background: var(--surface-sunken);
+}
+
+.list-panel__actions-col {
+  text-align: right;
+}
+
+.list-panel__meta {
+  color: var(--ink-secondary);
+  font-size: var(--font-small-size);
+}
+
+/* Superseded-chart marker on a roster row (warning role, paired with text). */
+.row-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--warning-surface);
+  color: var(--warning);
+  font-size: var(--font-small-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-small-line);
+}
+
+/* Ghost row-actions: chromeless links, >= 24px hit area, sunken hover. */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  justify-content: flex-end;
+}
+
+.row-actions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: var(--font-small-size);
+  font-weight: var(--font-label-weight);
+  text-decoration: none;
+}
+
+.row-actions a:hover {
+  background: var(--surface-sunken);
+  color: var(--primary-700);
+}
+
+/* The list's own empty state (no Client rows at all). */
+.list-empty {
+  max-width: 1120px;
+  padding: var(--space-xl);
+  border-radius: var(--radius-xl);
+  background: var(--surface-sunken);
+}
+
+.list-empty p {
+  margin: 0 0 var(--space-md);
+  color: var(--ink-primary);
+}
+
+/* The inline no-match line — shown by the filter instead of the empty state
+ * when a fragment matches nothing. */
+.filter-empty {
+  margin: 0;
+  color: var(--ink-secondary);
+}

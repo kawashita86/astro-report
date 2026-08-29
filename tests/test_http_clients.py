@@ -17,6 +17,7 @@ behavior is ``tests/test_natal_chart.py``'s.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -45,7 +46,7 @@ from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_run import ReportRun
 from shell.config import Environment, Settings
 from shell.http.app import create_app, get_session
-from shell.http.auth import SESSION_COOKIE_NAME, sign_session
+from shell.http.auth import ALLOWLIST, SESSION_COOKIE_NAME, sign_session
 from shell.http.routes import clients as clients_module
 from shell.http.routes.clients import get_geocoder
 from shell.ports.geocoder import Geocoder
@@ -1035,3 +1036,142 @@ def test_staleness_is_computed_globally_not_per_client(
 
     assert ada_response.status_code == 200
     assert _WARNING_TEXT in ada_response.text
+
+
+# --- GET /clients — the roster (Story 9.3) ----------------------------------------
+
+
+def test_the_roster_is_401_with_an_empty_body_for_an_anonymous_caller(
+    client: TestClient,
+) -> None:
+    """I/O Matrix — "Anonymous GET /clients": 401, empty body; the auth
+    allowlist is untouched by this story."""
+    response = client.get("/clients")
+
+    assert response.status_code == 401
+    assert response.content == b""
+    assert frozenset({"/healthz", "/login"}) == ALLOWLIST
+
+
+def test_the_roster_lists_every_client_in_name_then_id_order_through_the_shell(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """I/O Matrix — "Roster with clients": one row per Client in
+    ``list_clients`` (name, id) order; the name cell links to the edit route;
+    Nascita is ``dd/MM/yyyy`` · ``HH:mm``; the row-action links point at the
+    reports / chart / edit routes; it renders through ``base.html`` (one
+    ``<html>``, ``lang="it"``) with the ``Clienti`` nav item active."""
+    zoe, _z = _create_client_with_chart(app_instance, db_session, name="Zoe Zeta")
+    ada, _a = _create_client_with_chart(app_instance, db_session, name="Ada Alpha")
+
+    response = authenticated_client.get("/clients")
+
+    assert response.status_code == 200
+    body = response.text
+
+    # Rendered through the one shell.
+    assert body.lower().count("<html") == 1
+    assert '<html lang="it">' in body
+    assert re.search(
+        r'href="/clients"[^>]*\bclass="is-active"[^>]*aria-current="page"', body, re.S
+    )
+
+    # (name, id) order: Ada Alpha before Zoe Zeta.
+    assert body.index("Ada Alpha") < body.index("Zoe Zeta")
+
+    # The name cell links to the edit route; row actions to reports/chart/edit.
+    assert f'<a href="/clients/{ada.id}/edit">Ada Alpha</a>' in body
+    for suffix in ("/reports", "/chart", "/edit"):
+        assert f'href="/clients/{zoe.id}{suffix}"' in body
+
+    # Nascita column: dd/MM/yyyy · HH:mm (birth 2026-01-01 00:00 in the fixture).
+    assert "01/01/2026 · 00:00" in body
+
+    # data-name is exposed for the client-side filter.
+    assert 'data-client-row data-name="ada alpha"' in body
+    assert 'data-client-row data-name="zoe zeta"' in body
+
+
+def test_the_roster_marks_only_a_client_with_a_superseded_chart(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """I/O Matrix — "Client with a superseded chart": that Client's Tema cell
+    shows ``tema superato``; a Client with only a current chart shows
+    ``corrente`` and no badge."""
+    corrected, _c = _create_client_with_chart(app_instance, db_session, name="Aaa Corrected")
+    _create_client_with_chart(app_instance, db_session, name="Zzz Current")
+
+    correct_client_and_chart(
+        db_session,
+        client=corrected,
+        name=corrected.name,
+        birth_date=corrected.birth_date,
+        birth_time=corrected.birth_time,
+        resolved_place=_RESOLVED_PLACE,
+        natal_chart=_FAKE_NATAL_CHART,
+        computation_config=app_instance.state.computation_config,
+        ephemeris_identity=app_instance.state.ephemeris_identity,
+    )
+    db_session.commit()
+
+    body = authenticated_client.get("/clients").text
+
+    assert body.count("tema superato") == 1
+    assert "corrente" in body
+    # The badge belongs to the corrected client's row, not the current one.
+    corrected_row = body[body.index("Aaa Corrected") : body.index("Zzz Current")]
+    assert "tema superato" in corrected_row
+    current_row = body[body.index("Zzz Current") :]
+    assert "tema superato" not in current_row
+
+
+def test_an_empty_roster_shows_exactly_the_italian_empty_state_and_no_rows(
+    authenticated_client: TestClient,
+) -> None:
+    """I/O Matrix — "Empty roster": the one-line ``Nessun cliente.`` empty
+    state plus the ``Nuovo cliente`` action; no table body row."""
+    response = authenticated_client.get("/clients")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "Nessun cliente." in body
+    assert 'href="/clients/new"' in body
+    assert "data-client-row" not in body
+    assert "<tbody" not in body
+
+
+def test_the_roster_carries_every_client_side_filter_markup_hook(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Progressive-enhancement contract — the filter field, the live count
+    region, the per-row ``data-name``, and the hidden no-match line are all in
+    the server-rendered markup; JS only wires them."""
+    _create_client_with_chart(app_instance, db_session, name="Ada Alpha")
+
+    body = authenticated_client.get("/clients").text
+
+    assert "data-client-filter" in body
+    assert 'aria-label="Filtra per nome"' in body
+    assert "data-client-count" in body
+    assert 'aria-live="polite"' in body
+    assert "data-client-row" in body
+    assert "data-name=" in body
+    assert re.search(r"data-client-empty[^>]*hidden", body) or re.search(
+        r"hidden[^>]*data-client-empty", body
+    )
+
+
+def test_shell_js_wires_the_client_side_list_filter() -> None:
+    """AC — ``shell.js`` guards its list-filter enhancement on
+    ``[data-client-filter]`` and updates the count / no-match hooks."""
+    from pathlib import Path
+
+    shell_js = (
+        Path(__file__).resolve().parent.parent / "shell" / "http" / "static" / "shell.js"
+    ).read_text(encoding="utf-8")
+
+    assert "[data-client-filter]" in shell_js
+    assert "[data-client-row]" in shell_js
+    assert "[data-client-count]" in shell_js
+    assert "[data-client-empty]" in shell_js
+    assert "Nessun cliente corrisponde a" in shell_js

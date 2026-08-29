@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Reports — {{ client.name }} — astro-report{% endblock %}
+{% block page_header %}{% include "_client_tabs.html" %}{% endblock %}
 {% block content %}
       <h1>Reports for {{ client.name }}</h1>
 

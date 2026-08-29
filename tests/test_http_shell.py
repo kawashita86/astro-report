@@ -66,6 +66,7 @@ _DESIGN_MD = (
 #: seeds; the other operator routes need per-route fixtures and stay covered by
 #: their own ``tests/test_http_*.py`` suites).
 _MIGRATED_ROUTES = (
+    "/clients",
     "/clients/new",
     "/corpus",
     "/corpus/new",

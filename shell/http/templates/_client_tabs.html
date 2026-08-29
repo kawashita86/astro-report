@@ -1,0 +1,32 @@
+{#
+  Shared contextual-tab header for the three client-scoped screens (Story 9.3):
+  Anagrafica (/clients/{id}/edit), Tema (/clients/{id}/chart), Report
+  (/clients/{id}/reports). Included from each screen's `page_header` block so
+  the breadcrumb and the active sidebar item always agree.
+
+  Contract: the including route passes `client` (the loaded Client row) and
+  `active_tab` -- one of "anagrafica", "tema", "report". The tabs are real
+  full-page <a> links, never JS tabs; the active one is decided here from the
+  literal `active_tab` string, not sniffed from the request path.
+
+  Italian chrome from the start (EXPERIENCE.md label map). Screen body copy is
+  Story 9.9.
+#}
+      <p class="breadcrumb"><a href="/clients">Clienti</a> / {{ client.name }}</p>
+      <nav class="client-tabs" aria-label="Sezioni del cliente">
+        <a
+          href="/clients/{{ client.id }}/edit"
+          {% if active_tab == "anagrafica" %}class="is-active" aria-current="page"{% endif %}
+          >Anagrafica</a
+        >
+        <a
+          href="/clients/{{ client.id }}/chart"
+          {% if active_tab == "tema" %}class="is-active" aria-current="page"{% endif %}
+          >Tema</a
+        >
+        <a
+          href="/clients/{{ client.id }}/reports"
+          {% if active_tab == "report" %}class="is-active" aria-current="page"{% endif %}
+          >Report</a
+        >
+      </nav>

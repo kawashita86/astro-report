@@ -52,6 +52,7 @@ from shell.adapters.postgres.client import (
     correct_client_and_chart,
     create_client_with_chart,
     delete_client_and_derived,
+    list_clients,
 )
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_run import ReportRun
@@ -153,7 +154,7 @@ def _render_form(
 def _render_edit_form(
     request: Request,
     *,
-    client_id: UUID,
+    client: Client,
     status_code: int,
     error: str | None = None,
     form: dict[str, str] | None = None,
@@ -164,7 +165,9 @@ def _render_edit_form(
         request,
         "client_edit.html",
         {
-            "client_id": client_id,
+            "client": client,
+            "client_id": client.id,
+            "active_tab": "anagrafica",
             "error": error,
             "form": form or {},
             "candidates": _candidate_context(candidates),
@@ -214,6 +217,43 @@ def get_geocoder(session: Session = Depends(get_session)) -> Geocoder:
     share one transaction.
     """
     return NominatimGeocoder(session)
+
+
+@router.get("/clients", include_in_schema=False)
+def list_clients_view(request: Request, session: Session = Depends(get_session)) -> Response:
+    """The Client roster (Story 9.3): every Client in ``list_clients`` order
+    (``name`` then ``id``), each row carrying its birth date/time pre-formatted
+    ``dd/MM/yyyy`` / ``HH:mm`` and a flag for whether any ``StoredNatalChart``
+    for that Client has been superseded.
+
+    Presentation only -- ``list_clients(session)`` is reused verbatim for
+    ordering, there is no new query shape, no pagination, and no server-side
+    filtering (the name filter is entirely client-side). The superseded-chart
+    set is one batched ``distinct`` query -- the set-valued form of
+    :func:`_has_superseded_chart`, never that predicate called in a loop.
+    """
+    clients = list_clients(session)
+
+    superseded_client_ids: set[UUID] = set(
+        session.exec(
+            select(StoredNatalChart.client_id)
+            .where(StoredNatalChart.superseded_at.is_not(None))
+            .distinct()
+        ).all()
+    )
+
+    rows = [
+        {
+            "id": client.id,
+            "name": client.name,
+            "birth_date": client.birth_date.strftime("%d/%m/%Y"),
+            "birth_time": client.birth_time.strftime("%H:%M"),
+            "has_superseded_chart": client.id in superseded_client_ids,
+        }
+        for client in clients
+    ]
+
+    return _templates.TemplateResponse(request, "client_list.html", {"clients": rows})
 
 
 @router.get("/clients/new", include_in_schema=False)
@@ -354,7 +394,7 @@ def client_edit_form(
         "birth_time": client.birth_time.strftime("%H:%M"),
         "birthplace": "",
     }
-    return _render_edit_form(request, client_id=client_id, status_code=200, form=form)
+    return _render_edit_form(request, client=client, status_code=200, form=form)
 
 
 @router.post("/clients/{client_id}/edit", include_in_schema=False)
@@ -383,14 +423,14 @@ async def correct_client(
     except FormTooLarge:
         return _render_edit_form(
             request,
-            client_id=client_id,
+            client=client,
             status_code=422,
             error="the submitted form is too large.",
         )
     except FormNotUtf8:
         return _render_edit_form(
             request,
-            client_id=client_id,
+            client=client,
             status_code=422,
             error="the submitted form is not valid UTF-8.",
         )
@@ -399,7 +439,7 @@ async def correct_client(
     if missing:
         return _render_edit_form(
             request,
-            client_id=client_id,
+            client=client,
             status_code=422,
             error=f"Required: {', '.join(missing)}.",
             form=fields,
@@ -408,7 +448,7 @@ async def correct_client(
     if len(fields["name"]) > _MAX_NAME_LENGTH:
         return _render_edit_form(
             request,
-            client_id=client_id,
+            client=client,
             status_code=422,
             error=f"name must be at most {_MAX_NAME_LENGTH} characters.",
             form=fields,
@@ -419,7 +459,7 @@ async def correct_client(
     except ValueError as error:
         return _render_edit_form(
             request,
-            client_id=client_id,
+            client=client,
             status_code=422,
             error=f"birth_date is invalid: {error}",
             form=fields,
@@ -430,7 +470,7 @@ async def correct_client(
     except ValueError as error:
         return _render_edit_form(
             request,
-            client_id=client_id,
+            client=client,
             status_code=422,
             error=f"birth_time is invalid: {error}",
             form=fields,
@@ -449,7 +489,7 @@ async def correct_client(
             if isinstance(resolution, list):
                 return _render_edit_form(
                     request,
-                    client_id=client_id,
+                    client=client,
                     status_code=200,
                     form=fields,
                     candidates=resolution,
@@ -457,12 +497,12 @@ async def correct_client(
             resolved = resolution
     except PlaceResolutionError as error:
         return _render_edit_form(
-            request, client_id=client_id, status_code=422, error=str(error), form=fields
+            request, client=client, status_code=422, error=str(error), form=fields
         )
     except _CANDIDATE_DECODE_ERRORS as error:
         return _render_edit_form(
             request,
-            client_id=client_id,
+            client=client,
             status_code=422,
             error=f"the chosen birthplace candidate is invalid: {error}",
             form=fields,
@@ -494,7 +534,7 @@ async def correct_client(
         )
     except (ValueError, EphemerisIntegrityError) as error:
         return _render_edit_form(
-            request, client_id=client_id, status_code=422, error=str(error), form=fields
+            request, client=client, status_code=422, error=str(error), form=fields
         )
 
     if fields.get("confirmed") != "1":
@@ -502,7 +542,7 @@ async def correct_client(
         # resolved and computed successfully are shown back with a warning,
         # nothing persisted, until resubmitted with `confirmed=1`.
         return _render_edit_form(
-            request, client_id=client_id, status_code=200, form=fields, warning=True
+            request, client=client, status_code=200, form=fields, warning=True
         )
 
     correct_client_and_chart(
@@ -684,6 +724,7 @@ def list_client_reports(
         {
             "client_id": client_id,
             "client": client,
+            "active_tab": "report",
             "entries": entries,
             "backup_stale": _backup_is_stale(session),
         },
