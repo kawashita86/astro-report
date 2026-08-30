@@ -1,7 +1,7 @@
 /*
  * astro-report application-shell behaviour — first-party, no dependencies.
  *
- * Five jobs, all progressive enhancements over a shell that already works
+ * Seven jobs, all progressive enhancements over a shell that already works
  * without JavaScript:
  *
  *   1. Theme toggle — flip `data-theme` on <html>, persist the choice to
@@ -11,8 +11,8 @@
  *      stylesheet paints, so there is no flash.
  *
  *   2. Off-canvas drawer (<900px) — open from the header menu button, trap
- *      focus while open, close on Esc or scrim click, and restore focus to the
- *      trigger on close.
+ *      focus while open (via `trapFocus`, job 0 below), close on Esc or scrim
+ *      click, and restore focus to the trigger on close.
  *
  *   3. Clienti list filter — client-side, name-only, case-insensitive. Typing
  *      in `[data-client-filter]` hides non-matching `[data-client-row]`s, keeps
@@ -21,9 +21,9 @@
  *
  *   4. Delete-confirm modal (Story 9.4) — intercept the `[data-delete-client]`
  *      trigger on the Anagrafica screen, open the inline `[data-delete-modal]`
- *      instead of navigating, trap focus with initial focus on `Annulla`
- *      (`[data-delete-cancel]`), close on Esc / scrim click / cancel and
- *      restore focus to the trigger. The `danger` submit
+ *      instead of navigating, trap focus (via `trapFocus`) with initial focus
+ *      on `Annulla` (`[data-delete-cancel]`), close on Esc / scrim click /
+ *      cancel and restore focus to the trigger. The `danger` submit
  *      (`[data-delete-submit]`) stays disabled until the trimmed
  *      `[data-delete-confirm]` value exactly equals the modal's
  *      `data-client-name` (both sides trimmed). Opening the modal closes the
@@ -36,6 +36,27 @@
  *      focusable `role="alert"` `.banner--danger` so a keyboard / screen
  *      reader user lands on the error.
  *
+ *   6. Report-run stage view (Story 9.5) — pause the `#run-status` HTMX poll
+ *      while the tab is hidden (`document.hidden`), so a backgrounded tab
+ *      never spends a request; reveal the inline `[data-poll-error]`
+ *      `role="alert"` banner on `htmx:responseError` / `htmx:sendError` from
+ *      that region, and hide it again once a poll succeeds. The polling
+ *      cadence and stop condition are still server-driven (the `hx-*`
+ *      attributes render only while `poll_active` is true,
+ *      `shell/http/templates/report_run_poll.html`) — this job only pauses/
+ *      resumes the already-present trigger and surfaces a transient network
+ *      failure; it starts no timer of its own.
+ *
+ *   7. Regenerate-confirm modal (Story 9.5) — intercept the Gate-failure
+ *      panel's `[data-regen-trigger]` button on `/draft`, open the inline
+ *      `[data-regen-modal]` instead of submitting immediately, trap focus
+ *      (via `trapFocus`) with initial focus on `Annulla`
+ *      (`[data-regen-cancel]`), close on Esc / scrim click / cancel and
+ *      restore focus to the trigger — no typed-name gate (Rigenera is a
+ *      bounded recovery action, not a destroy). The no-JS path is the same
+ *      panel's plain `<form method="post">`, already a working full-page
+ *      submit before this script ever runs.
+ *
  * All shell transitions are disabled by tokens.css under
  * `prefers-reduced-motion`; this file adds no scripted animation.
  */
@@ -43,6 +64,78 @@
   "use strict";
 
   var root = document.documentElement;
+
+  var FOCUSABLE =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  /* ---- 0. Shared focus trap ---------------------------------------------
+   *
+   * `trapFocus(container, { onEscape, initialFocus })` wires a capturing
+   * `keydown` listener that cycles Tab/Shift+Tab within `container`'s own
+   * focusable descendants and calls `onEscape` (if given) on Escape. Focus
+   * lands on `initialFocus` if given, otherwise the container's first
+   * focusable element. Returns a `release()` function that removes the
+   * listener — the caller still owns hiding the container and restoring
+   * focus to whatever triggered it; this helper only owns the trap itself.
+   * Shared by the drawer (job 2), the delete-confirm modal (job 4) and the
+   * regenerate-confirm modal (job 7) — extracted once a third consumer
+   * appeared, per the Story 9.4 Design Notes.
+   */
+  function trapFocus(container, options) {
+    options = options || {};
+    var onEscape = options.onEscape;
+    var initialFocus = options.initialFocus;
+
+    function focusables() {
+      return Array.prototype.filter.call(
+        container.querySelectorAll(FOCUSABLE),
+        function (el) {
+          return el.offsetParent !== null || el === document.activeElement;
+        }
+      );
+    }
+
+    function onKeydown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (onEscape) {
+          onEscape();
+        }
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      var items = focusables();
+      if (items.length === 0) {
+        return;
+      }
+      var first = items[0];
+      var last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", onKeydown, true);
+
+    var toFocus = initialFocus;
+    if (!toFocus) {
+      var items = focusables();
+      toFocus = items.length > 0 ? items[0] : null;
+    }
+    if (toFocus && typeof toFocus.focus === "function") {
+      toFocus.focus();
+    }
+
+    return function release() {
+      document.removeEventListener("keydown", onKeydown, true);
+    };
+  }
 
   /* ---- 1. Theme toggle ------------------------------------------------- */
 
@@ -88,50 +181,10 @@
   var sidebar = document.querySelector("[data-app-sidebar]");
   var scrim = document.querySelector("[data-app-scrim]");
 
-  var FOCUSABLE =
-    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  var releaseDrawerTrap = null;
 
   function drawerOpen() {
     return !!shell && shell.classList.contains("is-drawer-open");
-  }
-
-  function focusables() {
-    if (!sidebar) {
-      return [];
-    }
-    return Array.prototype.filter.call(
-      sidebar.querySelectorAll(FOCUSABLE),
-      function (el) {
-        return el.offsetParent !== null || el === document.activeElement;
-      }
-    );
-  }
-
-  function onKeydown(event) {
-    if (!drawerOpen()) {
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeDrawer();
-      return;
-    }
-    if (event.key !== "Tab") {
-      return;
-    }
-    var items = focusables();
-    if (items.length === 0) {
-      return;
-    }
-    var first = items[0];
-    var last = items[items.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
   }
 
   function openDrawer() {
@@ -142,10 +195,8 @@
     if (menuButton) {
       menuButton.setAttribute("aria-expanded", "true");
     }
-    document.addEventListener("keydown", onKeydown, true);
-    var items = focusables();
-    if (items.length > 0) {
-      items[0].focus();
+    if (sidebar) {
+      releaseDrawerTrap = trapFocus(sidebar, { onEscape: closeDrawer });
     }
   }
 
@@ -158,7 +209,10 @@
       menuButton.setAttribute("aria-expanded", "false");
       menuButton.focus();
     }
-    document.removeEventListener("keydown", onKeydown, true);
+    if (releaseDrawerTrap) {
+      releaseDrawerTrap();
+      releaseDrawerTrap = null;
+    }
   }
 
   if (menuButton) {
@@ -253,19 +307,11 @@
     var deleteSubmit = deleteScrim.querySelector("[data-delete-submit]");
     var deleteConfirmField = deleteScrim.querySelector("[data-delete-confirm]");
     var deleteReturnFocusTo = null;
+    var releaseDeleteTrap = null;
     var expectedName = (deleteScrim.dataset.clientName || "").trim();
 
     var deleteModalOpen = function () {
       return !deleteScrim.hidden;
-    };
-
-    var deleteFocusables = function () {
-      return Array.prototype.filter.call(
-        deleteScrim.querySelectorAll(FOCUSABLE),
-        function (el) {
-          return el.offsetParent !== null || el === document.activeElement;
-        }
-      );
     };
 
     // Take the rest of the page out of the a11y tree / tab order while the
@@ -273,10 +319,10 @@
     // Everything except the modal scrim itself.
     var backgroundInertTargets = function () {
       var targets = [];
-      var sidebar = document.querySelector("[data-app-sidebar]");
+      var appSidebar = document.querySelector("[data-app-sidebar]");
       var header = document.querySelector(".app-header");
-      if (sidebar) {
-        targets.push(sidebar);
+      if (appSidebar) {
+        targets.push(appSidebar);
       }
       if (header) {
         targets.push(header);
@@ -318,7 +364,10 @@
       }
       deleteScrim.hidden = true;
       setBackgroundInert(false);
-      document.removeEventListener("keydown", onDeleteKeydown, true);
+      if (releaseDeleteTrap) {
+        releaseDeleteTrap();
+        releaseDeleteTrap = null;
+      }
       // Reset the friction: the next open starts from a blank field and a
       // disabled submit even if the operator typed the full name last time.
       if (deleteConfirmField) {
@@ -351,39 +400,12 @@
           : null);
       deleteScrim.hidden = false;
       setBackgroundInert(true);
-      document.addEventListener("keydown", onDeleteKeydown, true);
       // Initial focus lands on cancel, never on the destructive button.
-      if (deleteCancel) {
-        deleteCancel.focus();
-      }
+      releaseDeleteTrap = trapFocus(deleteScrim, {
+        onEscape: closeDeleteModal,
+        initialFocus: deleteCancel,
+      });
     };
-
-    function onDeleteKeydown(event) {
-      if (!deleteModalOpen()) {
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeDeleteModal();
-        return;
-      }
-      if (event.key !== "Tab") {
-        return;
-      }
-      var items = deleteFocusables();
-      if (items.length === 0) {
-        return;
-      }
-      var first = items[0];
-      var last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
 
     if (deleteTrigger) {
       deleteTrigger.addEventListener("click", function (event) {
@@ -418,5 +440,127 @@
   var errorSummary = document.querySelector(".banner--danger[tabindex='-1']");
   if (errorSummary) {
     errorSummary.focus();
+  }
+
+  /* ---- 6. Report-run stage view (Story 9.5) ------------------------------ */
+
+  // The poll region's own `hx-trigger="every 2s"` only renders while the run
+  // is still advanceable (`poll_active`, `report_run_poll.html`); this job
+  // pauses that already-present trigger while the tab is hidden, rather than
+  // starting a timer of its own — `document.hidden` is re-checked on every
+  // tick htmx would otherwise fire on.
+  document.body.addEventListener("htmx:beforeRequest", function (event) {
+    var elt = event.detail && event.detail.elt;
+    if (!elt || !document.hidden) {
+      return;
+    }
+    if (elt.id === "run-status" || (elt.closest && elt.closest("#run-status"))) {
+      event.preventDefault();
+    }
+  });
+
+  function pollErrorBanner(elt) {
+    if (!elt || !elt.querySelector) {
+      return null;
+    }
+    if (elt.id === "run-status") {
+      return elt.querySelector("[data-poll-error]");
+    }
+    var region = elt.closest ? elt.closest("#run-status") : null;
+    return region ? region.querySelector("[data-poll-error]") : null;
+  }
+
+  document.body.addEventListener("htmx:responseError", function (event) {
+    var banner = pollErrorBanner(event.detail && event.detail.target);
+    if (banner) {
+      banner.hidden = false;
+    }
+  });
+
+  document.body.addEventListener("htmx:sendError", function (event) {
+    var banner = pollErrorBanner(event.detail && event.detail.elt);
+    if (banner) {
+      banner.hidden = false;
+    }
+  });
+
+  document.body.addEventListener("htmx:afterOnLoad", function (event) {
+    var xhr = event.detail && event.detail.xhr;
+    if (!xhr || xhr.status < 200 || xhr.status >= 300) {
+      return;
+    }
+    var banner = pollErrorBanner(event.detail && event.detail.elt);
+    if (banner) {
+      banner.hidden = true;
+    }
+  });
+
+  /* ---- 7. Regenerate-confirm modal (Story 9.5) --------------------------- */
+
+  var regenScrim = document.querySelector("[data-regen-modal]");
+  if (regenScrim) {
+    var regenTrigger = document.querySelector("[data-regen-trigger]");
+    var regenCancel = regenScrim.querySelector("[data-regen-cancel]");
+    var regenReturnFocusTo = null;
+    var releaseRegenTrap = null;
+
+    var regenModalOpen = function () {
+      return !regenScrim.hidden;
+    };
+
+    var closeRegenModal = function () {
+      if (!regenModalOpen()) {
+        return;
+      }
+      regenScrim.hidden = true;
+      if (releaseRegenTrap) {
+        releaseRegenTrap();
+        releaseRegenTrap = null;
+      }
+      if (
+        regenReturnFocusTo &&
+        typeof regenReturnFocusTo.focus === "function"
+      ) {
+        regenReturnFocusTo.focus();
+      }
+      regenReturnFocusTo = null;
+    };
+
+    var openRegenModal = function () {
+      if (regenModalOpen()) {
+        return;
+      }
+      closeDrawer();
+      regenReturnFocusTo =
+        regenTrigger ||
+        (document.activeElement &&
+        typeof document.activeElement.focus === "function"
+          ? document.activeElement
+          : null);
+      regenScrim.hidden = false;
+      // Initial focus lands on cancel, never on the destructive-looking
+      // primary — no typed-name gate: Rigenera is a bounded recovery action.
+      releaseRegenTrap = trapFocus(regenScrim, {
+        onEscape: closeRegenModal,
+        initialFocus: regenCancel,
+      });
+    };
+
+    if (regenTrigger) {
+      regenTrigger.addEventListener("click", function (event) {
+        event.preventDefault();
+        openRegenModal();
+      });
+    }
+
+    if (regenCancel) {
+      regenCancel.addEventListener("click", closeRegenModal);
+    }
+
+    regenScrim.addEventListener("click", function (event) {
+      if (event.target === regenScrim) {
+        closeRegenModal();
+      }
+    });
   }
 })();

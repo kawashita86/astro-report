@@ -1,30 +1,41 @@
 {% extends "_bare.html" if request.headers.get("hx-request") else "base.html" %}
-{% block title %}Report run — astro-report{% endblock %}
+{% block title %}Report — astro-report{% endblock %}
 {% block page_header %}
-      <h1>Report run — {{ run.month }}</h1>
+      <h1>Report — {{ run.month }}</h1>
 {% endblock %}
 {% block content %}
       <div
         id="run-status"
-        {% if not run.failed_at %}
+        {% if poll_active %}
         hx-get="/report-runs/{{ run.id }}"
         hx-trigger="every 2s"
         hx-swap="outerHTML"
         {% endif %}
       >
-        {% if run.failed_at %}
-        <p>Failed: {{ run.failure_reason }}</p>
-        {% else %}
-        <p>Stage: {{ run.stage or "starting" }}</p>
+        <ol class="stage-track">
+          {% for node in stage_track %}
+          <li class="stage-track__node stage-track__node--{{ node.state }}">
+            <span class="stage-track__dot" aria-hidden="true"></span>
+            <span class="stage-track__label">{{ node.label }}</span>
+          </li>
+          {% if not loop.last %}
+          <span class="stage-track__connector" aria-hidden="true"></span>
+          {% endif %}
+          {% endfor %}
+        </ol>
+        <p class="stage-caption" role="status" aria-live="polite">{{ stage_caption }}</p>
+        <p class="banner banner--danger" role="alert" data-poll-error hidden>
+          Connessione persa — nuovo tentativo…
+        </p>
+
+        {% if run.stage == "payload_ready" or (run.stage == "draft_ready" and not gate_failed) %}
+        <p><a href="/report-runs/{{ run.id }}/payload">Vedi Payload</a></p>
         {% endif %}
-        {% if run.stage == "payload_ready" %}
-        <p><a href="/report-runs/{{ run.id }}/payload">View Payload</a></p>
-        {% endif %}
-        {% if run.stage == "draft_ready" %}
-        <p><a href="/report-runs/{{ run.id }}/draft">View Draft</a></p>
+        {% if gate_failed %}
+        <p><a href="/report-runs/{{ run.id }}/draft">Vedi bozza</a></p>
         {% endif %}
         {% if run.stage == "gate_passed" or run.stage == "exported" %}
-        <p><a href="/report-runs/{{ run.id }}/report">View Report</a></p>
+        <p><a href="/report-runs/{{ run.id }}/report">Vedi report</a></p>
         {% endif %}
       </div>
 {% endblock %}

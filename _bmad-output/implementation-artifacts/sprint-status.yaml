@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 2026-08-29
+last_updated: 2026-08-31
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -118,7 +118,7 @@ development_status:
   9-2-a-home-dashboard-instead-of-a-404: review
   9-3-the-clienti-list-and-the-client-scoped-tabs: review
   9-4-client-create-correct-and-delete-restyled: review
-  9-5-a-stage-track-i-can-watch-and-a-gate-failure-i-can-read: backlog
+  9-5-a-stage-track-i-can-watch-and-a-gate-failure-i-can-read: review
   9-6-the-report-reading-sheet-and-the-payload-view-made-readable: backlog
   9-7-the-style-guide-and-corpus-screens-restyled: backlog
   9-8-feedback-and-state-primitives: backlog

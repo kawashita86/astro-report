@@ -350,13 +350,16 @@ def test_each_poll_advances_the_run_by_one_stage(
     )
     location = start_response.headers["location"]
 
+    # Story 9.5: the poll fragment no longer leaks the raw English stage
+    # token -- it renders the stage-track node states and an Italian
+    # progress-tense caption instead (`shell/http/stage_view.py`).
     first_poll = authenticated_client.get(location)
     assert first_poll.status_code == 200
-    assert "natal_ready" in first_poll.text
+    assert "Ricerca dei transiti" in first_poll.text  # active once natal_ready
 
     second_poll = authenticated_client.get(location)
     assert second_poll.status_code == 200
-    assert "transits_ready" in second_poll.text
+    assert "Assemblaggio del Payload" in second_poll.text  # active once transits_ready
 
 
 def test_the_poll_route_invokes_advance_exactly_once_per_request(
@@ -406,7 +409,9 @@ def test_polling_an_already_completed_run_is_a_noop_and_still_shows_its_stage(
 
     assert third_poll.status_code == 200
     assert fourth_poll.status_code == 200
-    assert "transits_ready" in fourth_poll.text
+    # fake_advance never reaches a terminal stage, so polling keeps going.
+    assert "hx-trigger" in fourth_poll.text
+    assert "Assemblaggio del Payload" in fourth_poll.text  # active once transits_ready
     runs = _report_runs(db_session)
     assert len(runs) == 1
 
@@ -425,7 +430,7 @@ def test_an_htmx_poll_request_gets_a_fragment_without_the_full_page_shell(
 
     assert "<html" in full_page.text.lower()
     assert "<html" not in fragment.text.lower()
-    assert "transits_ready" in fragment.text
+    assert "Assemblaggio del Payload" in fragment.text  # active once transits_ready
 
 
 # --- Error paths -------------------------------------------------------------------
@@ -680,7 +685,11 @@ def test_getting_the_draft_renders_prose_and_list_sections_localized_to_the_clie
     # epic-6-retro-item-50: the draft view also renders the shared Italian
     # headings, so `section_titles` must be threaded into its context too.
     assert "<h2>Energia generale</h2>" in response.text
-    assert "energia_generale" not in response.text
+    # Story 9.5: the raw snake_case name now legitimately appears once, as
+    # the Section's jump-target anchor id -- never anywhere else (a heading,
+    # a label) that would leak it to the reader.
+    assert response.text.count("energia_generale") == 1
+    assert 'id="sezione-energia_generale"' in response.text
     # ada's client.iana_zone is America/Chicago (UTC-6 in January):
     # 2026-01-10 15:00 UTC (perfected_at) -> 09:00 local.
     assert "2026-01-10 09:00:00 CST" in response.text
@@ -734,9 +743,11 @@ def test_getting_the_draft_shows_the_latest_attempt_when_more_than_one_exists(
     assert "Un mese equilibrato." not in response.text
 
 
-def test_the_poll_view_links_to_the_draft_once_it_is_ready(
+def test_the_poll_view_links_to_payload_while_the_gate_is_still_running(
     authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
+    """Story 9.5's I/O Matrix, "Gate running": ``draft_ready`` with no
+    failure yet links to Payload, not the (still unvetted) draft."""
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
     db_session.add(run)
@@ -745,7 +756,58 @@ def test_the_poll_view_links_to_the_draft_once_it_is_ready(
     response = authenticated_client.get(f"/report-runs/{run.id}")
 
     assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/payload"' in response.text
+    assert f'href="/report-runs/{run.id}/draft"' not in response.text
+
+
+def test_the_poll_view_links_to_the_draft_once_a_gate_failure_exists(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.5's I/O Matrix, "Gate failure (bound exhausted)": a Gate
+    -failed run's poll fragment links to Bozza (``/draft``), so Francesco
+    reaches the violation cards from the stage view directly."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+        attempt=run.regeneration_count,
+    )
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=(
+            GateViolation(
+                kind="empty_citation",
+                section="lavoro",
+                sentence="x",
+                entry_ids=(),
+                detail="y",
+            ),
+        ),
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
     assert f'href="/report-runs/{run.id}/draft"' in response.text
+    assert "Vedi bozza" in response.text
+    # The two branches are mutually exclusive at draft_ready: once
+    # gate_failed is true, Payload is no longer offered in its place.
+    assert f'href="/report-runs/{run.id}/payload"' not in response.text
+    assert "Vedi Payload" not in response.text
 
 
 def test_the_poll_view_has_no_draft_link_before_draft_ready(
@@ -758,7 +820,7 @@ def test_the_poll_view_has_no_draft_link_before_draft_ready(
 
     response = authenticated_client.get(f"/report-runs/{run.id}")
 
-    assert "View Draft" not in response.text
+    assert "Vedi bozza" not in response.text
 
 
 class _StubAppState:
@@ -836,6 +898,9 @@ def test_a_failed_runs_poll_fragment_shows_the_reason_with_no_hx_trigger(
     assert response.status_code == 200
     assert "simulated rate limit" in response.text
     assert "hx-trigger" not in response.text
+    # Story 9.5: the stage track marks the node the run was working toward
+    # (Bozza, the one after `payload_ready`) failed.
+    assert "stage-track__node--failed" in response.text
 
 
 def test_the_draft_view_for_a_failed_run_still_404s(
@@ -857,20 +922,30 @@ def test_the_draft_view_for_a_failed_run_still_404s(
 # --- Story 5.5: seeing exactly what failed and what it contradicts ------------------
 
 
-def _a_bound_exhausted_run(client_id) -> ReportRun:
+def _a_bound_exhausted_run(client_id, *, failed_at: datetime | None = None) -> ReportRun:
     """A ``ReportRun`` in Story 5.4's exact regeneration-bound-exhausted
     terminal state: ``stage`` stays ``"draft_ready"`` (never rewound back,
     unlike a run mid-regeneration), ``failed_at``/``failure_reason`` are set,
     and (unlike ``_a_failed_run``, Story 4.8's generic stage-failure shape)
     a ``ReportDraft`` row for this run does exist -- mirrors
     ``shell/runner/driver.py``'s ``except GateFailedError`` branch once
-    ``regeneration_count`` exceeds ``_MAX_REGENERATIONS``."""
+    ``regeneration_count`` exceeds ``_MAX_REGENERATIONS``.
+
+    ``failed_at`` defaults to "now" (Story 9.5): every caller here that also
+    persists a *current-cycle* failing ``StoredGateResult`` does so via
+    ``store_gate_result()``, whose own ``created_at`` defaults to
+    ``datetime.now(UTC)`` too -- the two calls land comfortably inside
+    ``_current_cycle_gate_failure``'s ``_GATE_RESULT_CORRELATION_WINDOW`` (2s)
+    without the test needing to fake the clock. A caller building the
+    review-loop-1 "stale row from an earlier cycle" case passes an explicit,
+    far-past ``failed_at`` instead, to land the row *outside* that window on
+    purpose."""
     return ReportRun(
         client_id=client_id,
         month="2026-01",
         stage="draft_ready",
         regeneration_count=4,
-        failed_at=datetime(2026, 1, 20, 12, 0, 0, tzinfo=UTC),
+        failed_at=failed_at if failed_at is not None else datetime.now(UTC),
         failure_reason="regeneration bound exhausted after 4 attempts: "
         "Refusing to advance past the Groundedness Gate: 1 violation(s) against the Payload.",
     )
@@ -935,10 +1010,15 @@ def test_getting_the_draft_for_a_bound_exhausted_run_shows_gate_violations_and_f
 
     assert response.status_code == 200
     assert "Marte è retrogrado." in response.text
-    assert "empty_citation" in response.text
-    assert "energia_generale" in response.text
+    # Story 9.5: the raw kind token is now an Italian label, and the
+    # violation card links to its Sezione's own anchor.
+    assert "Citazione vuota" in response.text
+    assert 'href="#sezione-energia_generale"' in response.text
+    assert 'id="sezione-energia_generale"' in response.text
     assert "sentence is a Claim" in response.text
     assert run.failure_reason in response.text
+    assert "Verifica di fondatezza non superata" in response.text
+    assert f'action="/report-runs/{run.id}/regenerate"' in response.text
 
 
 def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_latest(
@@ -1073,11 +1153,12 @@ def test_getting_the_draft_for_a_generic_failure_with_a_grounded_draft_still_sho
     already passed in-memory -- leaving behind a latest ``ReportDraft`` with
     no matching ``StoredGateResult`` row at all (the Gate never failed for
     this run, so nothing was ever written), which is why ``violations``
-    defaults to an empty list here. The "Gate failures" section must still
-    render ``run.failure_reason`` in that case -- it must not be gated
+    defaults to an empty list here. The non-Gate ``.panel--danger`` must
+    still render ``run.failure_reason`` in that case -- it must not be gated
     behind ``violations`` being non-empty, since ``view_report_draft`` sets
     ``run`` in context whenever ``run.failed_at is not None``, independent
-    of whether a ``StoredGateResult`` row exists."""
+    of whether a ``StoredGateResult`` row exists. No Rigenera form: Story 9.5
+    only offers that recovery for a *current-cycle* Gate failure."""
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(
         client_id=ada.id,
@@ -1103,17 +1184,15 @@ def test_getting_the_draft_for_a_generic_failure_with_a_grounded_draft_still_sho
     response = authenticated_client.get(f"/report-runs/{run.id}/draft")
 
     assert response.status_code == 200
-    assert "Gate failures" in response.text
+    assert "Generazione non riuscita" in response.text
     # Not the raw `run.failure_reason in response.text`: Jinja2's
     # autoescaping turns the apostrophes in "stage 'gate_passed'..." into
     # HTML entities, so a substring free of quoting is checked instead
     # (mirrors `test_a_failed_runs_poll_fragment_shows_the_reason_with_no_hx_trigger`).
     assert "simulated DB error" in response.text
-    gate_failures_section = response.text.split('<section id="gate-failures">')[1].split(
-        "</section>"
-    )[0]
-    assert "<ul>" not in gate_failures_section
-    assert "Cited entries" not in gate_failures_section
+    assert "Verifica di fondatezza non superata" not in response.text
+    assert "violation-card" not in response.text
+    assert "/regenerate" not in response.text
 
 
 def test_getting_the_draft_for_a_passing_run_shows_no_gate_failures_block(
@@ -1143,7 +1222,365 @@ def test_getting_the_draft_for_a_passing_run_shows_no_gate_failures_block(
     response = authenticated_client.get(f"/report-runs/{run.id}/draft")
 
     assert response.status_code == 200
-    assert "Gate failures" not in response.text
+    assert "Verifica di fondatezza non superata" not in response.text
+    assert "Generazione non riuscita" not in response.text
+    assert "violation-card" not in response.text
+
+
+# --- Story 9.5: the stage track -----------------------------------------------------
+
+
+def test_a_running_runs_poll_fragment_shows_all_six_nodes_and_the_active_caption(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert response.text.count("stage-track__node") >= 6
+    for label in (
+        "Tema natale",
+        "Transiti",
+        "Payload",
+        "Bozza",
+        "Verifica di fondatezza",
+        "Esportazione",
+    ):
+        assert label in response.text
+    assert "stage-track__node--active" in response.text
+    assert "Generazione della bozza" in response.text  # payload_ready's own caption
+    assert "hx-trigger" in response.text
+
+
+def test_a_gate_passed_runs_poll_fragment_has_no_hx_trigger(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert "hx-trigger" not in response.text
+    # Jinja2 autoescapes the apostrophe as `&#39;`.
+    assert "Pronto per l" in response.text and "esportazione" in response.text
+
+
+def test_an_exported_runs_poll_fragment_shows_every_node_done_with_no_hx_trigger(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="exported")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert "hx-trigger" not in response.text
+    assert "Esportato" in response.text
+    assert "stage-track__node--pending" not in response.text
+    assert "stage-track__node--active" not in response.text
+    assert response.text.count("stage-track__node--done") == 6
+
+
+# --- Story 9.5: POST /report-runs/{run_id}/regenerate -------------------------------
+
+
+def _a_current_cycle_gate_failed_run(db_session: Session, client_id) -> ReportRun:
+    """A Gate-failed run whose ``StoredGateResult`` correlates with
+    ``failed_at`` within ``_current_cycle_gate_failure``'s window -- the
+    shape the Rigenera route (and the UI that shows it) requires."""
+    run = _a_bound_exhausted_run(client_id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+        attempt=run.regeneration_count,
+    )
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=(
+            GateViolation(
+                kind="empty_citation",
+                section="lavoro",
+                sentence="x",
+                entry_ids=(),
+                detail="y",
+            ),
+        ),
+    )
+    db_session.commit()
+    return run
+
+
+def test_regenerating_without_a_session_is_401(client: TestClient) -> None:
+    response = client.post(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/regenerate"
+    )
+
+    assert response.status_code == 401
+
+
+def test_regenerating_an_unknown_run_is_404(authenticated_client: TestClient) -> None:
+    response = authenticated_client.post(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/regenerate"
+    )
+
+    assert response.status_code == 404
+
+
+def test_regenerating_a_run_that_has_not_failed_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.post(f"/report-runs/{run.id}/regenerate")
+
+    assert response.status_code == 404
+
+
+def test_regenerating_a_run_with_a_non_gate_failure_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """A generic terminal failure (Story 4.8) -- no correlated
+    ``StoredGateResult`` -- must not be regenerable: the button is never
+    shown for it, and a direct POST must not bypass that."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_failed_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.post(f"/report-runs/{run.id}/regenerate")
+
+    assert response.status_code == 404
+
+
+def test_regenerating_a_gate_failed_run_rewinds_it_for_one_more_attempt(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/regenerate", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}"
+    db_session.refresh(run)
+    assert run.failed_at is None
+    assert run.failure_reason is None
+    assert run.stage == "payload_ready"
+    # AD-10: the driver, never this route, owns the counter -- unchanged.
+    assert run.regeneration_count == 4
+
+
+def test_regenerating_never_calls_advance_and_the_next_poll_runs_draft_ready(
+    authenticated_client: TestClient,
+    db_session: Session,
+    app_instance: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Design Notes' own claim: the route rewinds the row and returns
+    without ever calling ``advance()`` -- regeneration itself happens on the
+    *next* poll, exactly like ``start_report_run``."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)
+
+    advance_calls: list[str | None] = []
+
+    def _counting_advance(session, run, **kwargs):
+        advance_calls.append(run.stage)
+        if run.stage == "payload_ready":
+            run.stage = "draft_ready"
+            session.add(run)
+            session.commit()
+        return run
+
+    monkeypatch.setattr(report_runs_module, "advance", _counting_advance)
+    app_instance.dependency_overrides[get_generator] = lambda: object()
+
+    regen_response = authenticated_client.post(
+        f"/report-runs/{run.id}/regenerate", follow_redirects=False
+    )
+    assert regen_response.status_code == 303
+    assert advance_calls == []  # never called inside the regenerate handler
+
+    poll_response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert poll_response.status_code == 200
+    assert advance_calls == ["payload_ready"]
+    db_session.refresh(run)
+    assert run.stage == "draft_ready"
+
+
+def test_a_non_gate_failure_after_an_earlier_superseded_gate_failure_hides_rigenera(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Review-loop 1's own scenario: a run failed the Gate once (a failing
+    ``StoredGateResult`` row exists), was rewound via ``/regenerate``, and
+    *this* cycle's terminal failure is unrelated to the Gate. The stale row
+    must not resurface as if it were current -- no violation cards, no
+    Rigenera, on either the poll fragment or ``/draft`` -- and a direct
+    ``POST …/regenerate`` must still 404. The stale row's ``created_at`` is
+    explicitly backdated (Design Notes) so the test is deterministic
+    regardless of how fast it executes."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="draft_ready",
+        regeneration_count=1,
+        failed_at=datetime.now(UTC),
+        failure_reason="stage 'gate_passed' failed 5 consecutive times: simulated DB error",
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+        attempt=0,
+    )
+    # The stale row: a real Gate failure from the cycle *before* the
+    # `/regenerate` rewind that led to this run's current, unrelated
+    # failure -- backdated well outside the correlation window.
+    db_session.add(
+        StoredGateResult(
+            client_id=ada.id,
+            report_run_id=run.id,
+            passed=False,
+            regeneration_count=0,
+            vocabulary_version=1,
+            vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+            violations=[
+                {
+                    "kind": "empty_citation",
+                    "section": "lavoro",
+                    "sentence": "the stale cycle's sentence",
+                    "entry_ids": [],
+                    "detail": "the stale cycle's detail",
+                }
+            ],
+            created_at=run.failed_at - timedelta(hours=1),
+        )
+    )
+    db_session.commit()
+
+    poll_response = authenticated_client.get(f"/report-runs/{run.id}")
+    assert poll_response.status_code == 200
+    assert "the stale cycle's sentence" not in poll_response.text
+    assert "Vedi bozza" not in poll_response.text
+    assert "simulated DB error" in poll_response.text
+
+    draft_response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+    assert draft_response.status_code == 200
+    assert "the stale cycle's sentence" not in draft_response.text
+    assert "violation-card" not in draft_response.text
+    assert "/regenerate" not in draft_response.text
+    assert "Generazione non riuscita" in draft_response.text
+
+    regen_response = authenticated_client.post(f"/report-runs/{run.id}/regenerate")
+    assert regen_response.status_code == 404
+
+
+def _a_run_with_a_gate_result_offset_by(db_session: Session, client_id, *, offset) -> ReportRun:
+    """A terminally failed run at ``draft_ready`` with exactly one failing
+    ``StoredGateResult`` whose ``created_at`` sits ``run.failed_at - offset``
+    -- built directly (not via ``store_gate_result()``, which always defaults
+    ``created_at`` to "now") so the gap from ``failed_at`` is exact and
+    deterministic, for pinning down ``_GATE_RESULT_CORRELATION_WINDOW``'s own
+    `` > `` vs `` >= `` boundary (review-loop 2)."""
+    run = ReportRun(
+        client_id=client_id,
+        month="2026-01",
+        stage="draft_ready",
+        regeneration_count=1,
+        failed_at=datetime.now(UTC),
+        failure_reason="regeneration bound exhausted after 1 attempts: "
+        "Refusing to advance past the Groundedness Gate: 1 violation(s) against the Payload.",
+    )
+    db_session.add(run)
+    db_session.commit()
+    db_session.add(
+        StoredGateResult(
+            client_id=client_id,
+            report_run_id=run.id,
+            passed=False,
+            regeneration_count=0,
+            vocabulary_version=1,
+            vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+            violations=[
+                {
+                    "kind": "empty_citation",
+                    "section": "lavoro",
+                    "sentence": "boundary sentence",
+                    "entry_ids": [],
+                    "detail": "boundary detail",
+                }
+            ],
+            created_at=run.failed_at - offset,
+        )
+    )
+    db_session.commit()
+    return run
+
+
+def test_a_gate_result_1_9s_before_failed_at_is_still_the_current_cycle(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Just *inside* the 2s correlation window (``_GATE_RESULT_CORRELATION_WINDOW``,
+    ``shell/http/routes/report_runs.py``) -- still resolves as a Gate
+    failure: the violation panel and Rigenera show."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_run_with_a_gate_result_offset_by(db_session, ada.id, offset=timedelta(seconds=1.9))
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert "Vedi bozza" in response.text
+
+
+def test_a_gate_result_2_1s_before_failed_at_is_treated_as_a_stale_prior_cycle(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Just *outside* the 2s correlation window -- resolves as a non-Gate
+    failure: no violation panel, no Rigenera, even though a failing
+    ``StoredGateResult`` row exists for this run."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_run_with_a_gate_result_offset_by(db_session, ada.id, offset=timedelta(seconds=2.1))
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert "Vedi bozza" not in response.text
 
 
 # --- Story 6.1: GET /report-runs/{run_id}/report -----------------------------------

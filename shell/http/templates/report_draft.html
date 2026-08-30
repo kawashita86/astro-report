@@ -1,29 +1,59 @@
 {% extends "base.html" %}
-{% block title %}Report draft — astro-report{% endblock %}
+{% block title %}Bozza — astro-report{% endblock %}
 {% block content %}
-      <h1>Report draft</h1>
+      <h1>Bozza</h1>
 
-      {% if run %}
-      <section id="gate-failures">
-        <h2>Gate failures</h2>
-        <p>{{ run.failure_reason }}</p>
-        {% if violations %}
-        <ul>
-          {% for violation in violations %}
-          <li>
-            <strong>{{ violation.kind }}</strong> in <em>{{ violation.section }}</em>:
-            <blockquote>{{ violation.sentence }}</blockquote>
-            <p>{{ violation.detail }}</p>
-            <p>Cited entries: {{ violation.entry_ids | join(", ") if violation.entry_ids else "none" }}</p>
-          </li>
-          {% endfor %}
-        </ul>
-        {% endif %}
+      {% if violations %}
+      <section class="panel panel--danger" aria-labelledby="gate-fail-h">
+        <h2 id="gate-fail-h">Verifica di fondatezza non superata</h2>
+        <p class="panel__body">{{ run.failure_reason }}</p>
+
+        {% for v in violations %}
+        <article class="violation-card">
+          <p class="violation-card__kind">{{ v.kind_label }}</p>
+          <p>{{ section_titles[v.section] }}</p>
+          <blockquote>{{ v.sentence }}</blockquote>
+          <p class="violation-card__detail">{{ v.detail }}</p>
+          <p class="violation-card__chips">
+            {% for eid in v.entry_ids %}<span class="badge-mono">{{ eid }}</span>{% else %}nessuna{% endfor %}
+          </p>
+          <a href="#sezione-{{ v.section }}">Vai a {{ section_titles[v.section] }}</a>
+        </article>
+        {% endfor %}
+
+        <div class="panel__actions">
+          <form method="post" action="/report-runs/{{ run.id }}/regenerate">
+            <button type="submit" class="btn btn--primary" data-regen-trigger>Rigenera</button>
+          </form>
+          <a class="btn btn--secondary" href="/report-runs/{{ run.id }}/payload">Vedi Payload</a>
+        </div>
+      </section>
+
+      <div class="modal-scrim" data-regen-modal hidden>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="regen-h">
+          <h2 id="regen-h" class="modal__title">Rigenerare il report?</h2>
+          <p class="modal__body">
+            Avvia un altro tentativo: genera una nuova bozza e la sottopone di nuovo alla
+            verifica di fondatezza.
+          </p>
+          <div class="modal__actions">
+            <button type="button" class="btn btn--secondary" data-regen-cancel>Annulla</button>
+            <form method="post" action="/report-runs/{{ run.id }}/regenerate">
+              <button type="submit" class="btn btn--primary">Rigenera</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% elif run %}
+      <section class="panel panel--danger">
+        <h2>Generazione non riuscita</h2>
+        <p class="panel__body">{{ run.failure_reason }}</p>
+        <a class="btn btn--secondary" href="/report-runs/{{ run.id }}/payload">Vedi Payload</a>
       </section>
       {% endif %}
 
       {% for section_name in section_order %}
-      <section>
+      <section id="sezione-{{ section_name }}">
         <h2>{{ section_titles[section_name] }}</h2>
         {% if section_name in list_section_names %}
         <ul>

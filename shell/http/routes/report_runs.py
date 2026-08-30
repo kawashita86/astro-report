@@ -23,7 +23,7 @@ before a request ever reaches this module, mirroring
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
 from uuid import UUID
@@ -58,6 +58,7 @@ from shell.http.draft_view import (
 )
 from shell.http.payload_view import localize_payload
 from shell.http.report_markdown import render_report_markdown
+from shell.http.stage_view import build_stage_track, stage_caption, violation_kind_label
 from shell.ports.generator import Generator
 from shell.runner.driver import advance
 
@@ -85,6 +86,31 @@ DISPOSITION_CHOICES: tuple[tuple[str, str], ...] = (
 )
 _DISPOSITION_VALUES = {value for value, _label in DISPOSITION_CHOICES}
 
+#: How close a failing ``StoredGateResult.created_at`` must sit to
+#: ``run.failed_at`` -- in *either* direction -- for
+#: ``_current_cycle_gate_failure`` to treat it as the check that actually
+#: produced *this* failure, rather than a stale row from an earlier,
+#: ``/regenerate``-superseded cycle. A real Gate check and the terminal
+#: ``failed_at`` it produces are written inside the same ``advance()`` call
+#: (``shell/runner/driver.py``'s ``except GateFailedError`` block writes the
+#: ``StoredGateResult`` row first, then sets ``failed_at`` once
+#: ``regeneration_count`` exceeds the bound) -- a sub-second gap, well inside
+#: this window; the absolute value admits that same sub-second gap when a
+#: caller instead constructs ``failed_at`` before the row (as this module's
+#: own tests do). A stale row is always separated from a *later* terminal
+#: ``failed_at`` by well over this window: ``regenerate_report_run``'s ``303``
+#: redirects to ``/report-runs/{run_id}`` (``poll_report_run``), so the first
+#: ``advance()`` after a rewind fires immediately on that redirect's own page
+#: load, not after a 2s poll wait -- but a fresh non-Gate terminal failure
+#: still cannot land inside this window, because ``_MAX_STAGE_FAILURES``
+#: (``shell/runner/driver.py``, 5) requires 5 *consecutive* stage-failure
+#: exhaustions across separate ``advance()`` calls -- each one only reached on
+#: a subsequent, ~2s-apart poll -- before a run is marked terminally failed
+#: for a generic reason. The real minimum margin is therefore several poll
+#: intervals (well over 2s), not "one poll interval" (this story's Design
+#: Notes, review-loop 1; corrected by review-loop 2).
+_GATE_RESULT_CORRELATION_WINDOW = timedelta(seconds=2)
+
 
 def _current_chart(session: Session, client_id: UUID) -> StoredNatalChart | None:
     return session.exec(
@@ -93,6 +119,45 @@ def _current_chart(session: Session, client_id: UUID) -> StoredNatalChart | None
             StoredNatalChart.superseded_at.is_(None),
         )
     ).first()
+
+
+def _current_cycle_gate_failure(session: Session, run: ReportRun) -> StoredGateResult | None:
+    """The failing ``StoredGateResult`` that actually caused ``run``'s
+    *current* terminal failure, or ``None`` if this run's current failure was
+    not a Gate failure at all (Story 9.5, review-loop 1).
+
+    Replaces an existence-only "has a failing ``StoredGateResult`` ever been
+    written for this ``run_id``" check, which review-loop 0's blind-hunter
+    review caught as insufficient: once ``POST …/regenerate`` can rewind a
+    Gate-failed run and let it fail again for an unrelated reason, "this run
+    failed the Gate at some point in its history" and "the Gate produced
+    *this* ``failed_at``" are different questions, and only the latter is
+    safe to gate ``gate_failed``/the Rigenera route on.
+
+    Returns ``None`` immediately if ``run.failed_at is None`` -- a running or
+    passed run was never asked this question by any caller, but the guard is
+    cheap and makes the function total. Otherwise runs the same query
+    ``view_report_draft`` already ran pre-Story-9.5 (latest failing row by
+    ``regeneration_count`` descending) and additionally requires
+    ``result.created_at`` to fall within :data:`_GATE_RESULT_CORRELATION_WINDOW`
+    of ``run.failed_at`` -- see that constant's own comment for why this
+    window reliably separates "the check that just failed" from a stale row
+    left behind by an earlier, since-superseded regeneration cycle.
+    """
+    if run.failed_at is None:
+        return None
+    result = session.exec(
+        select(StoredGateResult)
+        .where(StoredGateResult.report_run_id == run.id)
+        .where(StoredGateResult.passed.is_(False))
+        .order_by(StoredGateResult.regeneration_count.desc())
+    ).first()
+    if result is None:
+        return None
+    delta = run.failed_at - result.created_at
+    if abs(delta) > _GATE_RESULT_CORRELATION_WINDOW:
+        return None
+    return result
 
 
 def _latest_export_record(session: Session, run_id: UUID) -> ExportRecord | None:
@@ -276,7 +341,64 @@ def poll_report_run(
 
     _advance_run(request, session, run, client, generator)
 
-    return _templates.TemplateResponse(request, "report_run_poll.html", {"run": run})
+    failed = run.failed_at is not None
+    gate_failed = _current_cycle_gate_failure(session, run) is not None
+    context = {
+        "run": run,
+        "stage_track": build_stage_track(run.stage, failed=failed, gate_failed=gate_failed),
+        "stage_caption": stage_caption(
+            run.stage,
+            failed=failed,
+            gate_failed=gate_failed,
+            failure_reason=run.failure_reason,
+        ),
+        "gate_failed": gate_failed,
+        "poll_active": run.failed_at is None and run.stage not in ("gate_passed", "exported"),
+    }
+    return _templates.TemplateResponse(request, "report_run_poll.html", context)
+
+
+@router.post("/report-runs/{run_id}/regenerate", include_in_schema=False)
+def regenerate_report_run(run_id: UUID, session: Session = Depends(get_session)) -> Response:
+    """Rewind a Gate-failed run to ``payload_ready`` for one more real
+    regeneration attempt (Story 9.5) -- a shell-only recovery route, not a
+    stage advance: it never calls ``advance()`` itself, mirroring
+    ``start_report_run``'s own "returns immediately without advancing" shape.
+    Unlike ``start_report_run`` (whose redirect target, the Client's Reports
+    tab, does not poll), this route's ``303`` redirects straight to
+    ``/report-runs/{run_id}`` -- ``poll_report_run`` -- so the first
+    ``advance()`` for the rewound run actually fires immediately, on that
+    redirect's own page load, not on some later timed poll.
+    ``run.regeneration_count`` is left untouched -- the driver's own
+    ``except GateFailedError`` branch (``shell/runner/driver.py::advance()``)
+    is still the only place that counter ever moves, on the *next* Gate check
+    this rewind lets run.
+
+    404s unless ``run.failed_at is not None`` **and**
+    ``_current_cycle_gate_failure(session, run) is not None`` -- not the old
+    "a failing ``StoredGateResult`` has ever existed for this run" check
+    (review-loop 1): that weaker guard would let a direct ``POST`` regenerate
+    a run whose *current* failure is not a Gate failure at all, even though
+    the UI never shows the Rigenera button for one (``report_draft.html``
+    only renders the form inside the ``{% if violations %}`` branch, which
+    the same current-cycle check gates). Mirrors every other "wrong state /
+    no such run" branch in this module by collapsing to a plain 404 (this
+    story's Design Notes: "why a wrong-state 404, not 409").
+    """
+    run = session.get(ReportRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404)
+    if run.failed_at is None or _current_cycle_gate_failure(session, run) is None:
+        raise HTTPException(status_code=404)
+
+    run.failed_at = None
+    run.failure_reason = None
+    run.stage = "payload_ready"
+    run.updated_at = datetime.now(UTC)
+    session.add(run)
+    session.commit()
+
+    return RedirectResponse(f"/report-runs/{run_id}", status_code=303)
 
 
 @router.get("/report-runs/{run_id}/payload", include_in_schema=False)
@@ -326,16 +448,21 @@ def view_report_draft(
 
     When ``run.failed_at`` is set (Story 5.4's regeneration bound exhausted,
     the last ``ReportDraft`` still reachable), the Groundedness Gate is
-    *not* recomputed -- Story 5.6's persisted ``StoredGateResult`` row for
-    this run (the one with the highest ``regeneration_count``, i.e. the
-    check that actually caused the failure) is read back instead, so a
-    vocabulary edit landing between the run's terminal failure and Francesco
-    opening its draft can never show a different violation set than what
-    actually failed (epic-5-retro-item-38). No row found (a generic,
-    non-Gate terminal failure never wrote one) -> ``violations`` defaults to
-    an empty list. Either way, ``run`` itself is added to the template
-    context, for ``failure_reason`` (Story 5.5). A passing run's context is
-    left byte-for-byte unchanged: no query, no new context keys.
+    *not* recomputed -- ``_current_cycle_gate_failure`` (Story 9.5, review
+    -loop 1) reads back the ``StoredGateResult`` row that actually caused
+    *this* run's *current* failure (the highest-``regeneration_count`` failing
+    row, but only when its ``created_at`` correlates with ``run.failed_at`` --
+    see that function's own docstring), so a vocabulary edit landing between
+    the run's terminal failure and Francesco opening its draft can never show
+    a different violation set than what actually failed (epic-5-retro-item-38),
+    and a stale Gate failure from an earlier cycle superseded by a
+    ``/regenerate`` rewind can never resurface as if it were current. No
+    correlated row found (a generic, non-Gate terminal failure never wrote
+    one, or the only row on record predates a rewind) -> ``violations``
+    defaults to an empty list and ``gate_failed`` to ``False``. Either way,
+    ``run`` itself is added to the template context, for ``failure_reason``
+    (Story 5.5). A passing run's context is left byte-for-byte unchanged: no
+    query, no new context keys.
     """
     run = session.get(ReportRun, run_id)
     if run is None:
@@ -368,16 +495,14 @@ def view_report_draft(
         "section_titles": SECTION_TITLES,
     }
     if run.failed_at is not None:
-        stored_gate_result = session.exec(
-            select(StoredGateResult)
-            .where(StoredGateResult.report_run_id == run_id)
-            .where(StoredGateResult.passed.is_(False))
-            .order_by(StoredGateResult.regeneration_count.desc())
-        ).first()
-        context["violations"] = (
-            stored_gate_result.violations if stored_gate_result is not None else []
-        )
+        stored_gate_result = _current_cycle_gate_failure(session, run)
+        violations = stored_gate_result.violations if stored_gate_result is not None else []
+        context["violations"] = [
+            {**violation, "kind_label": violation_kind_label(violation["kind"])}
+            for violation in violations
+        ]
         context["run"] = run
+        context["gate_failed"] = stored_gate_result is not None
 
     return _templates.TemplateResponse(request, "report_draft.html", context)
 

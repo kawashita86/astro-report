@@ -199,6 +199,8 @@ def test_the_active_sidebar_item_is_marked_from_the_request_path(
 
 
 def _render_poll(*, hx_request: bool) -> str:
+    from shell.http.stage_view import build_stage_track, stage_caption
+
     env = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR)), autoescape=True)
 
     headers = {"hx-request": "true"} if hx_request else {}
@@ -210,20 +212,37 @@ def _render_poll(*, hx_request: bool) -> str:
     fake_run = type(
         "_Run",
         (),
-        {"id": "abc", "month": "2026-01", "stage": "transits_ready", "failed_at": None},
+        {
+            "id": "abc",
+            "month": "2026-01",
+            "stage": "transits_ready",
+            "failed_at": None,
+            "regeneration_count": 0,
+            "failure_reason": None,
+        },
     )()
-    return env.get_template("report_run_poll.html").render(request=fake_request, run=fake_run)
+    stage_track = build_stage_track(fake_run.stage, failed=False, gate_failed=False)
+    caption = stage_caption(fake_run.stage, failed=False, gate_failed=False, failure_reason=None)
+    return env.get_template("report_run_poll.html").render(
+        request=fake_request,
+        run=fake_run,
+        stage_track=stage_track,
+        stage_caption=caption,
+        gate_failed=False,
+        poll_active=True,
+    )
 
 
 def test_an_htmx_poll_renders_only_the_fragment_no_document_skeleton() -> None:
     """I/O Matrix — "HTMX poll of a running run": fragment only, no ``<html>``,
-    no ``<head>``, no htmx ``<script>``; still carries the stage text."""
+    no ``<head>``, no htmx ``<script>``; still carries the stage track."""
     fragment = _render_poll(hx_request=True)
 
     assert "<html" not in fragment.lower()
     assert "<head" not in fragment.lower()
     assert "htmx.min.js" not in fragment
-    assert "transits_ready" in fragment
+    assert "Assemblaggio del Payload" in fragment  # transits_ready's own caption
+    assert "stage-track" in fragment
     assert 'id="run-status"' in fragment
 
 
@@ -235,7 +254,7 @@ def test_a_full_page_poll_renders_through_base_html() -> None:
     assert exactly_one_html(full_page)
     assert '<html lang="it">' in full_page
     assert "/static/htmx.min.js" in full_page
-    assert "transits_ready" in full_page
+    assert "Assemblaggio del Payload" in full_page  # transits_ready's own caption
 
 
 # --- login renders through base.html, chrome suppressed -------------------------

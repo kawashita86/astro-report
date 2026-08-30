@@ -480,6 +480,11 @@ h3 {
   * {
     scroll-behavior: auto;
   }
+
+  /* Story 9.5: the active stage-track dot stops pulsing. */
+  .stage-track__node--active .stage-track__dot {
+    animation: none;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1157,4 +1162,139 @@ h3 {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-md);
+}
+
+/* ---------------------------------------------------------------------------
+ * PROVISIONAL — Story 9.5 (a stage track to watch, a Gate failure that can be
+ * read). Minimal component styling for the six-node stage track, its
+ * progress-tense caption, and the Gate-failure violation cards. Reuses
+ * `.panel`/`.panel--danger`/`.panel__body`/`.panel__actions`, `.btn*`,
+ * `.banner`/`.banner--danger`, `.badge-mono`, `.modal-scrim`/`.modal`/
+ * `.modal__title`/`.modal__body`/`.modal__actions` verbatim from Stories
+ * 9.2-9.4 for the Rigenera confirm modal and the poll-error banner. Semantic
+ * tokens only; contrast holds in both themes (stage-dot fills and the
+ * hairline connector are >= 3:1 non-text; caption/label/card body text is
+ * >= 4.5:1). Story 9.8 consolidates these into shared component partials —
+ * do not build on the exact class names here.
+ * ------------------------------------------------------------------------- */
+
+.stage-track {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-md);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stage-track__node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.stage-track__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+}
+
+.stage-track__node--active .stage-track__dot {
+  background: var(--primary-700);
+  animation: stage-track-pulse 1.6s ease-in-out infinite;
+}
+
+.stage-track__node--done .stage-track__dot {
+  background: var(--success);
+}
+
+.stage-track__node--failed .stage-track__dot {
+  background: var(--danger);
+}
+
+@keyframes stage-track-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--primary-100);
+  }
+  50% {
+    box-shadow: 0 0 0 4px var(--primary-100);
+  }
+}
+
+.stage-track__label {
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+  color: var(--ink-secondary);
+  text-align: center;
+}
+
+.stage-track__node--active .stage-track__label {
+  color: var(--ink-primary);
+  font-weight: var(--font-label-weight);
+}
+
+.stage-track__node--failed .stage-track__label {
+  color: var(--danger);
+}
+
+.stage-track__connector {
+  flex: 1 1 auto;
+  align-self: flex-start;
+  min-width: var(--space-lg);
+  height: 1px;
+  /* Vertically centred on the 12px dot above it (`.stage-track` is
+     `align-items: flex-start`, so every node's dot starts flush with the
+     row's own top edge). */
+  margin-top: 5px;
+  background: var(--border-hairline);
+}
+
+.stage-caption {
+  margin: var(--space-md) 0 0;
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-line);
+  color: var(--ink-secondary);
+}
+
+.violation-card {
+  padding: var(--space-base);
+  margin-top: var(--space-md);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+
+.violation-card + .violation-card {
+  margin-top: var(--space-md);
+}
+
+.violation-card__kind {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-label-size);
+  font-weight: var(--font-label-weight);
+  line-height: var(--font-label-line);
+  color: var(--ink-primary);
+}
+
+.violation-card blockquote {
+  margin: var(--space-sm) 0;
+  padding-left: var(--space-md);
+  border-left: 3px solid var(--border-strong);
+  color: var(--ink-primary);
+}
+
+.violation-card__detail {
+  color: var(--ink-secondary);
+}
+
+.violation-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--ink-secondary);
 }
