@@ -20,6 +20,7 @@ fragment/full-page split.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -532,23 +533,33 @@ def test_getting_the_payload_shows_all_eight_groupings_localized_to_the_clients_
     response = authenticated_client.get(f"/report-runs/{run.id}/payload")
 
     assert response.status_code == 200
-    for name in (
-        "energia_generale",
-        "amore",
-        "lavoro",
-        "denaro",
-        "benessere",
-        "consiglio_finale",
-        "giorni_favorevoli",
-        "giorni_di_attenzione",
+    # Each Payload Section is its own <details>, labeled with the shared
+    # Italian title (not the raw snake_case field name) -- including the two
+    # day-list Sections (6-7), which share SECTION_TITLES with the other six.
+    for title in (
+        "Energia generale",
+        "Amore",
+        "Lavoro",
+        "Denaro",
+        "Benessere",
+        "Giorni favorevoli",
+        "Giorni di attenzione",
+        "Consiglio finale",
     ):
-        assert name in response.text
+        assert f"<summary>{title}</summary>" in response.text
+    # Only the first Section's <details> is open by default.
+    assert response.text.count('<details class="payload-section" open>') == 1
+    first_details_body = response.text.split('<details class="payload-section" open>', 1)[1]
+    assert first_details_body.lstrip().startswith("<summary>Energia generale</summary>")
     # ada's client.iana_zone is America/Chicago (UTC-6 in January):
     # 2026-01-08 12:00 UTC (orb_entry_at) -> 06:00 local.
     assert "2026-01-08 06:00:00 CST" in response.text
-    # `id` is omitted from a rendered event entry.
+    # `id` is no longer stripped -- it renders as an interactive mono chip.
     event_id = frozen["sections"]["amore"]["aspects"][0]["id"]
-    assert event_id not in response.text
+    assert (
+        f'<button type="button" class="badge-mono" data-copy-chip>{event_id}</button>'
+        in response.text
+    )
 
 
 def test_getting_the_payload_hides_empty_groupings(
@@ -578,6 +589,26 @@ def test_getting_the_payload_hides_empty_groupings(
         "<h3>profile</h3>",
     ):
         assert empty_field_heading not in response.text
+
+
+def test_getting_the_payload_only_the_first_section_is_open_by_default(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Every Section beyond the first renders as a collapsed ``<details>``
+    (no ``open`` attribute) -- only the very first Section starts expanded,
+    so the reader isn't confronted with every grouping's data at once."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+    store_report_payload(db_session, run=run, frozen=_a_frozen_payload_with_one_aspect())
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/payload")
+
+    assert response.status_code == 200
+    assert '<details class="payload-section" open>' in response.text
+    assert '<details class="payload-section">' in response.text
 
 
 def test_the_poll_view_links_to_the_payload_once_it_is_ready(
@@ -1749,9 +1780,59 @@ def test_getting_the_report_shows_all_eight_sections_and_the_gate_result(
     assert "Un mese equilibrato." in response.text
     assert "Venere sostiene i legami." in response.text
     assert "Ottimo per gli incontri." in response.text
-    assert "Passed" in response.text
-    assert "regenerated 0 times" in response.text
+    assert '<span class="status-badge status-badge--success">Verifica superata</span>' in (
+        response.text
+    )
+    assert "Verifica superata dopo 0 rigenerazioni." in response.text
     assert f'href="/report-runs/{run.id}/payload"' in response.text
+    assert '<article class="report-sheet">' in response.text
+    assert '<nav class="report-toc" data-report-toc aria-label="Sezioni">' in response.text
+    for section_name in (
+        "energia_generale",
+        "amore",
+        "lavoro",
+        "denaro",
+        "benessere",
+        "giorni_favorevoli",
+        "giorni_di_attenzione",
+        "consiglio_finale",
+    ):
+        assert f'id="sezione-{section_name}"' in response.text
+        assert f'href="#sezione-{section_name}"' in response.text
+
+
+def test_the_report_toc_has_eight_links_in_section_order(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """The scroll-spying section nav (``[data-report-toc]``) renders one
+    ``<a href="#sezione-…">`` per Section, in ``section_order`` -- the same
+    fixed order the reading sheet itself renders them in."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    toc = response.text.split('<nav class="report-toc" data-report-toc aria-label="Sezioni">')[
+        1
+    ].split("</nav>")[0]
+    links = re.findall(r'href="#sezione-([a-z_]+)"', toc)
+    assert links == [
+        "energia_generale",
+        "amore",
+        "lavoro",
+        "denaro",
+        "benessere",
+        "giorni_favorevoli",
+        "giorni_di_attenzione",
+        "consiglio_finale",
+    ]
 
 
 def test_getting_the_report_shows_the_stored_regeneration_count_not_the_runs_own(
@@ -1775,8 +1856,30 @@ def test_getting_the_report_shows_the_stored_regeneration_count_not_the_runs_own
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
     assert response.status_code == 200
-    assert "regenerated 2 times" in response.text
-    assert "regenerated 5 times" not in response.text
+    assert "Verifica superata dopo 2 rigenerazioni." in response.text
+    assert "Verifica superata dopo 5 rigenerazioni." not in response.text
+
+
+def test_getting_the_report_singularizes_the_regeneration_note_for_exactly_one(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Matrix row: "Passed Report, 1 regeneration" -- the note reads
+    "...dopo 1 rigenerazione." (singular, no trailing "i"), not the plural
+    form every other count uses."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=1)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert "Verifica superata dopo 1 rigenerazione." in response.text
+    assert "Verifica superata dopo 1 rigenerazioni." not in response.text
 
 
 def test_getting_a_report_generated_months_earlier_still_renders_fully(
@@ -1805,8 +1908,8 @@ def test_getting_a_report_generated_months_earlier_still_renders_fully(
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
     assert response.status_code == 200
-    assert "Passed" in response.text
-    assert "regenerated 0 times" in response.text
+    assert "Verifica superata" in response.text
+    assert "Verifica superata dopo 0 rigenerazioni." in response.text
     assert f'href="/report-runs/{run.id}/payload"' in response.text
     assert "Un mese equilibrato." in response.text
 
@@ -1852,7 +1955,7 @@ def test_getting_the_report_with_multiple_gate_results_picks_the_passing_row(
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
     assert response.status_code == 200
-    assert "regenerated 2 times" in response.text
+    assert "Verifica superata dopo 2 rigenerazioni." in response.text
 
 
 def test_getting_the_report_for_a_run_that_has_moved_past_gate_passed_into_exported(
@@ -2607,8 +2710,8 @@ def test_the_report_view_has_no_disposition_ui_before_any_export(
 
     assert response.status_code == 200
     assert 'id="disposition"' not in response.text
-    assert "Sent as generated" not in response.text
-    assert "Sent, edited first" not in response.text
+    assert "Inviato come generato" not in response.text
+    assert "Inviato, con modifiche" not in response.text
 
 
 def test_the_report_view_shows_both_disposition_forms_once_exported(
@@ -2622,8 +2725,8 @@ def test_the_report_view_shows_both_disposition_forms_once_exported(
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
     assert response.status_code == 200
-    assert "Sent as generated" in response.text
-    assert "Sent, edited first" in response.text
+    assert "Inviato come generato" in response.text
+    assert "Inviato, con modifiche" in response.text
     assert response.text.count(f'action="/report-runs/{run.id}/export/disposition"') == 2
 
 
@@ -2641,8 +2744,8 @@ def test_the_report_view_shows_the_recorded_disposition_and_hides_the_forms(
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
     assert response.status_code == 200
-    assert "Sent as generated" in response.text
-    assert "Sent, edited first" not in response.text
+    assert "Inviato come generato" in response.text
+    assert "Inviato, con modifiche" not in response.text
     disposition_section = response.text.split('id="disposition"')[1].split("</div>")[0]
     assert "<form" not in disposition_section
     assert "<button" not in disposition_section

@@ -1,7 +1,7 @@
 /*
  * astro-report application-shell behaviour — first-party, no dependencies.
  *
- * Seven jobs, all progressive enhancements over a shell that already works
+ * Nine jobs, all progressive enhancements over a shell that already works
  * without JavaScript:
  *
  *   1. Theme toggle — flip `data-theme` on <html>, persist the choice to
@@ -56,6 +56,30 @@
  *      bounded recovery action, not a destroy). The no-JS path is the same
  *      panel's plain `<form method="post">`, already a working full-page
  *      submit before this script ever runs.
+ *
+ *   8. Click-to-copy mono chips (Story 9.6) — one delegated `click` listener
+ *      on `document.body` for `.badge-mono[data-copy-chip]`: copies the
+ *      chip's own text via `navigator.clipboard.writeText`, wrapped in a
+ *      try/catch so a missing/blocked Clipboard API is a silent no-op, never
+ *      a thrown error. On success the chip's text swaps to `Copiato` for
+ *      ~1.5s, then reverts to the original text (stashed in a closure var,
+ *      not a data-attribute, so a pending restore timer is cancelled before
+ *      a rapid re-click starts a new one — no stale-state races). Every
+ *      `.badge-mono` in the app — report/payload entry ids, the draft's
+ *      violation-card chips, the dashboard's month codes — is wired by this
+ *      one listener; no per-template JS. Native `<button>` markup gives
+ *      keyboard operability (Enter/Space) for free.
+ *
+ *   9. Report-sheet scroll-spy (Story 9.6) — guarded on the presence of
+ *      `[data-report-toc]` (only `report.html` has one): an
+ *      `IntersectionObserver` watches every `.report-sheet section[id]` and
+ *      toggles `.is-active` on the matching `.report-toc a[href="#…"]` as
+ *      each Section crosses a top-anchored viewport band. Not gated by
+ *      `prefers-reduced-motion` — this is a state toggle, not an animation;
+ *      only the anchor links' own scroll is smoothed, via tokens.css's
+ *      global `scroll-behavior: smooth` (itself turned back to `auto` under
+ *      reduced motion). Without JS the `report-toc` links still work as
+ *      plain in-page anchors — no highlighting, but every jump still lands.
  *
  * All shell transitions are disabled by tokens.css under
  * `prefers-reduced-motion`; this file adds no scripted animation.
@@ -561,6 +585,94 @@
       if (event.target === regenScrim) {
         closeRegenModal();
       }
+    });
+  }
+
+  /* ---- 8. Click-to-copy mono chips (Story 9.6) --------------------------- */
+
+  var copyRestoreTimer = null;
+  var copyOriginalText = null;
+  var copyOriginalEl = null;
+
+  function restoreCopyChip() {
+    if (copyOriginalEl) {
+      copyOriginalEl.textContent = copyOriginalText;
+    }
+    copyRestoreTimer = null;
+    copyOriginalEl = null;
+    copyOriginalText = null;
+  }
+
+  document.body.addEventListener("click", function (event) {
+    var chip =
+      event.target && event.target.closest
+        ? event.target.closest(".badge-mono[data-copy-chip]")
+        : null;
+    if (!chip) {
+      return;
+    }
+
+    // If this chip is already mid-flash ("Copiato"), its live textContent
+    // is the feedback label, not the identifier -- read the stashed
+    // original instead, so a re-click during the 1.5s window copies (and
+    // eventually restores) the real value rather than the word "Copiato".
+    var text = chip === copyOriginalEl ? copyOriginalText : chip.textContent.trim();
+
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      return;
+    }
+
+    try {
+      navigator.clipboard
+        .writeText(text)
+        .then(function () {
+          // Cancel any pending restore from a previous click -- rapid
+          // re-clicks never race each other back to the wrong label.
+          if (copyRestoreTimer) {
+            clearTimeout(copyRestoreTimer);
+          }
+          copyOriginalEl = chip;
+          copyOriginalText = text;
+          chip.textContent = "Copiato";
+          copyRestoreTimer = setTimeout(restoreCopyChip, 1500);
+        })
+        .catch(function () {
+          /* clipboard write blocked/rejected — silent no-op */
+        });
+    } catch (e) {
+      /* Clipboard API unavailable — silent no-op */
+    }
+  });
+
+  /* ---- 9. Report-sheet scroll-spy (Story 9.6) ----------------------------- */
+
+  var reportToc = document.querySelector("[data-report-toc]");
+  if (reportToc && window.IntersectionObserver) {
+    var tocLinks = Array.prototype.slice.call(reportToc.querySelectorAll("a[href^='#']"));
+    var sections = Array.prototype.slice.call(
+      document.querySelectorAll(".report-sheet section[id]")
+    );
+
+    var setActiveLink = function (id) {
+      tocLinks.forEach(function (link) {
+        var isActive = link.getAttribute("href") === "#" + id;
+        link.classList.toggle("is-active", isActive);
+      });
+    };
+
+    var observer = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            setActiveLink(entry.target.id);
+          }
+        });
+      },
+      { rootMargin: "0px 0px -70% 0px" }
+    );
+
+    sections.forEach(function (section) {
+      observer.observe(section);
     });
   }
 })();

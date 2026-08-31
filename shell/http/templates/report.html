@@ -1,46 +1,62 @@
 {% extends "base.html" %}
 {% block title %}Report — astro-report{% endblock %}
 {% block content %}
-      <h1>Report — {{ run.month }}</h1>
+      <h1>Report <button type="button" class="badge-mono" data-copy-chip>{{ run.month }}</button></h1>
 
-      <section id="gate-result">
-        <h2>Gate</h2>
-        <p>Passed (regenerated {{ gate_result.regeneration_count }} times)</p>
-        <p><a href="/report-runs/{{ run_id }}/payload">View Payload</a></p>
-        <p><a href="/report-runs/{{ run_id }}/export/pdf">Export PDF</a></p>
-        <p><a href="/report-runs/{{ run_id }}/export/markdown">Download Markdown</a></p>
-        {% if latest_export %}
-        <div id="disposition">
-          {% if latest_export.disposition is none %}
-          {% for value, label in disposition_choices %}
-          <form method="post" action="/report-runs/{{ run_id }}/export/disposition">
-            <input type="hidden" name="disposition" value="{{ value }}" />
-            <button type="submit">{{ label }}</button>
-          </form>
-          {% endfor %}
-          {% else %}
-          <p>
+      <div class="exportbar">
+        <span class="status-badge status-badge--success">Verifica superata</span>
+        <p class="report-note">{{ regeneration_note }}</p>
+        <div class="exportbar__actions">
+          <a class="btn btn--secondary" href="/report-runs/{{ run_id }}/payload">Vedi Payload</a>
+          <a class="btn btn--primary" href="/report-runs/{{ run_id }}/export/pdf">Esporta PDF</a>
+          <a class="btn btn--secondary" href="/report-runs/{{ run_id }}/export/markdown"
+            >Scarica Markdown</a
+          >
+          {% if latest_export %}
+          <div id="disposition">
+            {% if latest_export.disposition is none %}
             {% for value, label in disposition_choices %}
-            {% if value == latest_export.disposition %}{{ label }}{% endif %}
+            <form method="post" action="/report-runs/{{ run_id }}/export/disposition">
+              <input type="hidden" name="disposition" value="{{ value }}" />
+              <button type="submit" class="btn btn--secondary">{{ label }}</button>
+            </form>
             {% endfor %}
-          </p>
+            {% else %}
+            <p>
+              {% for value, label in disposition_choices %}
+              {% if value == latest_export.disposition %}{{ label }}{% endif %}
+              {% endfor %}
+            </p>
+            {% endif %}
+          </div>
           {% endif %}
         </div>
-        {% endif %}
-      </section>
+      </div>
 
-      {% for section_name in section_order %}
-      <section>
-        <h2>{{ section_titles[section_name] }}</h2>
-        {% if section_name in list_section_names %}
-        <ul>
-          {% for item in draft[section_name] %}
-          <li>{{ item.date }} — {{ item.text or "" }}</li>
+      <div class="reading">
+        <nav class="report-toc" data-report-toc aria-label="Sezioni">
+          {% for section_name in section_order %}
+          <a href="#sezione-{{ section_name }}"
+            >{{ loop.index }} · {{ section_titles[section_name] }}</a
+          >
           {% endfor %}
-        </ul>
-        {% else %}
-        <p>{{ draft[section_name].text }}</p>
-        {% endif %}
-      </section>
-      {% endfor %}
+        </nav>
+
+        <article class="report-sheet">
+          {% for section_name in section_order %}
+          <section id="sezione-{{ section_name }}">
+            <h2>{{ section_titles[section_name] }}</h2>
+            {% if section_name in list_section_names %}
+            <ul>
+              {% for item in draft[section_name] %}
+              <li>{{ item.date }} — {{ item.text or "" }}</li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <p>{{ draft[section_name].text }}</p>
+            {% endif %}
+          </section>
+          {% endfor %}
+        </article>
+      </div>
 {% endblock %}

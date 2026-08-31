@@ -25,7 +25,7 @@
             <span class="dash-run__client" title="{{ run.client_name }}"
               >{{ run.client_name }}</span
             >
-            <span class="badge-mono">{{ run.month }}</span>
+            <button type="button" class="badge-mono" data-copy-chip>{{ run.month }}</button>
             <span
               class="status-badge status-badge--{{ run.badge_variant }}"
               {% if run.failure_reason %}title="{{ run.failure_reason }}"{% endif %}

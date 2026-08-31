@@ -15,7 +15,7 @@
           <blockquote>{{ v.sentence }}</blockquote>
           <p class="violation-card__detail">{{ v.detail }}</p>
           <p class="violation-card__chips">
-            {% for eid in v.entry_ids %}<span class="badge-mono">{{ eid }}</span>{% else %}nessuna{% endfor %}
+            {% for eid in v.entry_ids %}<button type="button" class="badge-mono" data-copy-chip>{{ eid }}</button>{% else %}nessuna{% endfor %}
           </p>
           <a href="#sezione-{{ v.section }}">Vai a {{ section_titles[v.section] }}</a>
         </article>

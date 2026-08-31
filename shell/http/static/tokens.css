@@ -229,6 +229,7 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
@@ -469,6 +470,21 @@ h3 {
 
   .app-shell.is-drawer-open .app-scrim {
     display: block;
+  }
+
+  /* The report sheet's two-column reading row (Story 9.6) has no room for
+   * a 190px sticky rail beside a 720px sheet below this width -- stack the
+   * nav above the sheet instead of letting the row overflow (accessibility
+   * floor: layout holds with no horizontal page scroll). */
+  .reading {
+    flex-direction: column;
+  }
+
+  .report-toc {
+    width: auto;
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 }
 
@@ -1297,4 +1313,123 @@ h3 {
   align-items: center;
   gap: var(--space-xs);
   color: var(--ink-secondary);
+}
+
+/* ---------------------------------------------------------------------------
+ * PROVISIONAL — Story 9.6 (the Report reading sheet, the Payload view made
+ * readable). Minimal component styling for the Report's export bar, its
+ * scroll-spying section nav, the 720px reading sheet itself, the Payload
+ * view's per-Section disclosures, and the native-button reset that lets
+ * `.badge-mono` become an interactive, click-to-copy chip everywhere it
+ * appears. Semantic tokens only; contrast holds in both themes. Story 9.8
+ * consolidates these into shared component partials — do not build on the
+ * exact class names here.
+ * ------------------------------------------------------------------------- */
+
+.exportbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-base);
+  margin-bottom: var(--space-lg);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.exportbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-left: auto;
+}
+
+.report-note {
+  margin: 0;
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+  color: var(--ink-tertiary);
+}
+
+.reading {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xl);
+}
+
+.report-toc {
+  flex: none;
+  width: 190px;
+  position: sticky;
+  top: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+}
+
+.report-toc a {
+  color: var(--ink-secondary);
+  text-decoration: none;
+  padding: var(--space-xs) var(--space-sm);
+  border-left: 2px solid transparent;
+}
+
+.report-toc a.is-active {
+  color: var(--primary-700);
+  font-weight: 600;
+  border-left-color: var(--primary-700);
+}
+
+.report-sheet {
+  max-width: 720px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xxl);
+}
+
+.report-sheet h2 {
+  margin-top: 32px;
+  font-size: var(--font-heading-size);
+  line-height: var(--font-heading-line);
+  font-weight: var(--font-heading-weight);
+}
+
+.report-sheet h2:first-of-type {
+  margin-top: 0;
+}
+
+.report-sheet p,
+.report-sheet ul {
+  font-size: var(--font-body-read-size);
+  line-height: var(--font-body-read-line);
+  font-weight: var(--font-body-read-weight);
+}
+
+.payload-section {
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-base);
+  margin-bottom: var(--space-md);
+}
+
+.payload-section > summary {
+  font-size: var(--font-heading-size);
+  line-height: var(--font-heading-line);
+  font-weight: var(--font-heading-weight);
+  cursor: pointer;
+}
+
+/* Neutralizes native <button> chrome on a `.badge-mono` chip so a
+   click-to-copy button renders identically to the plain, non-interactive
+   spans that predate this story. All visual styling still comes from
+   `.badge-mono` itself (l.627-636). */
+button.badge-mono {
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: inherit;
 }

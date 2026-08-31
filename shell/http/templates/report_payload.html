@@ -1,11 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Report payload — astro-report{% endblock %}
+{% block title %}Payload — astro-report{% endblock %}
 
 {% macro render_value(value) -%}
   {%- if value is mapping -%}
     <dl>
       {%- for key, item in value.items() -%}
-        {%- if key != "id" -%}
+        {%- if key == "id" -%}
+          <div><dt>{{ key }}</dt><dd><button type="button" class="badge-mono" data-copy-chip>{{ render_value(item) }}</button></dd></div>
+        {%- else -%}
           <div><dt>{{ key }}</dt><dd>{{ render_value(item) }}</dd></div>
         {%- endif -%}
       {%- endfor -%}
@@ -22,11 +24,11 @@
 {%- endmacro %}
 
 {% block content %}
-      <h1>Report payload</h1>
+      <h1>Payload</h1>
 
       {% for section_name, section in payload.sections.items() %}
-      <section>
-        <h2>{{ section_name }}</h2>
+      <details class="payload-section"{% if loop.first %} open{% endif %}>
+        <summary>{{ section_titles.get(section_name, section_name) }}</summary>
 
         {% if section.profile is not none %}
         <h3>profile</h3>
@@ -43,19 +45,19 @@
         </ul>
         {% endif %}
         {% endfor %}
-      </section>
+      </details>
       {% endfor %}
 
       {% for list_name, entries in payload.day_lists.items() %}
       {% if entries %}
-      <section>
-        <h2>{{ list_name }}</h2>
+      <details class="payload-section">
+        <summary>{{ section_titles.get(list_name, list_name) }}</summary>
         <ul>
           {% for entry in entries %}
           <li>{{ render_value(entry) }}</li>
           {% endfor %}
         </ul>
-      </section>
+      </details>
       {% endif %}
       {% endfor %}
 {% endblock %}

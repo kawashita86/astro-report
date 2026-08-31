@@ -81,8 +81,8 @@ _MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 #: Paired with the button label ``report.html`` renders for each, in the
 #: fixed order Francesco sees them.
 DISPOSITION_CHOICES: tuple[tuple[str, str], ...] = (
-    ("as_generated", "Sent as generated"),
-    ("edited", "Sent, edited first"),
+    ("as_generated", "Inviato come generato"),
+    ("edited", "Inviato, con modifiche"),
 )
 _DISPOSITION_VALUES = {value for value, _label in DISPOSITION_CHOICES}
 
@@ -425,7 +425,11 @@ def view_report_payload(
 
     localized = localize_payload(stored.payload, iana_zone=client.iana_zone)
 
-    return _templates.TemplateResponse(request, "report_payload.html", {"payload": localized})
+    return _templates.TemplateResponse(
+        request,
+        "report_payload.html",
+        {"payload": localized, "section_titles": SECTION_TITLES},
+    )
 
 
 @router.get("/report-runs/{run_id}/draft", include_in_schema=False)
@@ -554,6 +558,13 @@ def view_report(
             f"Report {bundle.report.id} has no matching passed StoredGateResult."
         )
 
+    n = stored_gate_result.regeneration_count
+    regeneration_note = (
+        f"Verifica superata dopo {n} rigenerazione."
+        if n == 1
+        else f"Verifica superata dopo {n} rigenerazioni."
+    )
+
     return _templates.TemplateResponse(
         request,
         "report.html",
@@ -565,6 +576,7 @@ def view_report(
             "run_id": run_id,
             "run": bundle.run,
             "gate_result": stored_gate_result,
+            "regeneration_note": regeneration_note,
             "latest_export": _latest_export_record(session, run_id),
             "disposition_choices": DISPOSITION_CHOICES,
         },

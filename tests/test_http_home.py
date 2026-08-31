@@ -239,7 +239,7 @@ def test_a_run_row_carries_client_name_month_chip_badge_and_timestamp(
     body = authenticated_client.get("/").text
 
     assert "Abbate Chiara" in body
-    assert '<span class="badge-mono">2026-03</span>' in body
+    assert '<button type="button" class="badge-mono" data-copy-chip>2026-03</button>' in body
     assert "Generazione della bozza" in body
     assert "09/03/2026 07:04" in body
 
