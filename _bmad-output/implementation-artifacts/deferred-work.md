@@ -783,3 +783,6 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-9-7-the-style-guide-and-corpus-screens-restyled.md`
   summary: base.html's header comment ("Screen body copy stays as-is until Story 9.9") is stale — every Epic 9 story since 9.2 has already translated its own screen's body copy to Italian as it restyled, so the comment no longer describes the templates it's attached to.
   evidence: Surfaced by Story 9.7's blind-hunter review; predates this story (already inaccurate after Story 9.2) and isn't caused by this change, so it's not this story's fix to make.
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-9-italian-everywhere-and-the-accessibility-floor.md`
+  summary: Several routes this story touched (e.g. `view_report_payload`, `_load_passed_report_bundle`) still raise bare `HTTPException(status_code=404)`/`401` with no custom `detail`, which FastAPI serializes as the default English `{"detail":"Not Found"}` body — a residual English surface "Italian everywhere" doesn't fully close.
+  evidence: Blind-hunter review of Story 9.9's diff; these bare `HTTPException` call sites predate this story and are outside its stated Boundaries (translating rendered template/route-flash strings, not raw framework error bodies), so it's not this story's fix to make.

@@ -186,6 +186,11 @@ def test_the_confirmation_page_states_what_will_be_removed_and_deletes_nothing(
     assert f'action="/clients/{seeded.id}/delete"' in body
     assert db_session.get(Client, seeded.id) is not None
     assert len(_charts_for(db_session, seeded.id)) == 1
+    # Story 9.9 Code Map — the title and h1 are Italian.
+    assert body.count("<h1") == 1
+    assert "<h1>Elimina cliente</h1>" in body
+    assert "<title>Elimina cliente — astro-report</title>" in body
+    assert "Delete Client" not in body
 
 
 def test_the_confirmation_page_mentions_a_superseded_chart_when_one_exists(
@@ -277,6 +282,13 @@ def test_confirmed_delete_removes_the_client_and_its_current_chart(
     assert response.status_code == 200
     assert db_session.get(Client, seeded.id) is None
     assert _charts_for(db_session, seeded.id) == []
+    # Story 9.9: the success flash is Italian ("eliminato"), never the prior
+    # English "deleted"; the body also carries "Torna a Clienti", never the
+    # prior "Back to Clienti".
+    assert "eliminato" in response.text.lower()
+    assert "deleted" not in response.text.lower()
+    assert "Torna a Clienti" in response.text
+    assert "Back to Clienti" not in response.text
 
 
 # --- Confirmed delete, superseded chart present -----------------------------------------

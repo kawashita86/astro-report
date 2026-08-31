@@ -17,7 +17,7 @@
         {% for entry, client in entries %}
         <li class="corpus-entry">
           <div class="corpus-entry__meta">
-            <span>{{ entry.created_at }}</span>
+            <span>{{ entry.created_at.strftime("%d/%m/%Y %H:%M") }}</span>
             {% if entry.paired %}
               <span class="status-badge status-badge--success">Accoppiato</span>
               {% if client %}<span>{{ client.name }}</span>{% endif %}

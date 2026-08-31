@@ -31,13 +31,13 @@
         <summary>{{ section_titles.get(section_name, section_name) }}</summary>
 
         {% if section.profile is not none %}
-        <h3>profile</h3>
+        <h3>{{ field_titles.get("profile", "profile") }}</h3>
         {{ render_value(section.profile) }}
         {% endif %}
 
         {% for field_name, entries in section.items() %}
         {% if field_name != "profile" and entries %}
-        <h3>{{ field_name }}</h3>
+        <h3>{{ field_titles.get(field_name, field_name) }}</h3>
         <ul>
           {% for entry in entries %}
           <li>{{ render_value(entry) }}</li>

@@ -163,9 +163,7 @@ def _supersede(
         birth_date=client_row.birth_date,
         birth_time=client_row.birth_time,
         resolved_place=_RESOLVED_PLACE,
-        natal_chart=compute_natal_chart(
-            instant, _LATITUDE, _LONGITUDE, _COMPUTATION_CONFIG
-        ),
+        natal_chart=compute_natal_chart(instant, _LATITUDE, _LONGITUDE, _COMPUTATION_CONFIG),
         computation_config=_COMPUTATION_CONFIG,
         ephemeris_identity=_EPHEMERIS_IDENTITY,
     )
@@ -217,6 +215,13 @@ def test_a_client_with_a_stored_chart_shows_the_wheel(
     assert response.headers["content-type"].startswith("text/html")
     body = response.text
     assert "<svg" in body
+
+    # Story 9.9 Code Map — the title and h1 read "Tema natale", never the
+    # prior "Chart wheel".
+    assert body.count("<h1") == 1
+    assert f"<h1>Tema natale — {seeded.name}</h1>" in body
+    assert f"<title>Tema natale — {seeded.name} — astro-report</title>" in body
+    assert "Chart wheel" not in body
 
     # Every planet this project computes is placed on the wheel.
     for kerykeion_name in _PLANET_KERYKEION_NAMES:
@@ -330,7 +335,7 @@ def test_a_chart_computed_under_a_drifted_config_shows_a_non_blocking_warning(
     body = response.text
     assert 'role="alert"' in body
     assert 'id="config-stale-warning"' in body
-    assert "computed with a different computation config" in body
+    assert "configurazione di calcolo diversa" in body
     # The wheel still renders, and the warning precedes it (banner above the
     # SVG, per the story: it must be seen before the chart is trusted).
     assert "<svg" in body
@@ -354,7 +359,7 @@ def test_a_chart_computed_under_the_running_config_shows_no_warning_banner(
     body = response.text
     assert 'role="alert"' not in body
     assert "config-stale-warning" not in body
-    assert "computed with a different computation config" not in body
+    assert "configurazione di calcolo diversa" not in body
     assert "<svg" in body
 
 
@@ -374,7 +379,7 @@ def test_the_equal_hash_path_renders_the_wheel_in_the_shell_with_no_warning(
     body = response.text
     assert 'role="alert"' not in body
     assert "config-stale-warning" not in body
-    assert "computed with a different computation config" not in body
+    assert "configurazione di calcolo diversa" not in body
     assert "<svg" in body
     assert body.lower().count("<html") == 1
     assert '<html lang="it">' in body

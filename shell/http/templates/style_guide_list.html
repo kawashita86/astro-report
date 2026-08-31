@@ -32,7 +32,7 @@
             {% for entry in history %}
             <tr>
               <td><a href="/style-guide/{{ entry.version }}">Versione {{ entry.version }}</a></td>
-              <td class="list-panel__meta">{{ entry.created_at }}</td>
+              <td class="list-panel__meta">{{ entry.created_at.strftime("%d/%m/%Y %H:%M") }}</td>
             </tr>
             {% endfor %}
           </tbody>

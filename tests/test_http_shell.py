@@ -549,6 +549,19 @@ def test_the_vendored_htmx_is_the_pinned_2_0_4_build() -> None:
     assert 'version:"2.0.4"' in js
 
 
+# --- .payload-section scrolls its own dump at 400% reflow (Story 9.9) ----------
+
+
+def test_payload_section_scrolls_its_own_dump_at_400_percent_reflow() -> None:
+    """AC — the Payload view's per-section dl/ul dump scrolls inside its own
+    container rather than the content column, mirroring ``.list-panel``'s
+    existing ``overflow-x: auto`` (Zoom — Accessibility Floor)."""
+    css = (_STATIC_DIR / "tokens.css").read_text(encoding="utf-8")
+
+    payload_section_rule = css.split(".payload-section {", 1)[1].split("}", 1)[0]
+    assert "overflow-x: auto;" in payload_section_rule
+
+
 # --- report_export.html is untouched ----------------------------------------------
 
 

@@ -271,6 +271,22 @@ def test_wrong_password_is_a_uniform_failure_response(client: TestClient) -> Non
     assert response.status_code == 401
 
 
+def test_the_login_screen_is_fully_italian_with_one_h1(client: TestClient) -> None:
+    """Story 9.9 Code Map — ``login.html``'s ``h1``, submit and (on failure)
+    the error line are all Italian; none of the prior English survives."""
+    form = client.get("/login").text
+    assert form.count("<h1") == 1
+    assert "<h1>Accedi</h1>" in form
+    assert ">Accedi</button>" in form
+    assert "Sign in" not in form
+
+    failure = client.post("/login", data={"password": "wrong password"}).text
+    assert failure.count("<h1") == 1
+    assert "Password errata" in failure
+    assert "Incorrect password" not in failure
+    assert "Sign in" not in failure
+
+
 def test_a_non_utf8_login_body_fails_cleanly_rather_than_crashing(client: TestClient) -> None:
     response = client.post(
         "/login",

@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Chart wheel — {{ client.name }} — astro-report{% endblock %}
+{% block title %}Tema natale — {{ client.name }} — astro-report{% endblock %}
 {% block page_header %}{% include "_client_tabs.html" %}{% endblock %}
 {% block content %}
-      <h1>Chart wheel — {{ client.name }}</h1>
+      <h1>Tema natale — {{ client.name }}</h1>
       {%- if config_stale %}
       <p role="alert" id="config-stale-warning">
-        Warning: this chart was computed with a different computation config
-        than the one now running. Stored planetary positions are shown as-is,
-        but natal aspects are recomputed at the current orb settings, so they
-        may not match the stored chart. Correct the Client to recompute it.
+        Attenzione: questo tema è stato calcolato con una configurazione di calcolo diversa da
+        quella ora in uso. Le posizioni planetarie sono mostrate come registrate, ma gli aspetti
+        natali sono ricalcolati con gli orbi attuali e potrebbero non corrispondere al tema
+        salvato. Correggi il cliente per ricalcolarlo.
       </p>
       {%- endif %}
       {{ svg | safe }}

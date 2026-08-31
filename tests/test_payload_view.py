@@ -10,7 +10,7 @@ instead.
 
 from __future__ import annotations
 
-from shell.http.payload_view import localize_payload
+from shell.http.payload_view import FIELD_TITLES, SECTION_PAYLOAD_FIELD_NAMES, localize_payload
 
 
 def test_a_never_perfected_aspect_shows_no_perfection_time_but_localizes_its_window() -> None:
@@ -40,8 +40,8 @@ def test_a_never_perfected_aspect_shows_no_perfection_time_but_localizes_its_win
 
     entry = localized["sections"]["amore"]["aspects"][0]
     assert entry["perfected_at"] is None
-    assert entry["orb_entry_at"] == "2026-01-05 06:00:00 CST"
-    assert entry["orb_exit_at"] == "2026-01-20 12:00:00 CST"
+    assert entry["orb_entry_at"] == "05/01/2026 06:00"
+    assert entry["orb_exit_at"] == "20/01/2026 12:00"
 
 
 def test_an_aspect_still_in_orb_at_month_end_shows_no_exit_time() -> None:
@@ -64,7 +64,7 @@ def test_an_aspect_still_in_orb_at_month_end_shows_no_exit_time() -> None:
     localized = localize_payload(payload, iana_zone="America/Chicago")
 
     entry = localized["sections"]["amore"]["aspects"][0]
-    assert entry["orb_entry_at"] == "2026-01-27 18:00:00 CST"
+    assert entry["orb_entry_at"] == "27/01/2026 18:00"
     assert entry["orb_exit_at"] is None
 
 
@@ -121,6 +121,16 @@ def test_ids_hashes_and_enum_strings_at_any_depth_pass_through_unchanged() -> No
     assert localized["sections"]["amore"]["profile"]["venus"]["house"] == 5
 
 
+def test_a_localized_instant_renders_dd_mm_yyyy_hh_mm_with_no_seconds_or_zone_name() -> None:
+    """Story 9.9: every displayed timestamp is ``dd/MM/yyyy HH:mm`` (EXPERIENCE.md),
+    not the prior ``YYYY-MM-DD HH:MM:SS ZZZ``."""
+    payload = {"sections": {"amore": {"aspects": [{"orb_entry_at": "2026-05-14T09:03:00+00:00"}]}}}
+
+    localized = localize_payload(payload, iana_zone="Europe/Rome")
+
+    assert localized["sections"]["amore"]["aspects"][0]["orb_entry_at"] == "14/05/2026 11:03"
+
+
 def test_a_naive_iso_string_passes_through_unchanged_instead_of_assuming_server_time() -> None:
     """Defense-in-depth: every stored instant is tz-aware by construction
     (``core/payload/freeze.py``'s ``_json_safe``), so this should never occur
@@ -133,3 +143,22 @@ def test_a_naive_iso_string_passes_through_unchanged_instead_of_assuming_server_
     localized = localize_payload(payload, iana_zone="America/Chicago")
 
     assert localized["sections"]["amore"]["aspects"][0]["orb_entry_at"] == "2026-01-05T12:00:00"
+
+
+# --- FIELD_TITLES <-> SECTION_PAYLOAD_FIELD_NAMES parity (Story 9.9) -----------------
+
+
+def test_field_titles_has_exactly_one_italian_heading_per_section_payload_field() -> None:
+    """``report_payload.html``'s ``field_titles.get(field_name, field_name)``
+    silently falls back to the raw snake_case key when ``FIELD_TITLES`` is
+    missing an entry -- exactly the bug this story fixed for ``profile``.
+    ``FIELD_TITLES`` must have exactly one entry per ``SECTION_PAYLOAD_FIELD
+    _NAMES`` name (introspected off ``SectionPayload`` itself, so a future
+    field is picked up automatically here) -- so a new ``SectionPayload``
+    field can never silently regress to an untranslated heading, and no stale
+    key lingers after a field is removed."""
+    assert tuple(FIELD_TITLES) == SECTION_PAYLOAD_FIELD_NAMES
+    assert set(FIELD_TITLES) == set(SECTION_PAYLOAD_FIELD_NAMES)
+    for name, title in FIELD_TITLES.items():
+        assert isinstance(title, str) and title.strip(), name
+        assert title[:1] == title[:1].upper(), title  # sentence-cased

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Sign in — astro-report{% endblock %}
+{% block title %}Accedi — astro-report{% endblock %}
 {% block sidebar %}{% endblock %}
 {% block app_header %}{% endblock %}
 {% block main_class %}auth-view{% endblock %}
 {% block content %}
-      <h1>Sign in</h1>
+      <h1>Accedi</h1>
       {% if error %}
-      <p role="alert">Incorrect password.</p>
+      <p role="alert">Password errata.</p>
       {% endif %}
       <form method="post" action="/login">
         <label for="password">Password</label>
@@ -18,6 +18,6 @@
           required
           autofocus
         />
-        <button type="submit">Sign in</button>
+        <button type="submit">Accedi</button>
       </form>
 {% endblock %}

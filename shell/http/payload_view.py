@@ -9,11 +9,40 @@ recording and reading UTC, unchanged.
 
 from __future__ import annotations
 
+from dataclasses import fields as dataclass_fields
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-__all__ = ["localize_payload"]
+from core.types.payload import SectionPayload
+
+__all__ = ["FIELD_TITLES", "SECTION_PAYLOAD_FIELD_NAMES", "localize_payload"]
+
+#: Every ``SectionPayload`` field name, in the dataclass's own fixed order --
+#: introspected rather than hand-listed, mirroring ``shell/http/draft_view
+#: .py``'s own ``SECTION_ORDER`` (a future ``SectionPayload`` field is picked
+#: up here automatically, so ``FIELD_TITLES``' parity test below cannot
+#: silently pass a field with no Italian heading).
+SECTION_PAYLOAD_FIELD_NAMES: tuple[str, ...] = tuple(
+    field.name for field in dataclass_fields(SectionPayload)
+)
+
+#: The Italian display heading for each ``SectionPayload`` field name (Story
+#: 9.9) -- mirrors ``shell/http/draft_view.py``'s ``SECTION_TITLES`` shape:
+#: an explicit dict, not a generic transform, since these are read by
+#: ``report_payload.html`` as a bare heading (``<h3>{{ field_name }}</h3>``
+#: previously rendered the raw snake_case key, including for the untranslated
+#: ``profile`` field this story fixes). Keyed by ``core.types.payload
+#: .SectionPayload``'s own field names -- exactly ``SECTION_PAYLOAD_FIELD_NAMES``,
+#: bound by ``tests/test_payload_view.py``.
+FIELD_TITLES: dict[str, str] = {
+    "profile": "Profilo",
+    "aspects": "Aspetti",
+    "stations": "Stazionamenti",
+    "standing_retrogrades": "Retrogradazioni in corso",
+    "ingresses": "Ingressi",
+    "lunations": "Lunazioni",
+}
 
 
 def _localize_value(value: Any, zone: ZoneInfo) -> Any:
@@ -43,7 +72,7 @@ def _localize_value(value: Any, zone: ZoneInfo) -> Any:
             return value
         if parsed.tzinfo is None:
             return value
-        return parsed.astimezone(zone).strftime("%Y-%m-%d %H:%M:%S %Z")
+        return parsed.astimezone(zone).strftime("%d/%m/%Y %H:%M")
     return value
 
 

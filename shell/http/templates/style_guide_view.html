@@ -7,6 +7,6 @@
       </div>
 {% endblock %}
 {% block content %}
-      <p class="list-panel__meta">Creata {{ style_guide.created_at }}. Sola lettura — le versioni precedenti non vengono mai modificate.</p>
+      <p class="list-panel__meta">Creata {{ style_guide.created_at.strftime("%d/%m/%Y %H:%M") }}. Sola lettura — le versioni precedenti non vengono mai modificate.</p>
       <div class="prose">{{ style_guide.content }}</div>
 {% endblock %}

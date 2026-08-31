@@ -132,8 +132,8 @@ def test_a_cited_day_list_entry_is_enriched_with_the_citing_sentence_text() -> N
 
     fav_1 = next(item for item in rendered["giorni_favorevoli"] if "fav-1" in item["entry_ids"])
     assert fav_1["text"] == "Venere favorisce gli incontri."
-    # 2026-01-10 15:00 UTC -> 09:00 CST (UTC-6).
-    assert fav_1["date"] == "2026-01-10 09:00:00 CST"
+    # 2026-01-10 15:00 UTC -> 09:00 CST (UTC-6). Story 9.9: dd/MM/yyyy HH:mm.
+    assert fav_1["date"] == "10/01/2026 09:00"
 
 
 def test_an_uncited_day_list_entry_still_renders_date_only_never_dropped() -> None:
@@ -144,12 +144,12 @@ def test_an_uncited_day_list_entry_still_renders_date_only_never_dropped() -> No
 
     fav_2 = next(item for item in rendered["giorni_favorevoli"] if "fav-2" in item["entry_ids"])
     assert fav_2["text"] is None
-    # 2026-01-18 09:00 UTC -> 03:00 CST (UTC-6).
-    assert fav_2["date"] == "2026-01-18 03:00:00 CST"
+    # 2026-01-18 09:00 UTC -> 03:00 CST (UTC-6). Story 9.9: dd/MM/yyyy HH:mm.
+    assert fav_2["date"] == "18/01/2026 03:00"
 
     attention = rendered["giorni_di_attenzione"][0]
     assert attention["text"] is None
-    assert attention["date"] == "2026-01-15 03:00:00 CST"
+    assert attention["date"] == "15/01/2026 03:00"
 
 
 def test_render_draft_covers_exactly_the_two_list_sections() -> None:

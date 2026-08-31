@@ -1,20 +1,20 @@
 {% extends "base.html" %}
-{% block title %}Add a past report — astro-report{% endblock %}
+{% block title %}Aggiungi un report passato — astro-report{% endblock %}
 {% block content %}
-      <h1>Add a past report</h1>
+      <h1>Aggiungi un report passato</h1>
       {% if error %}
       <p role="alert">{{ error }}</p>
       {% endif %}
       <p>
-        Paste one past report as plain text. Where it came from — email, messaging or a
-        folder — does not matter.
+        Incolla un report passato come testo semplice. La provenienza — email, messaggistica o
+        una cartella — non è rilevante.
       </p>
       <form method="post" action="/corpus">
-        <label for="content">Report text</label>
+        <label for="content">Testo del report</label>
         <textarea id="content" name="content" required rows="30" cols="100">{{ content }}</textarea>
 
         <fieldset>
-          <legend>Do you know the chart behind this report?</legend>
+          <legend>Conosci il tema dietro questo report?</legend>
           <label>
             <input
               type="radio"
@@ -22,7 +22,7 @@
               value="unpaired"
               {% if paired != "paired" %}checked{% endif %}
             />
-            No — unpaired
+            No — non accoppiato
           </label>
           <label>
             <input
@@ -31,14 +31,14 @@
               value="paired"
               {% if paired == "paired" %}checked{% endif %}
             />
-            Yes — paired
+            Sì — accoppiato
           </label>
         </fieldset>
 
-        <label for="client_id">Client (optional — only if the application holds it)</label>
+        <label for="client_id">Cliente (opzionale — solo se presente in applicazione)</label>
         <select id="client_id" name="client_id">
           <option value="" {% if not client_id %}selected{% endif %}>
-            — not in the application —
+            — non presente in applicazione —
           </option>
           {% for client in clients %}
           <option
@@ -50,7 +50,7 @@
           {% endfor %}
         </select>
 
-        <label for="month">Month (optional — YYYY-MM)</label>
+        <label for="month">Mese (opzionale — AAAA-MM)</label>
         <input
           type="text"
           id="month"
@@ -58,9 +58,9 @@
           value="{{ month }}"
           pattern="\d{4}-(0[1-9]|1[0-2])"
           placeholder="2026-05"
-          title="Use the format YYYY-MM, e.g. 2026-05"
+          title="{{ month_hint }}"
         />
 
-        <button type="submit">Add to corpus</button>
+        <button type="submit">Aggiungi al corpus</button>
       </form>
 {% endblock %}

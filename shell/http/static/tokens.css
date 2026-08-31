@@ -1417,6 +1417,10 @@ h3 {
   border-radius: var(--radius-md);
   padding: var(--space-base);
   margin-bottom: var(--space-md);
+  /* Story 9.9: 400% reflow -- the section's dl/ul dump (long mono-chip ids,
+     nested Domain Profile rows) scrolls in its own container instead of the
+     content column, mirroring `.list-panel`'s `overflow-x: auto` (l.794). */
+  overflow-x: auto;
 }
 
 .payload-section > summary {

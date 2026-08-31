@@ -108,6 +108,18 @@ _CORRECTION_FORM = {
 #: here. Lower-cased so the check is case-insensitive like the one it replaces.
 _SUPERSEDE_IT = "il tema attuale viene superato"
 
+#: The fixed Italian copy ``shell/http/routes/clients.py`` substitutes for a
+#: raw exception message on the resolution/chart-computation failure paths
+#: (Story 9.9, EXPERIENCE.md's Voice and Tone; never ``str(error)`` -- this
+#: story's Design Notes). Mirrored from ``tests/test_http_clients.py``.
+_ITALIAN_BIRTHPLACE_UNRESOLVED = (
+    "Non è stato possibile verificare il luogo di nascita indicato. Riprova."
+)
+_ITALIAN_CHART_COMPUTATION_FAILED = (
+    "Impossibile calcolare il tema natale con i dati forniti. "
+    "Verifica data, ora e luogo di nascita."
+)
+
 #: The ten planets, the True Node and the South Node -- every body this
 #: project's Natal Chart computes (core/types/chart.py's own docstring).
 _STORED_PLANET_NAMES: tuple[str, ...] = (
@@ -448,6 +460,38 @@ def test_the_correction_form_is_the_restyled_field_pattern_with_the_delete_guard
     assert "incluso il tema superato" not in body
 
 
+def test_the_correction_form_is_fully_italian_with_one_h1(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Story 9.9 Code Map — ``client_edit.html``'s title, ``h1``, field
+    labels, birthplace helper and submit are all Italian; none of the prior
+    English (including the literal-lifted helper text) survives."""
+    seeded = _seed_client_with_chart(db_session, app_instance)
+
+    response = authenticated_client.get(f"/clients/{seeded.id}/edit")
+
+    assert response.status_code == 200
+    body = response.text
+    assert body.count("<h1") == 1
+    assert "<h1>Correggi cliente</h1>" in body
+    assert "<title>Correggi cliente — astro-report</title>" in body
+    assert ">Nome</label>" in body
+    assert ">Data di nascita</label>" in body
+    assert ">Ora di nascita</label>" in body
+    assert ">Luogo di nascita</label>" in body
+    assert "Riscrivi il luogo di nascita, anche solo per riconfermarlo." in body
+    assert ">Rivedi la correzione</button>" in body
+    for english in (
+        "Correct Client",
+        "Birth date",
+        "Birth time",
+        "Birthplace",
+        "Review correction",
+        "Birthplace is never prefilled",
+    ):
+        assert english not in body
+
+
 def test_the_delete_modal_names_the_retained_superseded_chart_when_one_exists(
     authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
 ) -> None:
@@ -523,10 +567,15 @@ def test_confirmed_correction_supersedes_the_old_chart_and_updates_the_client(
     response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=form)
 
     assert response.status_code == 200, response.text
-    assert "corrected" in response.text.lower()
+    # Story 9.9: the success flash is Italian ("corretto"), never the prior
+    # English "corrected".
+    assert "corretto" in response.text.lower()
+    assert "corrected" not in response.text.lower()
     # epic-2-retro-item-14: the confirmed-correction success body links to the
     # chart view so the freshly recomputed chart can be verified in one click.
     assert f'href="/clients/{seeded.id}/chart"' in response.text
+    assert "Vedi il tema natale" in response.text
+    assert "View chart" not in response.text
 
     charts = _charts_for(db_session, seeded.id)
     assert len(charts) == 2
@@ -615,6 +664,10 @@ def test_ambiguous_birthplace_shows_the_candidate_picker_and_persists_nothing(
     assert "Springfield, Massachusetts, USA" in response.text
     assert _SUPERSEDE_IT not in response.text.lower()
     assert len(_charts_for(db_session, seeded.id)) == 1
+    # Story 9.9 Code Map — the candidate-picker legend is Italian.
+    assert "Più luoghi corrispondono a" in response.text
+    assert "Scegline uno" in response.text
+    assert "More than one place matched" not in response.text
 
 
 # --- Resolution failure ----------------------------------------------------------------
@@ -632,7 +685,10 @@ def test_a_resolution_failure_is_refused_naming_the_step_and_persists_nothing(
     response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=_CORRECTION_FORM)
 
     assert response.status_code == 422
-    assert "geocoding" in response.text
+    assert _ITALIAN_BIRTHPLACE_UNRESOLVED in response.text
+    # Never the raw exception text (this story's Design Notes).
+    assert "geocoding" not in response.text
+    assert "no match" not in response.text
 
     db_session.refresh(seeded)
     assert seeded.name == "Ada Lovelace"
@@ -661,7 +717,9 @@ def test_a_chart_computation_failure_is_refused_and_the_old_chart_stays_current(
     response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=_CORRECTION_FORM)
 
     assert response.status_code == 422
-    assert "simulated ephemeris failure" in response.text
+    assert _ITALIAN_CHART_COMPUTATION_FAILED in response.text
+    # Never the raw exception text (this story's Design Notes).
+    assert "simulated ephemeris failure" not in response.text
     assert "field--invalid" not in response.text
     assert "banner__links" not in response.text
     charts = _charts_for(db_session, seeded.id)
@@ -768,7 +826,9 @@ def test_a_fresh_places_cache_write_survives_a_chart_computation_failure_on_the_
     response = authenticated_client.post(f"/clients/{seeded.id}/edit", data=form)
 
     assert response.status_code == 422
-    assert "simulated ephemeris failure" in response.text
+    assert _ITALIAN_CHART_COMPUTATION_FAILED in response.text
+    # Never the raw exception text (this story's Design Notes).
+    assert "simulated ephemeris failure" not in response.text
     assert lookup_cached_place(db_session, "Tokyo, Japan") is not None
 
 

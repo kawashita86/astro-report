@@ -111,6 +111,49 @@ def test_anonymous_get_new_form_is_rejected(client: TestClient) -> None:
     assert response.content == b""
 
 
+def test_the_new_entry_form_is_fully_italian_with_one_h1(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.9 Code Map — ``corpus_new.html``'s title, ``h1``, intro,
+    textarea label, fieldset legend + radio labels, select label + option,
+    month label + title attr and submit are all Italian; none of the prior
+    English survives."""
+    _seed_client(db_session)
+
+    response = authenticated_client.get("/corpus/new")
+
+    assert response.status_code == 200
+    body = response.text
+    assert body.count("<h1") == 1
+    assert "<h1>Aggiungi un report passato</h1>" in body
+    assert "<title>Aggiungi un report passato — astro-report</title>" in body
+    assert "Incolla un report passato come testo semplice." in body
+    assert ">Testo del report</label>" in body
+    assert "Conosci il tema dietro questo report?" in body
+    assert "non accoppiato" in body
+    assert "accoppiato" in body
+    assert "Cliente (opzionale" in body
+    assert "non presente in applicazione" in body
+    assert "Mese (opzionale" in body
+    # Review fix: the title attribute and the route's invalid-month error now
+    # share one literal (threaded through as `month_hint`), so they can never
+    # drift apart in wording or punctuation.
+    assert 'title="Usa il formato AAAA-MM, es. 2026-05."' in body
+    assert ">Aggiungi al corpus</button>" in body
+    for english in (
+        "Add a past report",
+        "Paste one past report",
+        "Do you know the chart behind this report?",
+        "No — unpaired",
+        "Yes — paired",
+        "Client (optional",
+        "Month (optional",
+        "Add to corpus",
+        "Use the format YYYY-MM",
+    ):
+        assert english not in body
+
+
 def test_anonymous_post_is_rejected(client: TestClient, db_session: Session) -> None:
     response = client.post("/corpus", data={"content": "a past report"})
 
@@ -194,6 +237,20 @@ def test_list_renders_entries_most_recent_first(
     assert body.index("NEWEST-REPORT") < body.index("MIDDLE-REPORT") < body.index("OLDEST-REPORT")
 
 
+def test_list_row_shows_created_at_as_dd_mm_yyyy_hh_mm(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.9: every displayed timestamp is `dd/MM/yyyy HH:mm`, not
+    Python's default `str(datetime)`."""
+    _seed_entry(db_session, content="A-ROW", created_at=datetime(2026, 3, 7, 14, 5, tzinfo=UTC))
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    assert "07/03/2026 14:05" in response.text
+    assert "2026-03-07" not in response.text
+
+
 # --- Empty corpus ---------------------------------------------------------
 
 
@@ -219,6 +276,9 @@ def test_whitespace_only_content_is_rejected_and_inserts_nothing(
 
     assert response.status_code == 422
     assert 'role="alert"' in response.text
+    # Story 9.9: the field-required error is Italian.
+    assert "Il testo del report è obbligatorio." in response.text
+    assert "content is required" not in response.text
     assert db_session.exec(select(CorpusEntry)).all() == []
 
 
@@ -340,6 +400,9 @@ def test_paired_entry_with_unknown_client_is_rejected_and_inserts_nothing(
 
     assert response.status_code == 422
     assert 'role="alert"' in response.text
+    # Story 9.9: the not-found error is Italian.
+    assert "non è presente in applicazione" in response.text
+    assert "not in the application" not in response.text
     assert db_session.exec(select(CorpusEntry)).all() == []
 
 
@@ -354,6 +417,9 @@ def test_paired_entry_with_malformed_client_id_is_rejected_and_inserts_nothing(
 
     assert response.status_code == 422
     assert 'role="alert"' in response.text
+    # Story 9.9: the invalid-id error is Italian.
+    assert "identificativo del cliente non è valido" in response.text
+    assert "is not valid" not in response.text
     assert db_session.exec(select(CorpusEntry)).all() == []
 
 
@@ -369,6 +435,9 @@ def test_paired_entry_with_a_bad_month_is_rejected_and_inserts_nothing(
 
     assert response.status_code == 422
     assert 'role="alert"' in response.text
+    # Story 9.9: the invalid-month error is Italian.
+    assert "Usa il formato AAAA-MM, es. 2026-05." in response.text
+    assert "'YYYY-MM'" not in response.text
     assert db_session.exec(select(CorpusEntry)).all() == []
 
 
@@ -519,12 +588,8 @@ def test_empty_corpus_composition_reads_all_zero_and_keeps_the_empty_state(
 def test_mixed_corpus_composition_counts_and_still_lists_every_entry(
     authenticated_client: TestClient, db_session: Session
 ) -> None:
-    _seed_entry(
-        db_session, content="P-1", created_at=datetime(2026, 1, 1, tzinfo=UTC), paired=True
-    )
-    _seed_entry(
-        db_session, content="P-2", created_at=datetime(2026, 2, 1, tzinfo=UTC), paired=True
-    )
+    _seed_entry(db_session, content="P-1", created_at=datetime(2026, 1, 1, tzinfo=UTC), paired=True)
+    _seed_entry(db_session, content="P-2", created_at=datetime(2026, 2, 1, tzinfo=UTC), paired=True)
     _seed_entry(db_session, content="U-1", created_at=datetime(2026, 3, 1, tzinfo=UTC))
     _seed_entry(db_session, content="U-2", created_at=datetime(2026, 4, 1, tzinfo=UTC))
     _seed_entry(db_session, content="U-3", created_at=datetime(2026, 5, 1, tzinfo=UTC))
@@ -536,18 +601,20 @@ def test_mixed_corpus_composition_counts_and_still_lists_every_entry(
     assert "Composizione: 5 totali · 2 accoppiati · 3 non accoppiati" in body
     for marker in ("P-1", "P-2", "U-1", "U-2", "U-3"):
         assert marker in body
-    assert body.index("U-3") < body.index("U-2") < body.index("U-1") < body.index(
-        "P-2"
-    ) < body.index("P-1")
+    assert (
+        body.index("U-3")
+        < body.index("U-2")
+        < body.index("U-1")
+        < body.index("P-2")
+        < body.index("P-1")
+    )
 
 
 def test_all_unpaired_corpus_composition_counts(
     authenticated_client: TestClient, db_session: Session
 ) -> None:
     for n in range(4):
-        _seed_entry(
-            db_session, content=f"U-{n}", created_at=datetime(2026, 1, n + 1, tzinfo=UTC)
-        )
+        _seed_entry(db_session, content=f"U-{n}", created_at=datetime(2026, 1, n + 1, tzinfo=UTC))
 
     response = authenticated_client.get("/corpus")
 

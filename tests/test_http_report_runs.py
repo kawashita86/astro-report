@@ -457,9 +457,7 @@ def test_a_malformed_month_is_422(
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
 
-    response = authenticated_client.post(
-        f"/clients/{ada.id}/report-runs", data={"month": month}
-    )
+    response = authenticated_client.post(f"/clients/{ada.id}/report-runs", data={"month": month})
 
     assert response.status_code == 422
     assert _report_runs(db_session) == []
@@ -497,9 +495,7 @@ def test_getting_the_payload_without_a_session_is_401(client: TestClient) -> Non
 
 def test_getting_the_payload_for_an_unknown_run_is_404(authenticated_client: TestClient) -> None:
     """Matrix row: "Unknown run_id" -- no matching ReportRun -> 404."""
-    response = authenticated_client.get(
-        "/report-runs/01a01abf-0000-7000-8000-000000000000/payload"
-    )
+    response = authenticated_client.get("/report-runs/01a01abf-0000-7000-8000-000000000000/payload")
 
     assert response.status_code == 404
 
@@ -552,8 +548,8 @@ def test_getting_the_payload_shows_all_eight_groupings_localized_to_the_clients_
     first_details_body = response.text.split('<details class="payload-section" open>', 1)[1]
     assert first_details_body.lstrip().startswith("<summary>Energia generale</summary>")
     # ada's client.iana_zone is America/Chicago (UTC-6 in January):
-    # 2026-01-08 12:00 UTC (orb_entry_at) -> 06:00 local.
-    assert "2026-01-08 06:00:00 CST" in response.text
+    # 2026-01-08 12:00 UTC (orb_entry_at) -> 06:00 local. Story 9.9: dd/MM/yyyy HH:mm.
+    assert "08/01/2026 06:00" in response.text
     # `id` is no longer stripped -- it renders as an interactive mono chip.
     event_id = frozen["sections"]["amore"]["aspects"][0]["id"]
     assert (
@@ -580,13 +576,15 @@ def test_getting_the_payload_hides_empty_groupings(
     response = authenticated_client.get(f"/report-runs/{run.id}/payload")
 
     assert response.status_code == 200
-    assert "<h3>aspects</h3>" in response.text
+    # Italian field_titles headings (Story 9.9), not the raw snake_case field
+    # name -- mirrors SECTION_TITLES' own translated section headings above.
+    assert "<h3>Aspetti</h3>" in response.text
     for empty_field_heading in (
-        "<h3>stations</h3>",
-        "<h3>standing_retrogrades</h3>",
-        "<h3>ingresses</h3>",
-        "<h3>lunations</h3>",
-        "<h3>profile</h3>",
+        "<h3>Stazionamenti</h3>",
+        "<h3>Retrogradazioni in corso</h3>",
+        "<h3>Ingressi</h3>",
+        "<h3>Lunazioni</h3>",
+        "<h3>Profilo</h3>",
     ):
         assert empty_field_heading not in response.text
 
@@ -666,9 +664,7 @@ def test_getting_the_draft_without_a_session_is_401(client: TestClient) -> None:
 
 
 def test_getting_the_draft_for_an_unknown_run_is_404(authenticated_client: TestClient) -> None:
-    response = authenticated_client.get(
-        "/report-runs/01a01abf-0000-7000-8000-000000000000/draft"
-    )
+    response = authenticated_client.get("/report-runs/01a01abf-0000-7000-8000-000000000000/draft")
 
     assert response.status_code == 404
 
@@ -722,8 +718,8 @@ def test_getting_the_draft_renders_prose_and_list_sections_localized_to_the_clie
     assert response.text.count("energia_generale") == 1
     assert 'id="sezione-energia_generale"' in response.text
     # ada's client.iana_zone is America/Chicago (UTC-6 in January):
-    # 2026-01-10 15:00 UTC (perfected_at) -> 09:00 local.
-    assert "2026-01-10 09:00:00 CST" in response.text
+    # 2026-01-10 15:00 UTC (perfected_at) -> 09:00 local. Story 9.9: dd/MM/yyyy HH:mm.
+    assert "10/01/2026 09:00" in response.text
 
 
 def test_getting_the_draft_shows_the_latest_attempt_when_more_than_one_exists(
@@ -1363,9 +1359,7 @@ def _a_current_cycle_gate_failed_run(db_session: Session, client_id) -> ReportRu
 
 
 def test_regenerating_without_a_session_is_401(client: TestClient) -> None:
-    response = client.post(
-        "/report-runs/01a01abf-0000-7000-8000-000000000000/regenerate"
-    )
+    response = client.post("/report-runs/01a01abf-0000-7000-8000-000000000000/regenerate")
 
     assert response.status_code == 401
 
@@ -1695,9 +1689,7 @@ def test_getting_the_report_without_a_session_is_401(client: TestClient) -> None
 
 
 def test_getting_the_report_for_an_unknown_run_is_404(authenticated_client: TestClient) -> None:
-    response = authenticated_client.get(
-        "/report-runs/01a01abf-0000-7000-8000-000000000000/report"
-    )
+    response = authenticated_client.get("/report-runs/01a01abf-0000-7000-8000-000000000000/report")
 
     assert response.status_code == 404
 
@@ -1843,9 +1835,7 @@ def test_getting_the_report_shows_the_stored_regeneration_count_not_the_runs_own
     (epic-5-retro-item-38's precedent), never read off ``run.regeneration_count``
     directly, even when the two differ."""
     ada = _create_client_with_real_chart(db_session)
-    run = ReportRun(
-        client_id=ada.id, month="2026-01", stage="gate_passed", regeneration_count=5
-    )
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed", regeneration_count=5)
     db_session.add(run)
     db_session.commit()
     frozen = _a_frozen_payload_with_one_aspect()
@@ -1923,9 +1913,7 @@ def test_getting_the_report_with_multiple_gate_results_picks_the_passing_row(
     (Story 5.4 regeneration) left their own ``StoredGateResult`` rows
     behind."""
     ada = _create_client_with_real_chart(db_session)
-    run = ReportRun(
-        client_id=ada.id, month="2026-01", stage="gate_passed", regeneration_count=2
-    )
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed", regeneration_count=2)
     db_session.add(run)
     db_session.commit()
     frozen = _a_frozen_payload_with_one_aspect()
@@ -2359,9 +2347,7 @@ def test_the_report_view_links_to_the_export_pdf_route(
 
 
 def test_downloading_the_export_markdown_without_a_session_is_401(client: TestClient) -> None:
-    response = client.get(
-        "/report-runs/01a01abf-0000-7000-8000-000000000000/export/markdown"
-    )
+    response = client.get("/report-runs/01a01abf-0000-7000-8000-000000000000/export/markdown")
 
     assert response.status_code == 401
 
@@ -2432,9 +2418,7 @@ def test_the_first_markdown_export_returns_the_file_and_advances_the_run_to_expo
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
-    assert response.headers["content-disposition"] == (
-        f'attachment; filename="report-{run.id}.md"'
-    )
+    assert response.headers["content-disposition"] == (f'attachment; filename="report-{run.id}.md"')
     body = response.text
     # The eight Italian-titled Sections and the Client's name, nothing else.
     assert body.startswith("# Ada Lovelace\n")

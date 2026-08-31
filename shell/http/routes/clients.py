@@ -100,6 +100,59 @@ _CANDIDATE_DECODE_ERRORS: tuple[type[Exception], ...] = (
 #: still rejecting a garbage-sized body before reading it.
 _MAX_CLIENT_FORM_BODY_BYTES = 65536
 
+#: Fixed Italian copy for every error/field-error site below (Story 9.9,
+#: EXPERIENCE.md's Voice and Tone). None of these ever interpolate a raw
+#: exception's own message or a parser's own text: ``PlaceResolutionError``,
+#: the candidate-decode errors, and ``compute_natal_chart()``'s own
+#: ``ValueError``/``EphemerisIntegrityError`` all originate in ``core``/
+#: adapter code and stay English there by the architecture's naming rule --
+#: translating that text at the source would violate it, so each catch site
+#: here substitutes one of these fixed messages instead (this story's Design
+#: Notes). ``date.fromisoformat()``/``strptime()``'s own parser messages are
+#: dropped the same way, per this story's I/O & Edge-Case Matrix ("no raw
+#: parser text").
+_ERROR_FORM_TOO_LARGE = "Il modulo inviato è troppo grande."
+_ERROR_FORM_NOT_UTF8 = "Il modulo inviato non è in una codifica UTF-8 valida."
+
+_FIELD_REQUIRED_MESSAGES: dict[str, str] = {
+    "name": "Il nome è obbligatorio.",
+    "birth_date": "La data di nascita è obbligatoria.",
+    "birth_time": "L'ora di nascita è obbligatoria.",
+    "birthplace": "Il luogo di nascita è obbligatorio.",
+}
+_ERROR_NAME_TOO_LONG = f"Il nome non può superare {_MAX_NAME_LENGTH} caratteri."
+_ERROR_BIRTH_DATE_INVALID = "La data di nascita non è valida. Usa il formato AAAA-MM-GG."
+_ERROR_BIRTH_TIME_INVALID = "L'ora di nascita non è valida. Usa il formato HH:mm."
+#: Covers every ``PlaceResolutionError`` -- not only "no match for the typed
+#: text" (``shell/adapters/nominatim/geocoder.py``'s ``_geocode``) but also a
+#: cache-read failure, a geocoding-service error and a timezone-resolution
+#: failure (its ``_lookup_cache``/``_geocode``/``_zone_for``/
+#: ``_historical_offset`` raise sites). Deliberately does not suggest
+#: retyping the birthplace -- that would be misleading when the real cause is
+#: an infra failure the operator's own text had nothing to do with.
+_ERROR_BIRTHPLACE_UNRESOLVED = (
+    "Non è stato possibile verificare il luogo di nascita indicato. Riprova."
+)
+_ERROR_CANDIDATE_INVALID = (
+    "La selezione del luogo non è valida. Ricomincia la ricerca del luogo di nascita."
+)
+_ERROR_CHART_COMPUTATION_FAILED = (
+    "Impossibile calcolare il tema natale con i dati forniti. "
+    "Verifica data, ora e luogo di nascita."
+)
+
+
+def _correction_summary(action: str, field_count: int) -> str:
+    """The form-summary sentence at the top of the error banner (Voice and
+    Tone: "cosa è successo" + "cosa fare"), pluralized by how many fields are
+    flagged below it. Matches EXPERIENCE.md's own example verbatim at
+    ``field_count == 2``: "Impossibile creare il cliente. Correggi i 2 campi
+    segnalati qui sotto."
+    """
+    if field_count == 1:
+        return f"Impossibile {action}. Correggi il campo segnalato qui sotto."
+    return f"Impossibile {action}. Correggi i {field_count} campi segnalati qui sotto."
+
 
 def _missing_fields(fields: dict[str, str]) -> list[str]:
     return [name for name in _REQUIRED_FIELDS if not fields.get(name, "").strip()]
@@ -291,51 +344,49 @@ async def create_client(
     try:
         fields = await parse_form(request, max_bytes=_MAX_CLIENT_FORM_BODY_BYTES)
     except FormTooLarge:
-        return _render_form(request, status_code=422, error="the submitted form is too large.")
+        return _render_form(request, status_code=422, error=_ERROR_FORM_TOO_LARGE)
     except FormNotUtf8:
-        return _render_form(
-            request, status_code=422, error="the submitted form is not valid UTF-8."
-        )
+        return _render_form(request, status_code=422, error=_ERROR_FORM_NOT_UTF8)
 
     missing = _missing_fields(fields)
     if missing:
         return _render_form(
             request,
             status_code=422,
-            error=f"Required: {', '.join(missing)}.",
+            error=_correction_summary("creare il cliente", len(missing)),
             form=fields,
-            field_errors={field: "This field is required." for field in missing},
+            field_errors={field: _FIELD_REQUIRED_MESSAGES[field] for field in missing},
         )
 
     if len(fields["name"]) > _MAX_NAME_LENGTH:
         return _render_form(
             request,
             status_code=422,
-            error=f"name must be at most {_MAX_NAME_LENGTH} characters.",
+            error=_correction_summary("creare il cliente", 1),
             form=fields,
-            field_errors={"name": f"name must be at most {_MAX_NAME_LENGTH} characters."},
+            field_errors={"name": _ERROR_NAME_TOO_LONG},
         )
 
     try:
         birth_date = date.fromisoformat(fields["birth_date"])
-    except ValueError as error:
+    except ValueError:
         return _render_form(
             request,
             status_code=422,
-            error=f"birth_date is invalid: {error}",
+            error=_correction_summary("creare il cliente", 1),
             form=fields,
-            field_errors={"birth_date": f"birth_date is invalid: {error}"},
+            field_errors={"birth_date": _ERROR_BIRTH_DATE_INVALID},
         )
 
     try:
         birth_time = datetime.strptime(fields["birth_time"], "%H:%M").time()
-    except ValueError as error:
+    except ValueError:
         return _render_form(
             request,
             status_code=422,
-            error=f"birth_time is invalid: {error}",
+            error=_correction_summary("creare il cliente", 1),
             form=fields,
-            field_errors={"birth_time": f"birth_time is invalid: {error}"},
+            field_errors={"birth_time": _ERROR_BIRTH_TIME_INVALID},
         )
 
     birth_local_time = datetime.combine(birth_date, birth_time)
@@ -351,21 +402,21 @@ async def create_client(
             if isinstance(resolution, list):
                 return _render_form(request, status_code=200, form=fields, candidates=resolution)
             resolved = resolution
-    except PlaceResolutionError as error:
+    except PlaceResolutionError:
         return _render_form(
             request,
             status_code=422,
-            error=str(error),
+            error=_correction_summary("creare il cliente", 1),
             form=fields,
-            field_errors={"birthplace": str(error)},
+            field_errors={"birthplace": _ERROR_BIRTHPLACE_UNRESOLVED},
         )
-    except _CANDIDATE_DECODE_ERRORS as error:
+    except _CANDIDATE_DECODE_ERRORS:
         return _render_form(
             request,
             status_code=422,
-            error=f"the chosen birthplace candidate is invalid: {error}",
+            error=_correction_summary("creare il cliente", 1),
             form=fields,
-            field_errors={"birthplace": f"the chosen birthplace candidate is invalid: {error}"},
+            field_errors={"birthplace": _ERROR_CANDIDATE_INVALID},
         )
 
     birth_instant_utc = (birth_local_time - resolved.utc_offset).replace(tzinfo=UTC)
@@ -377,11 +428,15 @@ async def create_client(
         natal_chart = compute_natal_chart(
             birth_instant_utc, resolved.latitude, resolved.longitude, computation_config
         )
-    except (ValueError, EphemerisIntegrityError) as error:
+    except (ValueError, EphemerisIntegrityError):
         # Not field-attributable: no field on this form maps to "the
         # ephemeris computation itself failed" -- stays a form-level-only
-        # message, unchanged (this story's I/O & Edge-Case Matrix).
-        return _render_form(request, status_code=422, error=str(error), form=fields)
+        # message. Never the raw exception text (this story's Design Notes):
+        # core/adapter exception messages stay English by the architecture's
+        # naming rule, so a fixed Italian message substitutes for it here.
+        return _render_form(
+            request, status_code=422, error=_ERROR_CHART_COMPUTATION_FAILED, form=fields
+        )
 
     client = create_client_with_chart(
         session,
@@ -396,11 +451,12 @@ async def create_client(
     session.commit()
 
     # A real template, not a bare fragment (Story 9.8 closes Story 9.4's
-    # deferral): keeps the exact "created." wording the success tests assert
-    # on and the same link straight to the new Client's chart-verification
-    # view (epic-2-retro-item-14) -- still a 200, not a redirect (a 303 to
-    # the SVG page would be followed and lose the outcome) -- now delivered
-    # inside base.html's chrome, with the success message riding as `flash`
+    # deferral): Italian success wording (Story 9.9, EXPERIENCE.md's Voice
+    # and Tone) and the same link straight to the new Client's
+    # chart-verification view (epic-2-retro-item-14) -- still a 200, not a
+    # redirect (a 303 to the SVG page would be followed and lose the
+    # outcome) -- now delivered inside base.html's chrome, with the success
+    # message riding as `flash`
     # in the template context rather than a fourth, bespoke delivery path.
     # `flash.message` is plain text, escaped like any other Jinja variable;
     # the chart link is `client_action_result.html`'s own markup, driven by
@@ -409,7 +465,7 @@ async def create_client(
         request,
         "client_action_result.html",
         {
-            "flash": {"kind": "success", "message": f"Client {client.id} created."},
+            "flash": {"kind": "success", "message": f"Cliente {client.id} creato."},
             "chart_href": f"/clients/{client.id}/chart",
             "heading": "Clienti",
         },
@@ -469,7 +525,7 @@ async def correct_client(
             client=client,
             session=session,
             status_code=422,
-            error="the submitted form is too large.",
+            error=_ERROR_FORM_TOO_LARGE,
         )
     except FormNotUtf8:
         return _render_edit_form(
@@ -477,7 +533,7 @@ async def correct_client(
             client=client,
             session=session,
             status_code=422,
-            error="the submitted form is not valid UTF-8.",
+            error=_ERROR_FORM_NOT_UTF8,
         )
 
     missing = _missing_fields(fields)
@@ -487,9 +543,9 @@ async def correct_client(
             client=client,
             session=session,
             status_code=422,
-            error=f"Required: {', '.join(missing)}.",
+            error=_correction_summary("salvare la correzione", len(missing)),
             form=fields,
-            field_errors={field: "This field is required." for field in missing},
+            field_errors={field: _FIELD_REQUIRED_MESSAGES[field] for field in missing},
         )
 
     if len(fields["name"]) > _MAX_NAME_LENGTH:
@@ -498,35 +554,35 @@ async def correct_client(
             client=client,
             session=session,
             status_code=422,
-            error=f"name must be at most {_MAX_NAME_LENGTH} characters.",
+            error=_correction_summary("salvare la correzione", 1),
             form=fields,
-            field_errors={"name": f"name must be at most {_MAX_NAME_LENGTH} characters."},
+            field_errors={"name": _ERROR_NAME_TOO_LONG},
         )
 
     try:
         birth_date = date.fromisoformat(fields["birth_date"])
-    except ValueError as error:
+    except ValueError:
         return _render_edit_form(
             request,
             client=client,
             session=session,
             status_code=422,
-            error=f"birth_date is invalid: {error}",
+            error=_correction_summary("salvare la correzione", 1),
             form=fields,
-            field_errors={"birth_date": f"birth_date is invalid: {error}"},
+            field_errors={"birth_date": _ERROR_BIRTH_DATE_INVALID},
         )
 
     try:
         birth_time = datetime.strptime(fields["birth_time"], "%H:%M").time()
-    except ValueError as error:
+    except ValueError:
         return _render_edit_form(
             request,
             client=client,
             session=session,
             status_code=422,
-            error=f"birth_time is invalid: {error}",
+            error=_correction_summary("salvare la correzione", 1),
             form=fields,
-            field_errors={"birth_time": f"birth_time is invalid: {error}"},
+            field_errors={"birth_time": _ERROR_BIRTH_TIME_INVALID},
         )
 
     birth_local_time = datetime.combine(birth_date, birth_time)
@@ -549,25 +605,25 @@ async def correct_client(
                     candidates=resolution,
                 )
             resolved = resolution
-    except PlaceResolutionError as error:
+    except PlaceResolutionError:
         return _render_edit_form(
             request,
             client=client,
             session=session,
             status_code=422,
-            error=str(error),
+            error=_correction_summary("salvare la correzione", 1),
             form=fields,
-            field_errors={"birthplace": str(error)},
+            field_errors={"birthplace": _ERROR_BIRTHPLACE_UNRESOLVED},
         )
-    except _CANDIDATE_DECODE_ERRORS as error:
+    except _CANDIDATE_DECODE_ERRORS:
         return _render_edit_form(
             request,
             client=client,
             session=session,
             status_code=422,
-            error=f"the chosen birthplace candidate is invalid: {error}",
+            error=_correction_summary("salvare la correzione", 1),
             form=fields,
-            field_errors={"birthplace": f"the chosen birthplace candidate is invalid: {error}"},
+            field_errors={"birthplace": _ERROR_CANDIDATE_INVALID},
         )
 
     # Commit right after a successful resolve (via `resolve()` or
@@ -594,15 +650,16 @@ async def correct_client(
         natal_chart = compute_natal_chart(
             birth_instant_utc, resolved.latitude, resolved.longitude, computation_config
         )
-    except (ValueError, EphemerisIntegrityError) as error:
+    except (ValueError, EphemerisIntegrityError):
         # Not field-attributable, mirrors create_client's own chart-
-        # computation failure -- stays a form-level-only message.
+        # computation failure -- stays a form-level-only message, never the
+        # raw exception text (this story's Design Notes).
         return _render_edit_form(
             request,
             client=client,
             session=session,
             status_code=422,
-            error=str(error),
+            error=_ERROR_CHART_COMPUTATION_FAILED,
             form=fields,
         )
 
@@ -632,14 +689,14 @@ async def correct_client(
     )
     session.commit()
 
-    # See create_client: a real template keeping the exact "corrected."
-    # wording plus the same link to the chart view (epic-2-retro-item-14),
-    # still a 200, not a redirect.
+    # See create_client: a real template with Italian success wording plus
+    # the same link to the chart view (epic-2-retro-item-14), still a 200,
+    # not a redirect.
     return _templates.TemplateResponse(
         request,
         "client_action_result.html",
         {
-            "flash": {"kind": "success", "message": f"Client {client.id} corrected."},
+            "flash": {"kind": "success", "message": f"Cliente {client.id} corretto."},
             "chart_href": f"/clients/{client.id}/chart",
             "heading": "Clienti",
         },
@@ -693,7 +750,7 @@ async def delete_client(
             client_name=client.name,
             status_code=422,
             has_superseded_chart=_has_superseded_chart(session, client_id),
-            error="the submitted form is too large.",
+            error=_ERROR_FORM_TOO_LARGE,
         )
     except FormNotUtf8:
         return _render_delete_form(
@@ -702,7 +759,7 @@ async def delete_client(
             client_name=client.name,
             status_code=422,
             has_superseded_chart=_has_superseded_chart(session, client_id),
-            error="the submitted form is not valid UTF-8.",
+            error=_ERROR_FORM_NOT_UTF8,
         )
 
     if fields.get("confirmed") != "1":
@@ -718,14 +775,14 @@ async def delete_client(
     session.commit()
     log_client_deleted(client_id)
 
-    # See create_client: a real template keeping the exact "deleted."
-    # wording, still a 200, not a redirect. No chart link -- the Client
-    # (and every chart it had) no longer exists to link to.
+    # See create_client: a real template with Italian success wording, still
+    # a 200, not a redirect. No chart link -- the Client (and every chart it
+    # had) no longer exists to link to.
     return _templates.TemplateResponse(
         request,
         "client_action_result.html",
         {
-            "flash": {"kind": "success", "message": f"Client {client_id} deleted."},
+            "flash": {"kind": "success", "message": f"Cliente {client_id} eliminato."},
             "chart_href": None,
             "heading": "Clienti",
         },

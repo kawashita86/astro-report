@@ -17,6 +17,7 @@ behavior is ``tests/test_natal_chart.py``'s.
 
 from __future__ import annotations
 
+import html
 import re
 import time
 from dataclasses import dataclass, field
@@ -89,6 +90,30 @@ _VALID_FORM = {
     "birth_time": "00:00",
     "birthplace": "Fort Worth, TX",
 }
+
+#: The fixed Italian copy ``shell/http/routes/clients.py`` substitutes for a
+#: raw parser/exception message (Story 9.9, EXPERIENCE.md's Voice and Tone;
+#: never ``str(error)`` -- this story's Design Notes). Mirrored here rather
+#: than imported so a test failure shows the exact string, not an indirection
+#: through the route module. Both entries are the exact full sentence,
+#: leading ``L'`` included -- the assertion below unescapes the response body
+#: first (Jinja's autoescape renders ``birth_time``'s leading apostrophe as
+#: ``L&#39;ora``), so ``birth_date`` and ``birth_time`` are checked the same
+#: way rather than one being truncated to dodge the entity.
+_ITALIAN_INVALID_FIELD_MESSAGE = {
+    "birth_date": "La data di nascita non è valida. Usa il formato AAAA-MM-GG.",
+    "birth_time": "L'ora di nascita non è valida. Usa il formato HH:mm.",
+}
+_ITALIAN_BIRTHPLACE_UNRESOLVED = (
+    "Non è stato possibile verificare il luogo di nascita indicato. Riprova."
+)
+_ITALIAN_CANDIDATE_INVALID = (
+    "La selezione del luogo non è valida. Ricomincia la ricerca del luogo di nascita."
+)
+_ITALIAN_CHART_COMPUTATION_FAILED = (
+    "Impossibile calcolare il tema natale con i dati forniti. "
+    "Verifica data, ora e luogo di nascita."
+)
 
 #: A canned chart standing in for a real ``compute_natal_chart()`` call.
 #: Real computation (real ephemeris, real house math) is
@@ -230,9 +255,7 @@ def _use_real_geocoder(
     """
 
     def _get_real_geocoder(session: Session = Depends(get_session)) -> Geocoder:
-        return NominatimGeocoder(
-            session, geolocator=geolocator, timezone_finder=timezone_finder
-        )
+        return NominatimGeocoder(session, geolocator=geolocator, timezone_finder=timezone_finder)
 
     app_instance.dependency_overrides[get_geocoder] = _get_real_geocoder
 
@@ -288,6 +311,27 @@ def test_the_form_is_served_to_an_authenticated_caller(
     assert "btn btn--primary" in body
 
 
+def test_the_new_client_form_is_fully_italian_with_one_h1(
+    authenticated_client: TestClient,
+) -> None:
+    """Story 9.9 Code Map — ``client_new.html``'s title, ``h1``, field labels
+    and submit are all Italian; none of the prior English survives."""
+    response = authenticated_client.get("/clients/new")
+
+    assert response.status_code == 200
+    body = response.text
+    assert body.count("<h1") == 1
+    assert "<h1>Nuovo cliente</h1>" in body
+    assert "<title>Nuovo cliente — astro-report</title>" in body
+    assert ">Nome</label>" in body
+    assert ">Data di nascita</label>" in body
+    assert ">Ora di nascita</label>" in body
+    assert ">Luogo di nascita</label>" in body
+    assert ">Crea cliente</button>" in body
+    for english in ("New Client", "Birth date", "Birth time", "Birthplace", "Create Client"):
+        assert english not in body
+
+
 # --- Happy path -------------------------------------------------------------------
 
 
@@ -302,7 +346,10 @@ def test_all_fields_unambiguous_birthplace_persists_client_and_chart(
     response = authenticated_client.post("/clients", data=_VALID_FORM)
 
     assert response.status_code == 200, response.text
-    assert "created" in response.text.lower()
+    # Story 9.9: the success flash is Italian ("creato"), never the prior
+    # English "created".
+    assert "creato" in response.text.lower()
+    assert "created" not in response.text.lower()
 
     clients = _clients(db_session)
     charts = _charts(db_session)
@@ -316,6 +363,8 @@ def test_all_fields_unambiguous_birthplace_persists_client_and_chart(
     # epic-2-retro-item-14: the success body links straight to the new
     # Client's chart-verification view, still 200, still names the outcome.
     assert f'href="/clients/{clients[0].id}/chart"' in response.text
+    assert "Vedi il tema natale" in response.text
+    assert "View chart" not in response.text
 
     # Story 9.8: the response now extends base.html's chrome (Story 9.4's
     # deferral, closed) -- not just the same wording as the old bare
@@ -440,6 +489,10 @@ def test_an_ambiguous_birthplace_shows_candidates_and_persists_nothing(
     assert 'class="form-view"' in response.text
     assert _clients(db_session) == []
     assert _charts(db_session) == []
+    # Story 9.9 Code Map — the candidate-picker legend is Italian.
+    assert "Più luoghi corrispondono a" in response.text
+    assert "Scegline uno" in response.text
+    assert "More than one place matched" not in response.text
 
 
 def test_choosing_a_candidate_persists_and_never_re_queries_resolve(
@@ -452,8 +505,7 @@ def test_choosing_a_candidate_persists_and_never_re_queries_resolve(
     _use_geocoder(app_instance, geocoder)
 
     candidate_value = (
-        '{"display_name": "Fort Worth, TX, USA", '
-        '"latitude": "32.7358", "longitude": "-97.3453"}'
+        '{"display_name": "Fort Worth, TX, USA", "latitude": "32.7358", "longitude": "-97.3453"}'
     )
     form = {**_VALID_FORM, "candidate": candidate_value}
 
@@ -598,7 +650,9 @@ def test_an_unparsable_date_or_time_field_is_refused_naming_it(
     response = authenticated_client.post("/clients", data=form)
 
     assert response.status_code == 422
-    assert f"{field} is invalid" in response.text
+    # Unescaped so `birth_time`'s leading `L'` (Jinja renders it `L&#39;ora`)
+    # is asserted in full, the same way as `birth_date`'s message.
+    assert _ITALIAN_INVALID_FIELD_MESSAGE[field] in html.unescape(response.text)
     assert _clients(db_session) == []
     assert f'aria-describedby="{field}-error"' in response.text
     assert f'id="{field}-error"' in response.text
@@ -618,7 +672,7 @@ def test_a_malformed_candidate_is_refused(
     response = authenticated_client.post("/clients", data=form)
 
     assert response.status_code == 422
-    assert "candidate" in response.text.lower()
+    assert _ITALIAN_CANDIDATE_INVALID in response.text
     assert _clients(db_session) == []
     assert geocoder.resolve_candidate_calls == []
 
@@ -637,7 +691,11 @@ def test_a_resolution_failure_is_refused_naming_the_step(
     response = authenticated_client.post("/clients", data=_VALID_FORM)
 
     assert response.status_code == 422
-    assert "geocoding" in response.text
+    assert _ITALIAN_BIRTHPLACE_UNRESOLVED in response.text
+    # Never the raw exception text (this story's Design Notes): neither the
+    # step name nor the underlying message leaks to the operator.
+    assert "geocoding" not in response.text
+    assert "no match" not in response.text
     assert _clients(db_session) == []
     assert _charts(db_session) == []
 
@@ -661,7 +719,9 @@ def test_a_chart_computation_failure_is_refused_and_persists_no_partial_client(
     response = authenticated_client.post("/clients", data=_VALID_FORM)
 
     assert response.status_code == 422
-    assert "simulated ephemeris failure" in response.text
+    assert _ITALIAN_CHART_COMPUTATION_FAILED in response.text
+    # Never the raw exception text (this story's Design Notes).
+    assert "simulated ephemeris failure" not in response.text
     assert _clients(db_session) == []
     assert _charts(db_session) == []
     # Not field-attributable (spec I/O Matrix): stays a form-level-only message,
@@ -708,8 +768,7 @@ def test_the_stored_chart_records_computation_config_and_ephemeris_identity(
     chart = _charts(db_session)[0]
     assert chart.computation_config_version == app_instance.state.computation_config.version
     assert (
-        chart.computation_config_content_hash
-        == app_instance.state.computation_config.content_hash
+        chart.computation_config_content_hash == app_instance.state.computation_config.content_hash
     )
     assert {f["filename"] for f in chart.ephemeris_files} == {
         f.filename for f in app_instance.state.ephemeris_identity.files
@@ -774,9 +833,7 @@ def test_getting_the_reports_list_without_a_session_is_401(client: TestClient) -
 def test_the_reports_list_for_an_unknown_client_is_404(
     authenticated_client: TestClient,
 ) -> None:
-    response = authenticated_client.get(
-        "/clients/01a01abf-0000-7000-8000-000000000000/reports"
-    )
+    response = authenticated_client.get("/clients/01a01abf-0000-7000-8000-000000000000/reports")
 
     assert response.status_code == 404
 
@@ -791,6 +848,14 @@ def test_a_client_with_no_reports_shows_an_empty_list(
     assert response.status_code == 200
     assert f"Nessun report per {ada.name}." in response.text
     assert 'href="/clients"' in response.text
+    # Story 9.9 Code Map — the title and h1 read "Report di {nome}", never
+    # the prior "Reports for {nome}", and title/h1 phrasing match each other
+    # (review fix: the title previously dropped "di").
+    body = response.text
+    assert body.count("<h1") == 1
+    assert f"<h1>Report di {ada.name}</h1>" in body
+    assert f"<title>Report di {ada.name} — astro-report</title>" in body
+    assert "Reports for" not in body
 
 
 def test_a_client_with_several_reports_lists_them_by_month_most_recent_first(
@@ -887,7 +952,7 @@ def test_a_report_against_a_superseded_chart_is_marked_but_still_opens(
 
     assert response.status_code == 200
     assert f'href="/report-runs/{run.id}/report"' in response.text
-    assert "superseded" in response.text.lower()
+    assert "tema superato" in response.text.lower()
 
 
 def test_a_pre_migration_report_with_no_recorded_chart_is_not_marked_superseded(
@@ -898,15 +963,13 @@ def test_a_pre_migration_report_with_no_recorded_chart_is_not_marked_superseded(
     ``natal_ready``), so whether its chart was ever superseded is
     undeterminable -- never marked, not even a false positive."""
     ada, _chart = _create_client_with_chart(app_instance, db_session)
-    run = _create_passed_report(
-        db_session, client_id=ada.id, month="2026-01", natal_chart_id=None
-    )
+    run = _create_passed_report(db_session, client_id=ada.id, month="2026-01", natal_chart_id=None)
 
     response = authenticated_client.get(f"/clients/{ada.id}/reports")
 
     assert response.status_code == 200
     assert f'href="/report-runs/{run.id}/report"' in response.text
-    assert "superseded" not in response.text.lower()
+    assert "tema superato" not in response.text.lower()
 
 
 def test_the_reports_list_is_scoped_per_client(
@@ -932,7 +995,7 @@ def test_the_reports_list_is_scoped_per_client(
 
 # --- Backup staleness warning (Story 6.6) -------------------------------------
 
-_WARNING_TEXT = "Backup out of date"
+_WARNING_TEXT = "Backup non aggiornato"
 
 
 def _make_passed_report_at(
@@ -992,6 +1055,9 @@ def test_never_backed_up_with_a_report_shows_the_warning(
     # item 49) -- a bare /backup would serve the export without recording it,
     # so the warning would never clear.
     assert 'href="/backup?record=1"' in response.text
+    # Story 9.9 Code Map — the banner and its link are Italian.
+    assert "Esegui backup ora" in response.text
+    assert "Back up now" not in response.text
 
 
 def test_a_fresh_backup_shows_no_warning(
@@ -1117,9 +1183,7 @@ def test_the_roster_lists_every_client_in_name_then_id_order_through_the_shell(
     # Rendered through the one shell.
     assert body.lower().count("<html") == 1
     assert '<html lang="it">' in body
-    assert re.search(
-        r'href="/clients"[^>]*\bclass="is-active"[^>]*aria-current="page"', body, re.S
-    )
+    assert re.search(r'href="/clients"[^>]*\bclass="is-active"[^>]*aria-current="page"', body, re.S)
 
     # (name, id) order: Ada Alpha before Zoe Zeta.
     assert body.index("Ada Alpha") < body.index("Zoe Zeta")

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% set field_labels = {"name": "Name", "birth_date": "Birth date", "birth_time": "Birth time", "birthplace": "Birthplace"} %}
-{% block title %}New Client — astro-report{% endblock %}
+{% set field_labels = {"name": "Nome", "birth_date": "Data di nascita", "birth_time": "Ora di nascita", "birthplace": "Luogo di nascita"} %}
+{% block title %}Nuovo cliente — astro-report{% endblock %}
 {% block content %}
-      <h1>New Client</h1>
+      <h1>Nuovo cliente</h1>
 
       {% if error %}
       <div class="banner banner--danger" role="alert" tabindex="-1">
@@ -20,7 +20,7 @@
       <div class="form-view">
         <form method="post" action="/clients" data-submit-lock>
           <div class="field{% if field_errors and field_errors['name'] %} field--invalid{% endif %}">
-            <label for="name">Name</label>
+            <label for="name">Nome</label>
             <input
               type="text"
               id="name"
@@ -35,7 +35,7 @@
           </div>
 
           <div class="field{% if field_errors and field_errors['birth_date'] %} field--invalid{% endif %}">
-            <label for="birth_date">Birth date</label>
+            <label for="birth_date">Data di nascita</label>
             <input
               type="date"
               id="birth_date"
@@ -50,7 +50,7 @@
           </div>
 
           <div class="field{% if field_errors and field_errors['birth_time'] %} field--invalid{% endif %}">
-            <label for="birth_time">Birth time</label>
+            <label for="birth_time">Ora di nascita</label>
             <input
               type="time"
               id="birth_time"
@@ -67,7 +67,7 @@
           {% if candidates %}
           <input type="hidden" name="birthplace" value="{{ form.birthplace or '' }}" />
           <fieldset class="candidate-picker">
-            <legend>More than one place matched "{{ form.birthplace or '' }}" — choose one</legend>
+            <legend>Più luoghi corrispondono a "{{ form.birthplace or '' }}". Scegline uno.</legend>
             {% for candidate in candidates %}
             <label>
               <input type="radio" name="candidate" value="{{ candidate.value }}" required />
@@ -77,7 +77,7 @@
           </fieldset>
           {% else %}
           <div class="field{% if field_errors and field_errors['birthplace'] %} field--invalid{% endif %}">
-            <label for="birthplace">Birthplace</label>
+            <label for="birthplace">Luogo di nascita</label>
             <input
               type="text"
               id="birthplace"
@@ -92,7 +92,7 @@
           </div>
           {% endif %}
 
-          <button type="submit" class="btn btn--primary">Create Client</button>
+          <button type="submit" class="btn btn--primary">Crea cliente</button>
         </form>
       </div>
 {% endblock %}

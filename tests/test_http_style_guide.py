@@ -5,6 +5,7 @@ Mirrors ``tests/test_http_clients.py``'s fixture shape.
 
 from __future__ import annotations
 
+import re
 import time
 
 import pytest
@@ -110,6 +111,34 @@ def test_history_lists_current_and_prior_versions(
     body = response.text
     assert "Versione 1" in body
     assert "Versione 2" in body
+
+
+def test_history_row_shows_created_at_as_dd_mm_yyyy_hh_mm(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.9: every displayed timestamp is `dd/MM/yyyy HH:mm`, not
+    Python's default `str(datetime)`."""
+    _seed_version_1(db_session, "v1 content")
+    create_style_guide_version(db_session, "v2 content")
+    db_session.commit()
+
+    response = authenticated_client.get("/style-guide")
+
+    assert response.status_code == 200
+    assert re.search(r"\b\d{2}/\d{2}/\d{4} \d{2}:\d{2}\b", response.text)
+    assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", response.text)
+
+
+def test_a_historical_version_shows_created_at_as_dd_mm_yyyy_hh_mm(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    _seed_version_1(db_session, "Version one prose.")
+
+    response = authenticated_client.get("/style-guide/1")
+
+    assert response.status_code == 200
+    assert re.search(r"\bCreata \d{2}/\d{2}/\d{4} \d{2}:\d{2}\b", response.text)
+    assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", response.text)
 
 
 def test_current_version_is_not_duplicated_in_history(
@@ -249,7 +278,9 @@ def test_a_concurrent_save_race_is_caught_and_rendered_409(
 
     assert response.status_code == 409
     assert "Racing content." in response.text
-    assert "someone else saved a version first" in response.text
+    # Story 9.9: the conflict message is Italian, never the prior English.
+    assert "salvata una nuova versione nel frattempo" in response.text
+    assert "someone else saved a version first" not in response.text
 
 
 def test_saving_a_revision_leaves_prior_rows_untouched(

@@ -55,6 +55,17 @@ _templates = Jinja2Templates(
 #: while still rejecting a garbage-sized body before reading it.
 _MAX_STYLE_GUIDE_FORM_BODY_BYTES = 1_048_576
 
+#: Fixed Italian copy for every ``error`` site below (Story 9.9,
+#: EXPERIENCE.md's Voice and Tone) -- mirrors
+#: ``shell/http/routes/clients.py``'s own fixed-message convention.
+_ERROR_FORM_TOO_LARGE = "Il modulo inviato è troppo grande."
+_ERROR_FORM_NOT_UTF8 = "Il modulo inviato non è in una codifica UTF-8 valida."
+_ERROR_CONTENT_REQUIRED = "Il contenuto è obbligatorio."
+_ERROR_CONCURRENT_SAVE = (
+    "È stata salvata una nuova versione nel frattempo — rivedi la versione attuale "
+    "e riprova a salvare."
+)
+
 
 def _history(session: Session, *, exclude_version: int) -> list[StyleGuide]:
     """Every version except ``exclude_version`` (the current one), so
@@ -128,14 +139,14 @@ async def save_style_guide(
         return _templates.TemplateResponse(
             request,
             "style_guide_edit.html",
-            {"content": "", "error": "the submitted form is too large."},
+            {"content": "", "error": _ERROR_FORM_TOO_LARGE},
             status_code=422,
         )
     except FormNotUtf8:
         return _templates.TemplateResponse(
             request,
             "style_guide_edit.html",
-            {"content": "", "error": "the submitted form is not valid UTF-8."},
+            {"content": "", "error": _ERROR_FORM_NOT_UTF8},
             status_code=422,
         )
 
@@ -144,7 +155,7 @@ async def save_style_guide(
         return _templates.TemplateResponse(
             request,
             "style_guide_edit.html",
-            {"content": content, "error": "content is required."},
+            {"content": content, "error": _ERROR_CONTENT_REQUIRED},
             status_code=422,
         )
 
@@ -158,10 +169,7 @@ async def save_style_guide(
             "style_guide_edit.html",
             {
                 "content": content,
-                "error": (
-                    "someone else saved a version first -- please review the "
-                    "current version and try saving again."
-                ),
+                "error": _ERROR_CONCURRENT_SAVE,
             },
             status_code=409,
         )

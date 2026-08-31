@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_empty_state.html" import empty_state %}
-{% block title %}Reports — {{ client.name }} — astro-report{% endblock %}
+{% block title %}Report di {{ client.name }} — astro-report{% endblock %}
 {% block page_header %}{% include "_client_tabs.html" %}{% endblock %}
 {% block content %}
-      <h1>Reports for {{ client.name }}</h1>
+      <h1>Report di {{ client.name }}</h1>
 
       {% if backup_stale %}
       <p role="alert">
-        Backup out of date — new Reports exist since the last backup.
-        <a href="/backup?record=1">Back up now</a>
+        Backup non aggiornato — esistono nuovi report dall'ultimo backup.
+        <a href="/backup?record=1">Esegui backup ora</a>
       </p>
       {% endif %}
 
@@ -18,7 +18,7 @@
         <li>
           <a href="/report-runs/{{ entry.run_id }}/report">{{ entry.month }}</a>
           {% if entry.superseded %}
-          <span>(superseded chart)</span>
+          <span>(tema superato)</span>
           {% endif %}
         </li>
         {% endfor %}

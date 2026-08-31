@@ -60,6 +60,19 @@ _MAX_CORPUS_FORM_BODY_BYTES = 1_048_576
 #: unpadded month such as ``2026-1``.
 _MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
+#: Fixed Italian copy for every ``error`` site below (Story 9.9,
+#: EXPERIENCE.md's Voice and Tone) -- mirrors
+#: ``shell/http/routes/clients.py``'s own fixed-message convention.
+_ERROR_FORM_TOO_LARGE = "Il modulo inviato è troppo grande."
+_ERROR_FORM_NOT_UTF8 = "Il modulo inviato non è in una codifica UTF-8 valida."
+_ERROR_CONTENT_REQUIRED = "Il testo del report è obbligatorio."
+_ERROR_CLIENT_ID_INVALID = "L'identificativo del cliente non è valido."
+_ERROR_CLIENT_NOT_FOUND = "Il cliente indicato non è presente in applicazione."
+#: Shared verbatim with ``corpus_new.html``'s month ``title`` attribute hint
+#: (passed through as ``month_hint`` below) so the two never drift out of
+#: sync with each other -- one string, two consumers, per review fix.
+_ERROR_MONTH_INVALID = "Usa il formato AAAA-MM, es. 2026-05."
+
 
 def _render_new_form(
     request: Request,
@@ -86,6 +99,7 @@ def _render_new_form(
             "client_id": client_id,
             "month": month,
             "clients": list_clients(session),
+            "month_hint": _ERROR_MONTH_INVALID,
         },
         status_code=status_code,
     )
@@ -114,9 +128,7 @@ def corpus_list(request: Request, session: Session = Depends(get_session)) -> Re
     clients_by_id = (
         {
             client.id: client
-            for client in session.exec(
-                select(Client).where(Client.id.in_(linked_ids))
-            )
+            for client in session.exec(select(Client).where(Client.id.in_(linked_ids)))
         }
         if linked_ids
         else {}
@@ -138,9 +150,7 @@ def corpus_list(request: Request, session: Session = Depends(get_session)) -> Re
 
 
 @router.get("/corpus/new", include_in_schema=False)
-def corpus_new_form(
-    request: Request, session: Session = Depends(get_session)
-) -> Response:
+def corpus_new_form(request: Request, session: Session = Depends(get_session)) -> Response:
     """The paste-in form, with the paired/unpaired radio (default unpaired),
     the existing-Client picker and the month input."""
     return _render_new_form(
@@ -173,7 +183,7 @@ async def add_corpus(request: Request, session: Session = Depends(get_session)) 
             request,
             session,
             content="",
-            error="the submitted form is too large.",
+            error=_ERROR_FORM_TOO_LARGE,
             paired="unpaired",
             client_id="",
             month="",
@@ -184,7 +194,7 @@ async def add_corpus(request: Request, session: Session = Depends(get_session)) 
             request,
             session,
             content="",
-            error="the submitted form is not valid UTF-8.",
+            error=_ERROR_FORM_NOT_UTF8,
             paired="unpaired",
             client_id="",
             month="",
@@ -210,7 +220,7 @@ async def add_corpus(request: Request, session: Session = Depends(get_session)) 
         )
 
     if not content.strip():
-        return _reject("content is required.")
+        return _reject(_ERROR_CONTENT_REQUIRED)
 
     linked_client_id: UUID | None = None
     linked_month: str | None = None
@@ -220,13 +230,13 @@ async def add_corpus(request: Request, session: Session = Depends(get_session)) 
             try:
                 candidate = UUID(client_id_field)
             except ValueError:
-                return _reject("that Client id is not valid.")
+                return _reject(_ERROR_CLIENT_ID_INVALID)
             if session.get(Client, candidate) is None:
-                return _reject("that Client is not in the application.")
+                return _reject(_ERROR_CLIENT_NOT_FOUND)
             linked_client_id = candidate
         if month_field:
             if not _MONTH_PATTERN.match(month_field):
-                return _reject("month must be 'YYYY-MM'.")
+                return _reject(_ERROR_MONTH_INVALID)
             linked_month = month_field
 
     add_corpus_entry(

@@ -122,7 +122,7 @@ development_status:
   9-6-the-report-reading-sheet-and-the-payload-view-made-readable: review
   9-7-the-style-guide-and-corpus-screens-restyled: review
   9-8-feedback-and-state-primitives: review
-  9-9-italian-everywhere-and-the-accessibility-floor: backlog
+  9-9-italian-everywhere-and-the-accessibility-floor: review
   epic-9-retrospective: optional
 action_items:
   - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"

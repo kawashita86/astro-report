@@ -129,12 +129,12 @@ def test_an_empty_prose_section_renders_its_heading_and_a_blank_body() -> None:
 def test_list_sections_render_one_dash_bullet_per_day_entry_date_prefixed() -> None:
     markdown = _render()
 
-    # 2026-01-10 15:00 UTC -> 09:00 CST; cited, so text is appended.
-    assert "- 2026-01-10 09:00:00 CST — Venere favorisce gli incontri." in markdown
+    # 2026-01-10 15:00 UTC -> 09:00 CST; cited, so text is appended. Story 9.9: dd/MM/yyyy HH:mm.
+    assert "- 10/01/2026 09:00 — Venere favorisce gli incontri." in markdown
     # 2026-01-18 09:00 UTC -> 03:00 CST; uncited -> date only, still emitted.
-    assert "- 2026-01-18 03:00:00 CST\n" in markdown
+    assert "- 18/01/2026 03:00\n" in markdown
     # The lone attention entry is uncited too and must not be dropped.
-    assert "## Giorni di attenzione\n\n- 2026-01-15 03:00:00 CST" in markdown
+    assert "## Giorni di attenzione\n\n- 15/01/2026 03:00" in markdown
 
 
 def test_the_body_is_the_eight_sections_and_the_name_only() -> None:

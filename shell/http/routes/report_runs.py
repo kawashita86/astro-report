@@ -57,7 +57,7 @@ from shell.http.draft_view import (
     render_draft,
 )
 from shell.http.flash import _flash_context_processor, set_flash
-from shell.http.payload_view import localize_payload
+from shell.http.payload_view import FIELD_TITLES, localize_payload
 from shell.http.report_markdown import render_report_markdown
 from shell.http.stage_view import build_stage_track, stage_caption, violation_kind_label
 from shell.ports.generator import Generator
@@ -215,9 +215,7 @@ def _load_passed_report_bundle(session: Session, run_id: UUID) -> _PassedReportB
     ``RuntimeError`` (a data-integrity bug, not a not-ready state), with the
     same message shapes both routes used before.
     """
-    stored_report = session.exec(
-        select(Report).where(Report.report_run_id == run_id)
-    ).first()
+    stored_report = session.exec(select(Report).where(Report.report_run_id == run_id)).first()
     if stored_report is None:
         raise HTTPException(status_code=404)
 
@@ -448,7 +446,7 @@ def view_report_payload(
     return _templates.TemplateResponse(
         request,
         "report_payload.html",
-        {"payload": localized, "section_titles": SECTION_TITLES},
+        {"payload": localized, "section_titles": SECTION_TITLES, "field_titles": FIELD_TITLES},
     )
 
 
@@ -574,9 +572,7 @@ def view_report(
         .order_by(StoredGateResult.regeneration_count.desc())
     ).first()
     if stored_gate_result is None:
-        raise RuntimeError(
-            f"Report {bundle.report.id} has no matching passed StoredGateResult."
-        )
+        raise RuntimeError(f"Report {bundle.report.id} has no matching passed StoredGateResult.")
 
     n = stored_gate_result.regeneration_count
     regeneration_note = (
