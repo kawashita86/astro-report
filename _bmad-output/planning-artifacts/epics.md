@@ -1934,6 +1934,13 @@ So that I stop navigating a set of disconnected unstyled pages.
 **When** the shell is in place
 **Then** every route still renders and the unauthenticated-route allowlist test still passes ( `/` is authenticated)
 
+**Given** the sign-in screen (`login.html`)
+**When** it renders
+**Then** it sits in a centred flex column — not the left-aligned bare form the base layout would otherwise produce — with a small SVG wordmark above the password field, built from existing DESIGN.md tokens (the `#42297A` ramp), no new asset or third-party dependency
+**And** the same centred treatment holds at 320px width and in both themes
+
+*(Added 2026-08-31, correct-course: `.auth-view` centred the column horizontally with top padding only — no vertical centring, no mark. `DESIGN.md` never specified a logo; this is new scope, not a defect.)*
+
 ### Story 9.2: A home dashboard instead of a 404
 
 As Francesco,
@@ -1955,9 +1962,18 @@ So that opening the app tells me what needs attention.
 **When** Francesco wants to act
 **Then** quick actions link to Clienti and to the Guida di stile
 
-**Given** an unauthenticated request to `/`
+**Given** a run in the dashboard's recent-runs list
+**When** Francesco activates its row
+**Then** it opens that run's Report (if `gate_passed`/exported) or its stage view (if in progress or failed) — the row is a link, not inert text
+
+*(Added 2026-08-31, correct-course: new scope — the original AC left the recent-runs list read-only; Francesco wants to open a report straight from Home.)*
+
+**Given** an unauthenticated browser request to `/` or any other guarded route
 **When** it is handled
-**Then** it is redirected to sign-in like every other guarded route
+**Then** it is a real HTTP redirect (302) to `/login?next=<path>`, and a successful sign-in opens that same path next — not the bare empty-body 401 defined for non-navigational callers
+**And** a request whose `Accept` header does not indicate a browser navigation (HTMX polls, anything JSON-shaped) keeps the existing uniform empty-body 401 unchanged — a presentation fix for the human at the browser, not a change to `AD-15`'s authenticated-by-default boundary or its allowlist test
+
+*(Amended 2026-08-31, correct-course: this AC existed since the 2026-08-28 proposal but the implementation returns a bare 401 for every unauthenticated request including plain browser navigation — confirmed by `test_anonymous_get_slash_is_empty_body_401_and_slash_is_not_allowlisted`. Francesco hits a blank page instead of the sign-in screen unless he already knows to type `/login`. This closes that gap; it does not touch `shell/http/auth.py`'s allowlist or its test.)*
 
 ### Story 9.3: The Clienti list and the client-scoped tabs
 
@@ -1980,6 +1996,13 @@ So that a month-end batch of thirty is navigable.
 **When** any of its screens is open
 **Then** a contextual tab row shows Anagrafica / Tema / Report, each its own route, with the active tab derived from the path
 **And** the breadcrumb and the active sidebar item agree
+
+**Given** the Report tab for a Client who has a stored chart
+**When** it renders
+**Then** it offers **Nuovo report** — a single `YYYY-MM` month field with a format hint, above or beside the report history list — that posts to `POST /clients/{id}/report-runs` and lands Francesco on the run's stage view (Story 9.5)
+**And** for a Client with no stored chart the action is absent or disabled, since starting a run with no chart is a 404 at submission (`report_runs.py::start_report_run`)
+
+*(Added 2026-08-31, correct-course: **defect, not new scope** — `EXPERIENCE.md`'s route map (`/clients/{id}/reports — month history + "Nuovo report"`) and its Month Selection section both specify this exact control against this exact route, and Epic 9's header names `EXPERIENCE.md` binding. `client_reports.html` shipped the history list only; no template anywhere posts to the start-run route. This was the one concrete answer to "where do I generate a report" — nowhere, currently.)*
 
 ### Story 9.4: Client create, correct and delete — restyled, with a real delete guard
 
@@ -2058,6 +2081,12 @@ So that reviewing and defending a report are both quick.
 **Given** any identifier elsewhere in the UI (a hash, a `YYYY-MM` month code, a UUID)
 **When** it is displayed
 **Then** it uses the same mono-chip treatment
+
+**Given** any report-run-scoped screen — the stage view, Draft, Payload, or the passed Report
+**When** it renders
+**Then** a breadcrumb reads Clienti / {client name} / {month}, exactly as `EXPERIENCE.md`'s route map specifies for `/report-runs/{run_id}`, with Clienti and the client name each linking back
+
+*(Added 2026-08-31, correct-course: **defect, not new scope** — `EXPERIENCE.md`'s route map states this breadcrumb explicitly; `report.html` (and `report_draft.html`/`report_payload.html`) never received a `client` in their route context and render no breadcrumb, so opening a report gives no visible link back to whose it is or how to return. This is most of what reads as "too plain and can get confusing.")*
 
 ### Story 9.7: The Style Guide and Corpus screens, restyled
 

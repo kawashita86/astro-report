@@ -114,12 +114,12 @@ development_status:
   epic-8-retrospective: done
 
   epic-9: in-progress
-  9-1-the-application-shell: review
-  9-2-a-home-dashboard-instead-of-a-404: review
-  9-3-the-clienti-list-and-the-client-scoped-tabs: review
+  9-1-the-application-shell: in-progress
+  9-2-a-home-dashboard-instead-of-a-404: in-progress
+  9-3-the-clienti-list-and-the-client-scoped-tabs: in-progress
   9-4-client-create-correct-and-delete-restyled: review
   9-5-a-stage-track-i-can-watch-and-a-gate-failure-i-can-read: review
-  9-6-the-report-reading-sheet-and-the-payload-view-made-readable: review
+  9-6-the-report-reading-sheet-and-the-payload-view-made-readable: in-progress
   9-7-the-style-guide-and-corpus-screens-restyled: review
   9-8-feedback-and-state-primitives: review
   9-9-italian-everywhere-and-the-accessibility-floor: review
