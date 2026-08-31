@@ -29,6 +29,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, Request, Response, status
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import create_engine
@@ -47,6 +48,7 @@ from shell.http.auth import (
     SESSION_MAX_AGE_SECONDS,
     AuthMiddleware,
     log_failed_login_attempt,
+    safe_next_path,
     sign_session,
     verify_password,
 )
@@ -172,13 +174,22 @@ def create_app(settings: Settings) -> FastAPI:
     def login_form(request: Request) -> Response:
         """The sign-in form. Unauthenticated by design -- it is how one becomes
         authenticated -- and it is the only entry in the allowlist besides
-        ``/healthz``."""
-        return templates.TemplateResponse(request, "login.html", {"error": False})
+        ``/healthz``.
+
+        ``next`` (from ``AuthMiddleware``'s redirect off a guarded route, or
+        typed by hand) is sanitized and carried into the form as a hidden
+        field so a successful sign-in returns Francesco to where he started."""
+        next_path = safe_next_path(request.query_params.get("next"))
+        return templates.TemplateResponse(
+            request, "login.html", {"error": False, "next": next_path}
+        )
 
     @application.post("/login", include_in_schema=False)
     async def login_submit(request: Request) -> Response:
         """Verify the single configured password and, on success, set the
-        signed session cookie.
+        signed session cookie and redirect to ``next`` (Story 9.2, correct-
+        course 2026-08-31) -- previously a bare "Signed in." text response
+        that left a no-JS sign-in going nowhere.
 
         Parsed by hand from the raw body rather than via FastAPI's ``Form()``,
         which pulls in ``python-multipart`` for a single field this login form
@@ -194,30 +205,38 @@ def create_app(settings: Settings) -> FastAPI:
         except ValueError:
             body_too_large = True
         if body_too_large:
+            # `next` lives in the body, deliberately never read here -- the
+            # whole point of rejecting on `content-length` alone is to avoid
+            # touching an oversized body at all (review-loop 1: this is why
+            # this branch can't preserve `next` the way a parsed failure can).
             log_failed_login_attempt()
             return templates.TemplateResponse(
-                request, "login.html", {"error": True}, status_code=401
+                request, "login.html", {"error": True, "next": "/"}, status_code=401
             )
 
         raw_body = await request.body()
         try:
             body = raw_body.decode("utf-8")
         except UnicodeDecodeError:
+            # Undecodable body -> no `next` to recover either; same tradeoff
+            # as the oversized-body branch above.
             log_failed_login_attempt()
             return templates.TemplateResponse(
-                request, "login.html", {"error": True}, status_code=401
+                request, "login.html", {"error": True, "next": "/"}, status_code=401
             )
-        password = dict(parse_qsl(body)).get("password", "")
+        fields = dict(parse_qsl(body))
+        password = fields.get("password", "")
+        next_path = safe_next_path(fields.get("next"))
 
         if not verify_password(password, settings.auth_password_hash):
             log_failed_login_attempt()
             return templates.TemplateResponse(
-                request, "login.html", {"error": True}, status_code=401
+                request, "login.html", {"error": True, "next": next_path}, status_code=401
             )
 
         expires_at = int(time.time()) + SESSION_MAX_AGE_SECONDS
         token = sign_session(expires_at, settings.session_secret_key)
-        response = Response(content="Signed in.", media_type="text/plain")
+        response = RedirectResponse(next_path, status_code=303)
         response.set_cookie(
             SESSION_COOKIE_NAME,
             token,

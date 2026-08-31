@@ -21,6 +21,7 @@ from shell.http.auth import (
     ALLOWLIST,
     SESSION_COOKIE_NAME,
     log_failed_login_attempt,
+    safe_next_path,
     sign_session,
     verify_password,
     verify_session,
@@ -237,6 +238,114 @@ def test_a_valid_cookie_clears_the_checkpoint(client: TestClient) -> None:
     # Past the checkpoint, "/" reaches its handler: Story 9.2's dashboard,
     # a 200 rather than the middleware's anonymous empty-body 401.
     assert response.status_code == 200
+
+
+# --- A browser navigation without a session is sent to sign-in, not a blank
+# --- page (Story 9.2 amendment, correct-course 2026-08-31) --------------------
+
+
+def test_an_unauthenticated_browser_navigation_redirects_to_login_with_next(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/clients/new", headers={"accept": "text/html"}, follow_redirects=False
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?next=%2Fclients%2Fnew"
+
+
+def test_an_unauthenticated_browser_navigation_to_a_path_with_a_query_carries_it_in_next(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/clients?foo=bar", headers={"accept": "text/html"}, follow_redirects=False
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?next=%2Fclients%3Ffoo%3Dbar"
+
+
+def test_an_htmx_poll_with_no_session_still_gets_the_bare_401(client: TestClient) -> None:
+    response = client.get(
+        "/clients",
+        headers={"accept": "text/html", "hx-request": "true"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 401
+    assert response.content == b""
+
+
+def test_a_json_shaped_caller_with_no_session_still_gets_the_bare_401(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/clients", headers={"accept": "application/json"}, follow_redirects=False
+    )
+
+    assert response.status_code == 401
+    assert response.content == b""
+
+
+def test_a_plain_caller_with_no_accept_header_still_gets_the_bare_401(
+    client: TestClient,
+) -> None:
+    """The default shape every existing anonymous-401 test in this suite
+    already uses (no `Accept` header at all) -- must keep getting the
+    uniform 401, not a redirect, so this change doesn't quietly flip every
+    non-browser caller (curl, a health checker, a bot) onto a 302."""
+    response = client.get("/clients", follow_redirects=False)
+
+    assert response.status_code == 401
+    assert response.content == b""
+
+
+def test_an_unauthenticated_browser_shaped_post_still_gets_the_bare_401(
+    client: TestClient,
+) -> None:
+    """A plain, no-JS form POST also sends `Accept: text/html` with no
+    `HX-Request` -- but a redirect can't carry a POST body forward (`/login`
+    itself always turns a POST into a GET on success, via its 303), so
+    redirecting one here would silently drop the action the user meant to
+    take instead of completing it after sign-in. `_wants_html_navigation`
+    restricts the redirect to GET/HEAD for exactly this reason."""
+    response = client.post(
+        "/clients/00000000-0000-7000-8000-000000000000/report-runs",
+        data={"month": "2026-03"},
+        headers={"accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 401
+    assert response.content == b""
+
+
+# --- safe_next_path: only an on-site, path-absolute destination survives ------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, "/"),
+        ("", "/"),
+        ("/clients/new", "/clients/new"),
+        ("/report-runs/abc?foo=bar", "/report-runs/abc?foo=bar"),
+        ("//evil.example/steal", "/"),
+        ("not-a-path", "/"),
+        ("/\\evil.example", "/"),
+        ("/foo\r\nSet-Cookie: x=y", "/"),
+        ("/foo\nEvil: header", "/"),
+        ("/\tevil.example", "/"),  # a browser strips the tab, leaving `//evil.example`
+        ("/login", "/"),
+        ("/login/", "/"),
+        ("/login?next=%2Fclients", "/"),
+        ("/loginX", "/loginX"),  # a same-prefix path that is not actually /login
+        ("/" + "a" * 2048, "/"),  # one over _NEXT_MAX_LENGTH
+    ],
+)
+def test_safe_next_path(value: str | None, expected: str) -> None:
+    assert safe_next_path(value) == expected
 
 
 # --- The failed-login log line carries no secrets ------------------------------

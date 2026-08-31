@@ -635,6 +635,18 @@ h3 {
   white-space: nowrap;
   font-size: var(--font-body-size);
   color: var(--ink-primary);
+  /* Story 9.2 amendment (correct-course 2026-08-31): this became a real
+   * link (was a `<span>`) -- an always-on underline is the affordance,
+   * since a row a keyboard or touch user can't hover still needs to read
+   * as clickable. */
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+}
+
+.dash-run__client:hover,
+.dash-run__client:focus-visible {
+  color: var(--primary-700);
+  text-decoration-color: currentColor;
 }
 
 .dash-run__time {

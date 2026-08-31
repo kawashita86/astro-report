@@ -23,8 +23,12 @@
         <ul class="dash-runs__list">
           {% for run in runs %}
           <li class="dash-run">
-            <span class="dash-run__client" title="{{ run.client_name }}"
-              >{{ run.client_name }}</span
+            <a
+              class="dash-run__client"
+              href="{{ run.href }}"
+              title="{{ run.client_name }}"
+              aria-label="{{ run.link_label }}"
+              >{{ run.client_name }}</a
             >
             <button type="button" class="badge-mono" data-copy-chip>{{ run.month }}</button>
             <span

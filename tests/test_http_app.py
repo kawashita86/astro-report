@@ -252,11 +252,64 @@ def test_login_form_needs_no_credentials_because_login_is_allowlisted(
     assert client.get("/login").status_code == 200
 
 
-def test_correct_password_sets_the_session_cookie(client: TestClient) -> None:
-    response = client.post("/login", data={"password": AUTH_PASSWORD})
+def test_login_form_carries_a_safe_next_into_a_hidden_field(client: TestClient) -> None:
+    response = client.get("/login?next=/clients/new")
 
-    assert response.status_code == 200
+    assert '<input type="hidden" name="next" value="/clients/new" />' in response.text
+
+
+def test_login_form_sanitizes_an_unsafe_next_to_the_root(client: TestClient) -> None:
+    response = client.get("/login?next=//evil.example/steal")
+
+    assert '<input type="hidden" name="next" value="/" />' in response.text
+
+
+def test_login_form_with_no_next_defaults_the_hidden_field_to_root(
+    client: TestClient,
+) -> None:
+    response = client.get("/login")
+
+    assert '<input type="hidden" name="next" value="/" />' in response.text
+
+
+def test_correct_password_sets_the_session_cookie(client: TestClient) -> None:
+    response = client.post(
+        "/login", data={"password": AUTH_PASSWORD}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
     assert SESSION_COOKIE_NAME in response.cookies
+
+
+def test_correct_password_redirects_to_next_when_given(client: TestClient) -> None:
+    response = client.post(
+        "/login",
+        data={"password": AUTH_PASSWORD, "next": "/clients/new"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/clients/new"
+
+
+def test_correct_password_redirects_to_home_when_next_is_absent(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/login", data={"password": AUTH_PASSWORD}, follow_redirects=False
+    )
+
+    assert response.headers["location"] == "/"
+
+
+def test_correct_password_ignores_an_off_site_next(client: TestClient) -> None:
+    response = client.post(
+        "/login",
+        data={"password": AUTH_PASSWORD, "next": "//evil.example/steal"},
+        follow_redirects=False,
+    )
+
+    assert response.headers["location"] == "/"
 
 
 def test_wrong_password_sets_no_cookie(client: TestClient) -> None:
@@ -322,7 +375,9 @@ def test_a_login_post_missing_the_password_field_fails_cleanly(client: TestClien
 
 
 def test_the_session_cookie_is_http_only_and_same_site_lax(client: TestClient) -> None:
-    response = client.post("/login", data={"password": AUTH_PASSWORD})
+    response = client.post(
+        "/login", data={"password": AUTH_PASSWORD}, follow_redirects=False
+    )
 
     set_cookie = response.headers["set-cookie"]
     assert "HttpOnly" in set_cookie
@@ -330,9 +385,11 @@ def test_the_session_cookie_is_http_only_and_same_site_lax(client: TestClient) -
 
 
 def test_the_session_cookie_is_secure_only_in_production() -> None:
-    local = TestClient(create_app(LOCAL)).post("/login", data={"password": AUTH_PASSWORD})
+    local = TestClient(create_app(LOCAL)).post(
+        "/login", data={"password": AUTH_PASSWORD}, follow_redirects=False
+    )
     production = TestClient(create_app(PRODUCTION)).post(
-        "/login", data={"password": AUTH_PASSWORD}
+        "/login", data={"password": AUTH_PASSWORD}, follow_redirects=False
     )
 
     assert "Secure" not in local.headers["set-cookie"]
@@ -345,7 +402,9 @@ def test_a_session_from_signing_in_authenticates_later_requests(client: TestClie
     checkpoint and lets a request reach FastAPI's own routing -- proven now
     by `GET /` returning the Story 9.2 dashboard (200) rather than the
     middleware's anonymous 401."""
-    login = client.post("/login", data={"password": AUTH_PASSWORD})
+    login = client.post(
+        "/login", data={"password": AUTH_PASSWORD}, follow_redirects=False
+    )
     assert SESSION_COOKIE_NAME in login.cookies
 
     assert client.get("/").status_code == 200

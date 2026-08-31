@@ -19,13 +19,14 @@ import hashlib
 import hmac
 import logging
 import time
+from urllib.parse import urlencode
 from uuid import UUID
 
 import argon2
 from argon2.exceptions import Argon2Error, InvalidHashError
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import RedirectResponse, Response
 
 from shell.config import Settings
 
@@ -37,6 +38,7 @@ __all__ = [
     "AuthMiddleware",
     "log_client_deleted",
     "log_failed_login_attempt",
+    "safe_next_path",
     "sign_session",
     "verify_password",
     "verify_session",
@@ -145,6 +147,81 @@ def log_client_deleted(client_id: UUID) -> None:
     _logger.info("client deleted: %s", client_id)
 
 
+#: A generous ceiling on an accepted ``next`` value -- well under any real
+#: proxy header-size limit, and no legitimate in-app path needs anywhere
+#: near this many characters (review-loop 1: an unbounded ``next`` round-
+#: trips through the ``Location`` header and the login page's hidden field
+#: on every re-render for no benefit).
+_NEXT_MAX_LENGTH = 2048
+
+
+def safe_next_path(value: str | None) -> str:
+    """A ``next`` value safe to redirect a signed-in browser to: an on-site,
+    path-absolute destination only, defaulting to ``"/"``.
+
+    ``next`` is attacker-controlled -- it arrives as a plain query parameter
+    on ``/login``, never something this app already vetted -- so this
+    rejects anything that could send the browser off-site or corrupt the
+    response: a scheme-relative path (``//evil.example``, which browsers
+    resolve against the current scheme, not this origin), a backslash
+    (browsers and some proxies treat ``\\`` as a path separator, the same
+    trick as ``//`` under a different character), a tab (review-loop 1: the
+    WHATWG URL parser strips embedded tabs before resolving a URL, so
+    ``/\t/evil.example`` is *also* ``//evil.example`` by the time a browser
+    acts on it -- the same bypass class as the backslash check, one
+    character over), and raw ``\\r``/``\\n`` (header-injection payload).
+    Also rejects ``/login`` itself (redirecting a freshly signed-in visitor
+    straight back to sign-in is never a meaningful destination) and anything
+    over :data:`_NEXT_MAX_LENGTH`. Anything else that starts with a single
+    ``/`` is accepted as-is.
+    """
+    if (
+        not value
+        or len(value) > _NEXT_MAX_LENGTH
+        or not value.startswith("/")
+        or value.startswith("//")
+        or "\\" in value
+        or "\t" in value
+        or "\r" in value
+        or "\n" in value
+    ):
+        return "/"
+    if value.split("?", 1)[0].rstrip("/") == "/login":
+        return "/"
+    return value
+
+
+def _wants_html_navigation(request: Request) -> bool:
+    """Whether ``request`` looks like a browser loading a page, rather than
+    an HTMX poll or a JSON-shaped/API caller.
+
+    Used only to choose *how* an unauthenticated request is told "no" (a
+    redirect a human can act on, vs. the uniform empty-body 401 every
+    non-navigational caller must keep getting) -- it never changes *whether*
+    the request is authenticated.
+
+    Two guards beyond the ``Accept`` sniff itself:
+
+    - **Method.** Only ``GET``/``HEAD`` redirect. A redirect can't carry a
+      ``POST`` body forward -- ``/login``'s own success response is a 303,
+      which always turns into a ``GET`` -- so redirecting a guarded ``POST``
+      (a plain, no-JS form submission also sends ``Accept: text/html`` with
+      no ``HX-Request``) would silently drop the action the user meant to
+      take instead of completing it after sign-in (review-loop 1). Those
+      calls keep the bare 401 exactly as before.
+    - **Substring, not a full media-type parse.** ``"text/html" in accept``
+      is deliberately loose: the only two outcomes it drives are "redirect"
+      or "401," and a false positive (a caller that merely lists
+      ``text/html`` alongside a preferred type) just gets a friendlier
+      response to the same denial, never a change in whether it's denied.
+    """
+    if request.method not in ("GET", "HEAD"):
+        return False
+    if request.headers.get("hx-request", "").lower() == "true":
+        return False
+    return "text/html" in request.headers.get("accept", "")
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Reject any request outside :data:`ALLOWLIST` without a valid session.
 
@@ -174,10 +251,34 @@ class AuthMiddleware(BaseHTTPMiddleware):
         settings: Settings = request.app.state.settings
         token = request.cookies.get(SESSION_COOKIE_NAME)
         if token is None or not verify_session(token, settings.session_secret_key):
-            # Uniform, empty-body, always 401: missing cookie, tampered
-            # signature and expired timestamp are indistinguishable to the
-            # caller, and no application data -- not even a hint that the
-            # path exists -- rides along.
+            if _wants_html_navigation(request):
+                # A human hit a guarded URL with no session -- send them to
+                # the sign-in screen instead of a page that renders nothing
+                # (correct-course 2026-08-31: Story 9.2's own AC already said
+                # "redirected to sign-in," but this returned the bare 401
+                # below to every caller, browser included, until now).
+                #
+                # Echoing the path into `Location` (and, from `/login`, the
+                # hidden `next` field) does not weaken the 401 branch's own
+                # "no hint the path exists" property below: this branch is
+                # reached identically for a real guarded route and a
+                # nonexistent one (this middleware runs before routing), and
+                # the requested path is already the request path an access
+                # log records regardless of which response follows it. What
+                # this echoes back is only the path the caller already typed
+                # or clicked -- never data from elsewhere in the app
+                # (review-loop 1).
+                target = request.url.path
+                if request.url.query:
+                    target = f"{target}?{request.url.query}"
+                return RedirectResponse(
+                    f"/login?{urlencode({'next': target})}", status_code=302
+                )
+            # Uniform, empty-body, always 401 for every non-navigational
+            # caller (HTMX polls, JSON-shaped requests): missing cookie,
+            # tampered signature and expired timestamp are indistinguishable
+            # to the caller, and no application data -- not even a hint
+            # that the path exists -- rides along.
             return Response(status_code=401)
 
         return await call_next(request)

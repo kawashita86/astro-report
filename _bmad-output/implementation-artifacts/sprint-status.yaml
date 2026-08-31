@@ -115,7 +115,7 @@ development_status:
 
   epic-9: in-progress
   9-1-the-application-shell: in-progress
-  9-2-a-home-dashboard-instead-of-a-404: in-progress
+  9-2-a-home-dashboard-instead-of-a-404: review
   9-3-the-clienti-list-and-the-client-scoped-tabs: review
   9-4-client-create-correct-and-delete-restyled: review
   9-5-a-stage-track-i-can-watch-and-a-gate-failure-i-can-read: review

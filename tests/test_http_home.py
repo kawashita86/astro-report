@@ -244,6 +244,110 @@ def test_a_run_row_carries_client_name_month_chip_badge_and_timestamp(
     assert "09/03/2026 07:04" in body
 
 
+def _make_report(db_session: Session, *, run: ReportRun) -> Report:
+    """A minimal, directly-built `Report` row for `run` -- mirrors this
+    file's own convention (module docstring) of building each model's
+    columns directly rather than driving the real Gate. Content-free by
+    design: the dashboard link only checks this row's existence."""
+    report = Report(
+        client_id=run.client_id,
+        report_run_id=run.id,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+    )
+    db_session.add(report)
+    db_session.flush()
+    return report
+
+
+def test_a_gate_passed_run_row_links_straight_to_its_report(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    chiara = _make_client(db_session, name="Abbate Chiara")
+    run = _make_run(db_session, client_id=chiara.id, stage="gate_passed")
+    _make_report(db_session, run=run)
+    db_session.commit()
+
+    body = authenticated_client.get("/").text
+
+    assert f'href="/report-runs/{run.id}/report"' in body
+
+
+def test_an_exported_run_row_links_straight_to_its_report(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    chiara = _make_client(db_session, name="Abbate Chiara")
+    run = _make_run(db_session, client_id=chiara.id, stage="exported")
+    _make_report(db_session, run=run)
+    db_session.commit()
+
+    body = authenticated_client.get("/").text
+
+    assert f'href="/report-runs/{run.id}/report"' in body
+
+
+def test_a_still_running_run_row_links_to_its_stage_view(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """No `Report` row yet -- `view_report` itself would 404 this run, so
+    the dashboard must not send it there."""
+    chiara = _make_client(db_session, name="Abbate Chiara")
+    run = _make_run(db_session, client_id=chiara.id, stage="payload_ready")
+    db_session.commit()
+
+    body = authenticated_client.get("/").text
+
+    assert f'href="/report-runs/{run.id}"' in body
+    assert f'href="/report-runs/{run.id}/report"' not in body
+
+
+def test_a_run_that_never_reached_gate_passed_and_is_now_failed_links_to_its_stage_view(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Terminally failed with no `Report` row at all -- the common failure
+    shape (never passed the Gate)."""
+    chiara = _make_client(db_session, name="Abbate Chiara")
+    run = _make_run(
+        db_session,
+        client_id=chiara.id,
+        stage="draft_ready",
+        failed_at=datetime(2026, 3, 9, 8, 0, tzinfo=UTC),
+        failure_reason="errore generico",
+    )
+    db_session.commit()
+
+    body = authenticated_client.get("/").text
+
+    assert f'href="/report-runs/{run.id}"' in body
+    assert f'href="/report-runs/{run.id}/report"' not in body
+
+
+def test_a_run_with_a_passed_report_links_to_it_even_if_later_marked_failed(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """The dashboard link mirrors `view_report`'s own gate: a persisted
+    `Report` row's mere existence, never `run.stage`/`run.failed_at`
+    (`shell/http/routes/report_runs.py::view_report`'s docstring). A run
+    that passed once and only later picked up an unrelated terminal
+    failure still has a real Report to show -- linking to the stage view
+    instead would hide it behind a badge that no longer reflects it."""
+    chiara = _make_client(db_session, name="Abbate Chiara")
+    run = _make_run(
+        db_session,
+        client_id=chiara.id,
+        stage="gate_passed",
+        failed_at=datetime(2026, 3, 9, 8, 0, tzinfo=UTC),
+        failure_reason="errore generico",
+    )
+    _make_report(db_session, run=run)
+    db_session.commit()
+
+    body = authenticated_client.get("/").text
+
+    assert f'href="/report-runs/{run.id}/report"' in body
+
+
 def test_recent_runs_are_ordered_newest_updated_first(
     authenticated_client: TestClient, db_session: Session
 ) -> None:

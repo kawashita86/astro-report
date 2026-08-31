@@ -32,6 +32,7 @@ from sqlmodel import Session, select
 
 from shell.adapters.postgres.backup_record import backup_is_stale
 from shell.adapters.postgres.client import Client
+from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_run import ReportRun
 from shell.http.app import get_session
 from shell.http.flash import _flash_context_processor
@@ -104,9 +105,23 @@ def home_dashboard(request: Request, session: Session = Depends(get_session)) ->
         .limit(_RECENT_LIMIT)
     ).all()
 
+    # Which of the listed runs actually have a passed `Report` row -- the
+    # same existence check `view_report` itself gates on (`_load_passed_
+    # report_bundle`, `shell/http/routes/report_runs.py`), not a re-derived
+    # guess from `stage`/`failed_at` (review-loop 1: those two can drift
+    # apart, e.g. a `gate_passed` run whose Report was somehow removed, or a
+    # stage added between `gate_passed` and `exported` later).
+    run_ids = [run.id for run, _client in rows]
+    reported_run_ids = set(
+        session.exec(
+            select(Report.report_run_id).where(Report.report_run_id.in_(run_ids))
+        ).all()
+    )
+
     runs = []
     for run, client in rows:
         badge_text, badge_variant = _badge_for(run)
+        report_ready = run.id in reported_run_ids
         runs.append(
             {
                 "client_name": client.name,
@@ -115,6 +130,21 @@ def home_dashboard(request: Request, session: Session = Depends(get_session)) ->
                 "badge_variant": badge_variant,
                 "failure_reason": run.failure_reason,
                 "updated_at": run.updated_at.strftime("%d/%m/%Y %H:%M"),
+                # Story 9.2 amendment (correct-course 2026-08-31): a passed
+                # run opens the Report directly; anything without one yet
+                # (still running, or terminally failed before ever passing)
+                # opens the stage view instead. `link_label` gives the link
+                # an accessible name a screen reader can tell apart from its
+                # neighbours without following it (review-loop 1) -- the
+                # visible badge text already conveys this to a sighted user.
+                "href": f"/report-runs/{run.id}/report"
+                if report_ready
+                else f"/report-runs/{run.id}",
+                "link_label": (
+                    f"{client.name} — apri il report"
+                    if report_ready
+                    else f"{client.name} — apri l'avanzamento"
+                ),
             }
         )
 

@@ -9,6 +9,7 @@
       <p role="alert">Password errata.</p>
       {% endif %}
       <form method="post" action="/login">
+        <input type="hidden" name="next" value="{{ next | default('/') }}" />
         <label for="password">Password</label>
         <input
           type="password"
