@@ -108,8 +108,8 @@ def test_history_lists_current_and_prior_versions(
 
     assert response.status_code == 200
     body = response.text
-    assert "version 1" in body
-    assert "version 2" in body
+    assert "Versione 1" in body
+    assert "Versione 2" in body
 
 
 def test_current_version_is_not_duplicated_in_history(
@@ -126,8 +126,8 @@ def test_current_version_is_not_duplicated_in_history(
 
     assert response.status_code == 200
     body = response.text
-    assert body.count("version 2") == 1
-    assert body.count("version 1") == 1
+    assert body.count("Versione 2") == 1
+    assert body.count("Versione 1") == 1
 
 
 def test_history_against_an_empty_table_is_caught_and_rendered_not_a_bare_500(
@@ -174,6 +174,20 @@ def test_an_unknown_version_is_404(authenticated_client: TestClient, db_session:
     response = authenticated_client.get("/style-guide/999")
 
     assert response.status_code == 404
+
+
+def test_a_historical_version_renders_no_pre_tag(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.7: the bare `<pre>` dump is replaced by a `.prose` block --
+    no `<pre>` remains anywhere on the historical view."""
+    _seed_version_1(db_session, "Version one prose.")
+
+    response = authenticated_client.get("/style-guide/1")
+
+    assert response.status_code == 200
+    assert "<pre>" not in response.text
+    assert 'class="prose"' in response.text
 
 
 # --- GET /style-guide/edit: the form ------------------------------------------------
@@ -266,7 +280,7 @@ def test_no_code_change_or_redeploy_is_needed_to_read_the_new_content(
     )
 
     history = authenticated_client.get("/style-guide")
-    assert "version 2" in history.text
+    assert "Versione 2" in history.text
 
     view = authenticated_client.get("/style-guide/2")
     assert "Freshly edited prose." in view.text

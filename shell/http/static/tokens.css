@@ -1433,3 +1433,107 @@ button.badge-mono {
   cursor: pointer;
   text-align: inherit;
 }
+
+/* ---------------------------------------------------------------------------
+ * PROVISIONAL — Story 9.7 (the Style Guide and Corpus screens, restyled).
+ * Minimal component styling for the info banner (Style Guide editor), the
+ * read-only prose block (Style Guide historical view), and the Corpus list's
+ * clamp-and-expand entries. Reuses `.page-header`, `.form-view`/`.field`,
+ * `.btn*`, `.list-panel`, `.banner`, `.status-badge` verbatim from prior
+ * stories. Semantic tokens only; contrast holds in both themes (the info
+ * banner's tint fill is >= 3:1 non-text, its body text >= 4.5:1). Story 9.8
+ * consolidates these into shared component partials — do not build on the
+ * exact class names here.
+ * ------------------------------------------------------------------------- */
+
+/* Info banner — mirrors `.banner--warning`/`.banner--danger` with the info
+   role. Used above the Style Guide editor: saving never overwrites, it only
+   forks a new version. */
+.banner--info {
+  background: var(--info-surface);
+  border-left-color: var(--info);
+  color: var(--ink-primary);
+}
+
+/* Read-only prose (Style Guide historical view). 720px measure, body-read
+   type, `pre-wrap` so blank lines in the stored Markdown-ish content still
+   read as paragraph breaks without parsing it as Markdown. */
+.prose {
+  max-width: 720px;
+  color: var(--ink-primary);
+  font-size: var(--font-body-read-size);
+  line-height: var(--font-body-read-line);
+  font-weight: var(--font-body-read-weight);
+  white-space: pre-wrap;
+}
+
+/* Corpus list — 1120px measure, hairline dividers between entries, no
+   shadow (DESIGN.md density split). */
+.corpus-list {
+  max-width: 1120px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.corpus-entry {
+  padding: var(--space-base);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.corpus-entry:last-child {
+  border-bottom: 0;
+}
+
+.corpus-entry__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-md);
+  margin-bottom: var(--space-sm);
+  color: var(--ink-secondary);
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+}
+
+/* Clamped to 6 lines by default; `shell.js` job 10 reveals
+   `.corpus-entry__expand` only where the text actually overflows, and
+   toggles `.is-expanded` (which clears both properties) on click. Without
+   JS the full text stays in the DOM, clamped but selectable/screen-reader
+   visible -- only the toggle affordance is inert. */
+.corpus-entry__text {
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  color: var(--ink-primary);
+  font-size: var(--font-body-read-size);
+  line-height: var(--font-body-read-line);
+  font-weight: var(--font-body-read-weight);
+  white-space: pre-wrap;
+}
+
+.corpus-entry__text.is-expanded {
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+/* Chromeless expand/collapse control -- link colour, underline, no button
+   chrome. Hidden by default in markup; `shell.js` job 10 un-hides it only
+   where the paired text is actually clamped. */
+.corpus-entry__expand {
+  display: inline-block;
+  margin-top: var(--space-sm);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  font-size: var(--font-small-size);
+  text-decoration: underline;
+  cursor: pointer;
+}

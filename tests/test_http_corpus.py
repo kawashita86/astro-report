@@ -5,6 +5,7 @@ Story 7.1's I/O & Edge-Case Matrix, plus authentication. Mirrors
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -177,7 +178,7 @@ def test_empty_corpus_shows_empty_state_and_a_link_to_the_form(
 
     assert response.status_code == 200
     assert "/corpus/new" in response.text
-    assert "No past reports" in response.text
+    assert "Nessun report passato è stato ancora aggiunto." in response.text
 
 
 # --- Blank content --------------------------------------------------------
@@ -450,15 +451,15 @@ def test_list_shows_paired_client_and_month_and_unpaired_state(
     response = authenticated_client.get("/corpus")
 
     assert response.status_code == 200
-    blocks = response.text.split("<li>")
+    blocks = response.text.split('<li class="corpus-entry">')
     paired_block = next(block for block in blocks if "PAIRED-BLOCK-MARKER" in block)
     unpaired_block = next(block for block in blocks if "UNPAIRED-BLOCK-MARKER" in block)
 
     assert "Ada Lovelace" in paired_block
     assert "2026-05" in paired_block
-    assert "Paired" in paired_block
+    assert "Accoppiato" in paired_block
 
-    assert "Unpaired" in unpaired_block
+    assert "Non accoppiato" in unpaired_block
     assert "Ada Lovelace" not in unpaired_block
     assert "2026-05" not in unpaired_block
 
@@ -484,8 +485,8 @@ def test_empty_corpus_composition_reads_all_zero_and_keeps_the_empty_state(
     response = authenticated_client.get("/corpus")
 
     assert response.status_code == 200
-    assert "0 total · 0 paired · 0 unpaired" in response.text
-    assert "No past reports" in response.text
+    assert "Composizione: 0 totali · 0 accoppiati · 0 non accoppiati" in response.text
+    assert "Nessun report passato è stato ancora aggiunto." in response.text
     assert "/corpus/new" in response.text
 
 
@@ -506,7 +507,7 @@ def test_mixed_corpus_composition_counts_and_still_lists_every_entry(
 
     assert response.status_code == 200
     body = response.text
-    assert "5 total · 2 paired · 3 unpaired" in body
+    assert "Composizione: 5 totali · 2 accoppiati · 3 non accoppiati" in body
     for marker in ("P-1", "P-2", "U-1", "U-2", "U-3"):
         assert marker in body
     assert body.index("U-3") < body.index("U-2") < body.index("U-1") < body.index(
@@ -525,7 +526,7 @@ def test_all_unpaired_corpus_composition_counts(
     response = authenticated_client.get("/corpus")
 
     assert response.status_code == 200
-    assert "4 total · 0 paired · 4 unpaired" in response.text
+    assert "Composizione: 4 totali · 0 accoppiati · 4 non accoppiati" in response.text
 
 
 def test_paired_entry_without_a_link_still_counts_as_paired(
@@ -541,7 +542,7 @@ def test_paired_entry_without_a_link_still_counts_as_paired(
     response = authenticated_client.get("/corpus")
 
     assert response.status_code == 200
-    assert "1 total · 1 paired · 0 unpaired" in response.text
+    assert "Composizione: 1 totali · 1 accoppiati · 0 non accoppiati" in response.text
 
 
 def test_composition_line_precedes_the_first_entry_in_the_html(
@@ -555,21 +556,23 @@ def test_composition_line_precedes_the_first_entry_in_the_html(
 
     assert response.status_code == 200
     body = response.text
-    assert body.index("Corpus composition:") < body.index("ONLY-ENTRY-MARKER")
+    assert body.index("Composizione: 1 totali · 0 accoppiati · 1 non accoppiati") < body.index(
+        "ONLY-ENTRY-MARKER"
+    )
 
 
 def test_composition_counts_change_when_entries_are_added_between_requests(
     authenticated_client: TestClient, db_session: Session
 ) -> None:
     first = authenticated_client.get("/corpus")
-    assert "0 total · 0 paired · 0 unpaired" in first.text
+    assert "Composizione: 0 totali · 0 accoppiati · 0 non accoppiati" in first.text
 
     _seed_entry(
         db_session, content="NEW-ROW", created_at=datetime(2026, 1, 1, tzinfo=UTC), paired=True
     )
 
     second = authenticated_client.get("/corpus")
-    assert "1 total · 1 paired · 0 unpaired" in second.text
+    assert "Composizione: 1 totali · 1 accoppiati · 0 non accoppiati" in second.text
 
 
 def test_composition_line_after_the_real_post_then_get_user_path(
@@ -596,7 +599,58 @@ def test_composition_line_after_the_real_post_then_get_user_path(
     response = authenticated_client.get("/corpus")
 
     assert response.status_code == 200
-    assert "Corpus composition: 2 total · 1 paired · 1 unpaired" in response.text
+    assert "Composizione: 2 totali · 1 accoppiati · 1 non accoppiati" in response.text
+
+
+# --- Clamp/Expand markup (Story 9.7 I/O & Edge-Case Matrix) ---------------
+
+
+def test_a_short_entry_renders_with_a_hidden_expand_button(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.7: the Expand button is always present in the markup (JS
+    reveals it only where the text actually overflows the 6-line clamp), so
+    every entry -- short or long -- carries a `hidden` button, never no
+    button at all."""
+    _seed_entry(
+        db_session,
+        content="A short past report.",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    button = re.search(r"<button[^>]*data-corpus-expand[^>]*>", response.text)
+    assert button is not None
+    assert "hidden" in button.group(0)
+
+
+def test_a_long_entry_renders_its_full_content_verbatim_never_truncated_server_side(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.7: the 6-line clamp is CSS-only (`-webkit-line-clamp`) -- the
+    server must never truncate `content` itself. A long, multi-paragraph
+    entry's full text -- including its paragraph breaks -- still appears
+    verbatim in the response, not just its first visible lines."""
+    long_content = (
+        "Paragrafo uno. " * 20
+        + "\n\n"
+        + "Paragrafo due. " * 20
+        + "\n\n"
+        + "FINAL-PARAGRAPH-MARKER, ultimo paragrafo del report."
+    )
+    _seed_entry(
+        db_session,
+        content=long_content,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    response = authenticated_client.get("/corpus")
+
+    assert response.status_code == 200
+    assert long_content in response.text
+    assert "FINAL-PARAGRAPH-MARKER" in response.text
 
 
 # --- FR-29 cascade (matrix rows 8 & 9) --------------------------------------

@@ -1,8 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Style Guide v{{ style_guide.version }} — astro-report{% endblock %}
+{% block title %}Guida di stile v{{ style_guide.version }} — astro-report{% endblock %}
+{% block page_header %}
+      <p class="breadcrumb"><a href="/style-guide">Guida di stile</a> / Versione {{ style_guide.version }}</p>
+      <div class="page-header">
+        <h1>Versione {{ style_guide.version }}</h1>
+      </div>
+{% endblock %}
 {% block content %}
-      <h1>Style Guide -- version {{ style_guide.version }}</h1>
-      <p>Created {{ style_guide.created_at }}. Read-only -- prior versions are never edited.</p>
-      <p><a href="/style-guide">Back to history</a></p>
-      <pre>{{ style_guide.content }}</pre>
+      <p class="list-panel__meta">Creata {{ style_guide.created_at }}. Sola lettura — le versioni precedenti non vengono mai modificate.</p>
+      <div class="prose">{{ style_guide.content }}</div>
 {% endblock %}

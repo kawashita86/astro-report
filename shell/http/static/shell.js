@@ -1,7 +1,7 @@
 /*
  * astro-report application-shell behaviour — first-party, no dependencies.
  *
- * Nine jobs, all progressive enhancements over a shell that already works
+ * Ten jobs, all progressive enhancements over a shell that already works
  * without JavaScript:
  *
  *   1. Theme toggle — flip `data-theme` on <html>, persist the choice to
@@ -80,6 +80,18 @@
  *      global `scroll-behavior: smooth` (itself turned back to `auto` under
  *      reduced motion). Without JS the `report-toc` links still work as
  *      plain in-page anchors — no highlighting, but every jump still lands.
+ *
+ *   10. Corpus clamp toggle (Story 9.7) — on load, reveal
+ *      `[data-corpus-expand]` only where its paired `[data-corpus-text]` is
+ *      actually clamped (`scrollHeight > clientHeight`); a short entry's
+ *      button stays hidden, since the full text already fits. One delegated
+ *      `click` listener on `document.body` for `[data-corpus-expand]`:
+ *      toggles `.is-expanded` on the sibling text (found via
+ *      `closest(".corpus-entry")`), flips the button's `aria-expanded`, and
+ *      swaps its label Espandi ↔ Comprimi. Without JS every entry's full
+ *      text stays in the DOM -- readable, selectable, screen-reader visible,
+ *      just visually clamped to 6 lines with no toggle -- per the epic's
+ *      "JS only upgrades ... in-place disclosure" rule.
  *
  * All shell transitions are disabled by tokens.css under
  * `prefers-reduced-motion`; this file adds no scripted animation.
@@ -675,4 +687,39 @@
       observer.observe(section);
     });
   }
+
+  /* ---- 10. Corpus clamp toggle (Story 9.7) -------------------------------- */
+
+  var corpusTexts = Array.prototype.slice.call(
+    document.querySelectorAll("[data-corpus-text]")
+  );
+  corpusTexts.forEach(function (text) {
+    var entry = text.closest(".corpus-entry");
+    var expandButton = entry ? entry.querySelector("[data-corpus-expand]") : null;
+    if (!expandButton) {
+      return;
+    }
+    if (text.scrollHeight > text.clientHeight) {
+      expandButton.hidden = false;
+      expandButton.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  document.body.addEventListener("click", function (event) {
+    var button =
+      event.target && event.target.closest
+        ? event.target.closest("[data-corpus-expand]")
+        : null;
+    if (!button) {
+      return;
+    }
+    var entry = button.closest(".corpus-entry");
+    var text = entry ? entry.querySelector("[data-corpus-text]") : null;
+    if (!text) {
+      return;
+    }
+    var expanded = text.classList.toggle("is-expanded");
+    button.setAttribute("aria-expanded", expanded ? "true" : "false");
+    button.textContent = expanded ? "Comprimi" : "Espandi";
+  });
 })();

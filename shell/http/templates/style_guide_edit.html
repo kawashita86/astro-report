@@ -1,15 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Edit Style Guide — astro-report{% endblock %}
+{% block title %}Modifica Guida di stile — astro-report{% endblock %}
+{% block page_header %}
+      <p class="breadcrumb"><a href="/style-guide">Guida di stile</a> / Modifica</p>
+      <div class="page-header">
+        <h1>Modifica Guida di stile</h1>
+      </div>
+{% endblock %}
 {% block content %}
-      <h1>Edit Style Guide</h1>
       {% if error %}
-      <p role="alert">{{ error }}</p>
+      <div class="banner banner--danger" role="alert" tabindex="-1">
+        <span class="banner__text">{{ error }}</span>
+      </div>
       {% endif %}
-      <p>Saving creates a new version -- the current version is kept, never overwritten.</p>
-      <form method="post" action="/style-guide/edit">
-        <label for="content">Content</label>
-        <textarea id="content" name="content" required rows="30" cols="100">{{ content }}</textarea>
 
-        <button type="submit">Save new version</button>
-      </form>
+      <div class="banner banner--info" role="status">
+        <span class="banner__text"
+          >Il salvataggio crea una nuova versione — la corrente resta invariata.</span
+        >
+      </div>
+
+      <div class="form-view">
+        <form method="post" action="/style-guide/edit">
+          <div class="field">
+            <label for="content">Contenuto</label>
+            <textarea id="content" name="content" required rows="30" cols="100">{{ content }}</textarea>
+          </div>
+
+          <button type="submit" class="btn btn--primary">Salva nuova versione</button>
+        </form>
+      </div>
 {% endblock %}

@@ -1,28 +1,44 @@
 {% extends "base.html" %}
-{% block title %}Style Guide — astro-report{% endblock %}
+{% block title %}Guida di stile — astro-report{% endblock %}
+{% block page_header %}
+      <div class="page-header">
+        <h1>Guida di stile</h1>
+        <a class="page-header__action" href="/style-guide/edit">Modifica</a>
+      </div>
+{% endblock %}
 {% block content %}
-      <h1>Style Guide</h1>
       {% if error %}
-      <p role="alert">{{ error }}</p>
+      <div class="banner banner--danger" role="alert" tabindex="-1">
+        <span class="banner__text">{{ error }}</span>
+      </div>
       {% endif %}
 
       {% if current %}
-      <section>
-        <h2>Current (version {{ current.version }})</h2>
-        <p><a href="/style-guide/{{ current.version }}">View</a></p>
-        <p><a href="/style-guide/edit">Edit</a></p>
-      </section>
+      <h2>Versione corrente</h2>
+      <p>Versione {{ current.version }} · <a href="/style-guide/{{ current.version }}">Visualizza</a></p>
 
-      <section>
-        <h2>History</h2>
-        <ul>
-          {% for entry in history %}
-          <li>
-            <a href="/style-guide/{{ entry.version }}">version {{ entry.version }}</a>
-            -- {{ entry.created_at }}
-          </li>
-          {% endfor %}
-        </ul>
-      </section>
+      <h2>Cronologia</h2>
+      {% if history %}
+      <div class="list-panel">
+        <table aria-label="Cronologia della Guida di stile">
+          <thead>
+            <tr>
+              <th scope="col">Versione</th>
+              <th scope="col">Creata</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in history %}
+            <tr>
+              <td><a href="/style-guide/{{ entry.version }}">Versione {{ entry.version }}</a></td>
+              <td class="list-panel__meta">{{ entry.created_at }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="list-panel__meta">Nessuna versione precedente.</p>
+      {% endif %}
       {% endif %}
 {% endblock %}

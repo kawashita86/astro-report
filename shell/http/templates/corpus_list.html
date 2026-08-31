@@ -1,27 +1,51 @@
 {% extends "base.html" %}
 {% block title %}Corpus — astro-report{% endblock %}
+{% block page_header %}
+      <div class="page-header">
+        <h1>Corpus</h1>
+        <a class="page-header__action" href="/corpus/new">Aggiungi report</a>
+      </div>
+{% endblock %}
 {% block content %}
-      <h1>Corpus</h1>
-      <p><a href="/corpus/new">Add a past report</a></p>
-      <p>Corpus composition: {{ total }} total · {{ paired_count }} paired · {{ unpaired_count }} unpaired</p>
+      <p class="list-panel__meta">
+        Composizione: {{ total }} totali · {{ paired_count }} accoppiati · {{ unpaired_count }} non accoppiati
+      </p>
 
       {% if entries %}
-      <ul>
+      <ul class="corpus-list">
         {% for entry, client in entries %}
-        <li>
-          <p>{{ entry.created_at }}</p>
-          {% if entry.paired %}
-          <p>
-            Paired{% if client %} — {{ client.name }}{% endif %}{% if entry.month %} — {{ entry.month }}{% endif %}
-          </p>
-          {% else %}
-          <p>Unpaired</p>
-          {% endif %}
-          <pre>{{ entry.content }}</pre>
+        <li class="corpus-entry">
+          <div class="corpus-entry__meta">
+            <span>{{ entry.created_at }}</span>
+            {% if entry.paired %}
+              <span class="status-badge status-badge--success">Accoppiato</span>
+              {% if client %}<span>{{ client.name }}</span>{% endif %}
+              {% if entry.month %}<span>{{ entry.month }}</span>{% endif %}
+            {% else %}
+              <span class="status-badge status-badge--neutral">Non accoppiato</span>
+            {% endif %}
+          </div>
+          <p
+            class="corpus-entry__text"
+            id="corpus-text-{{ loop.index }}"
+            data-corpus-text
+          >{{ entry.content }}</p>
+          <button
+            type="button"
+            class="corpus-entry__expand"
+            data-corpus-expand
+            aria-controls="corpus-text-{{ loop.index }}"
+            hidden
+          >
+            Espandi
+          </button>
         </li>
         {% endfor %}
       </ul>
       {% else %}
-      <p>No past reports have been added yet. <a href="/corpus/new">Add the first one</a>.</p>
+      <div class="list-empty">
+        <p>Nessun report passato è stato ancora aggiunto.</p>
+        <a class="page-header__action" href="/corpus/new">Aggiungi il primo</a>
+      </div>
       {% endif %}
 {% endblock %}

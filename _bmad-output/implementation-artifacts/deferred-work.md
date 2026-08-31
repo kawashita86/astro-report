@@ -780,3 +780,6 @@ the spec that surfaced it. Append only.
   summary: The report sheet's scroll-spying section nav (`.report-toc a.is-active`) signals the currently-read Section only via a CSS class (colour + left border), with no `aria-current` (or equivalent) attribute exposing that state to assistive technology.
   evidence: Blind-hunter review of Story 9.6's diff. `shell.js`'s `IntersectionObserver` callback toggles `.is-active` via `classList.toggle` only; nothing sets `aria-current="true"`/`location` on the active link. Same rationale as the click-to-copy accessibility gap above -- natural fit for Story 9.9's designated accessibility-floor audit pass.
   triage: defer (blind-hunter review of spec-9-6-the-report-reading-sheet-and-the-payload-view-made-readable)
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-7-the-style-guide-and-corpus-screens-restyled.md`
+  summary: base.html's header comment ("Screen body copy stays as-is until Story 9.9") is stale — every Epic 9 story since 9.2 has already translated its own screen's body copy to Italian as it restyled, so the comment no longer describes the templates it's attached to.
+  evidence: Surfaced by Story 9.7's blind-hunter review; predates this story (already inaccurate after Story 9.2) and isn't caused by this change, so it's not this story's fix to make.
