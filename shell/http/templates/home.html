@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_empty_state.html" import empty_state %}
 {% block title %}Home — astro-report{% endblock %}
 {% block page_header %}
       <div class="page-header">
@@ -36,10 +37,7 @@
           {% endfor %}
         </ul>
         {% else %}
-        <p class="dash-runs__empty">
-          Nessun report avviato.
-          <a href="/clients">Vai a Clienti per avviarne uno</a>
-        </p>
+        {{ empty_state("Nessun report avviato.", "/clients", "Vai a Clienti per avviarne uno") }}
         {% endif %}
       </section>
 

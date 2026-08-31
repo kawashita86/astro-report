@@ -50,6 +50,7 @@ from shell.http.auth import (
     sign_session,
     verify_password,
 )
+from shell.http.flash import FlashClearMiddleware
 from shell.sections import load_sections_config
 
 __all__ = [
@@ -144,6 +145,7 @@ def create_app(settings: Settings) -> FastAPI:
     application.state.ephemeris_identity = ephemeris_identity
     application.state.gate_vocabulary = gate_vocabulary
     application.add_middleware(AuthMiddleware)
+    application.add_middleware(FlashClearMiddleware)
     application.include_router(clients_router)
     application.include_router(chart_router)
     application.include_router(report_runs_router)

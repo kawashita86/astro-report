@@ -56,6 +56,7 @@ from shell.http.draft_view import (
     deserialize_generated_draft,
     render_draft,
 )
+from shell.http.flash import _flash_context_processor, set_flash
 from shell.http.payload_view import localize_payload
 from shell.http.report_markdown import render_report_markdown
 from shell.http.stage_view import build_stage_track, stage_caption, violation_kind_label
@@ -67,7 +68,9 @@ __all__ = ["get_generator", "router"]
 router = APIRouter()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+_templates = Jinja2Templates(
+    directory=_TEMPLATES_DIR, context_processors=[_flash_context_processor]
+)
 
 #: "YYYY-MM", zero-padded -- the one shape ``shell/runner/month.py``'s
 #: ``client_month_interval_utc`` is contracted to accept. Checked here so a
@@ -298,6 +301,7 @@ def _advance_run(
 @router.post("/clients/{client_id}/report-runs", include_in_schema=False)
 def start_report_run(
     client_id: UUID,
+    request: Request,
     month: str = Form(...),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -321,7 +325,14 @@ def start_report_run(
     session.add(run)
     session.commit()
 
-    return RedirectResponse(f"/report-runs/{run.id}", status_code=303)
+    response = RedirectResponse(f"/report-runs/{run.id}", status_code=303)
+    set_flash(
+        response,
+        "success",
+        "Report avviato.",
+        environment=request.app.state.settings.environment,
+    )
+    return response
 
 
 @router.get("/report-runs/{run_id}", include_in_schema=False)
@@ -359,7 +370,9 @@ def poll_report_run(
 
 
 @router.post("/report-runs/{run_id}/regenerate", include_in_schema=False)
-def regenerate_report_run(run_id: UUID, session: Session = Depends(get_session)) -> Response:
+def regenerate_report_run(
+    run_id: UUID, request: Request, session: Session = Depends(get_session)
+) -> Response:
     """Rewind a Gate-failed run to ``payload_ready`` for one more real
     regeneration attempt (Story 9.5) -- a shell-only recovery route, not a
     stage advance: it never calls ``advance()`` itself, mirroring
@@ -398,7 +411,14 @@ def regenerate_report_run(run_id: UUID, session: Session = Depends(get_session))
     session.add(run)
     session.commit()
 
-    return RedirectResponse(f"/report-runs/{run_id}", status_code=303)
+    response = RedirectResponse(f"/report-runs/{run_id}", status_code=303)
+    set_flash(
+        response,
+        "success",
+        "Rigenerazione avviata.",
+        environment=request.app.state.settings.environment,
+    )
+    return response
 
 
 @router.get("/report-runs/{run_id}/payload", include_in_schema=False)
@@ -715,6 +735,7 @@ def download_report_markdown(
 @router.post("/report-runs/{run_id}/export/disposition", include_in_schema=False)
 def record_export_disposition(
     run_id: UUID,
+    request: Request,
     disposition: str = Form(...),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -745,4 +766,11 @@ def record_export_disposition(
     record_send_disposition(session, run_id=run_id, disposition=disposition)
     session.commit()
 
-    return RedirectResponse(f"/report-runs/{run_id}/report", status_code=303)
+    response = RedirectResponse(f"/report-runs/{run_id}/report", status_code=303)
+    set_flash(
+        response,
+        "success",
+        "Esito di invio registrato.",
+        environment=request.app.state.settings.environment,
+    )
+    return response

@@ -213,7 +213,7 @@ def test_no_runs_shows_the_one_line_empty_state_and_still_the_quick_actions(
     # Review item 7 -- the empty state carries one onward action of its own,
     # in addition to the quick-action link to the same place.
     assert body.count('href="/clients"') >= 2
-    empty_block = body.split('class="dash-runs__empty"', 1)[1].split("</p>", 1)[0]
+    empty_block = body.split("Nessun report avviato.", 1)[1].split("</div>", 1)[0]
     assert 'href="/clients"' in empty_block
 
 

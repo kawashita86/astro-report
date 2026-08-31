@@ -32,6 +32,7 @@ from sqlmodel import Session, select
 from shell.adapters.postgres.client import Client, list_clients
 from shell.adapters.postgres.corpus_entry import add_corpus_entry, list_corpus_entries
 from shell.http.app import get_session
+from shell.http.flash import _flash_context_processor, set_flash
 from shell.http.form import FormNotUtf8, FormTooLarge, parse_form
 
 __all__ = ["router"]
@@ -39,7 +40,9 @@ __all__ = ["router"]
 router = APIRouter()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+_templates = Jinja2Templates(
+    directory=_TEMPLATES_DIR, context_processors=[_flash_context_processor]
+)
 
 #: Whole-body ceiling on the POST /corpus body. A pasted past report is
 #: prose -- sized exactly like
@@ -234,4 +237,11 @@ async def add_corpus(request: Request, session: Session = Depends(get_session)) 
         month=linked_month,
     )
     session.commit()
-    return RedirectResponse("/corpus", status_code=303)
+    response = RedirectResponse("/corpus", status_code=303)
+    set_flash(
+        response,
+        "success",
+        "Voce aggiunta.",
+        environment=request.app.state.settings.environment,
+    )
+    return response

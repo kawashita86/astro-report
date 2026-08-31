@@ -501,6 +501,21 @@ h3 {
   .stage-track__node--active .stage-track__dot {
     animation: none;
   }
+
+  /* Story 9.8: the toast slide-in, the skeleton shimmer, and the spinner
+     spin all stop -- every element stays visible and functional, just
+     static. */
+  .toast {
+    animation: none;
+  }
+
+  .skeleton::after {
+    animation: none;
+  }
+
+  .spinner {
+    animation: none;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -596,18 +611,6 @@ h3 {
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.dash-runs__empty {
-  margin: 0;
-  padding: var(--space-md) var(--space-base);
-  color: var(--ink-secondary);
-}
-
-.dash-runs__empty a {
-  display: inline-block;
-  min-height: var(--space-lg);
-  padding: var(--space-xs) 0;
 }
 
 .dash-run {
@@ -1536,4 +1539,205 @@ button.badge-mono {
   font-size: var(--font-small-size);
   text-decoration: underline;
   cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+ * PROVISIONAL — Story 9.8 (Feedback and state primitives: toasts, loaders,
+ * empty states, inline errors). Minimal component styling for the toast
+ * queue, the skeleton/spinner loading primitives, and the shared flash
+ * banner's own dismiss control -- plus `.banner--success`, since no route
+ * ever rendered a success banner before this story. Reuses `.banner`/
+ * `.banner--warning`/`.banner--danger`/`.banner--info`, `.btn*`, `.field`/
+ * `.field--invalid`/`.field__error`, `.list-empty` verbatim from prior
+ * stories. Semantic tokens only; contrast holds in both themes (toast/banner
+ * tint fills >= 3:1 non-text, their body text >= 4.5:1). Do not build on the
+ * exact class names here.
+ * ------------------------------------------------------------------------- */
+
+/* Success banner variant -- mirrors `.banner--warning`/`.banner--danger`/
+   `.banner--info` with the success role. */
+.banner--success {
+  background: var(--success-surface);
+  border-left-color: var(--success);
+  color: var(--ink-primary);
+}
+
+/* Form-lock (`shell.js` job 13, `[data-submit-lock]` forms) -- never the
+   native `disabled` attribute on a field whose value must reach the server
+   in that same submission (it would silently drop it). */
+.field.is-locked {
+  pointer-events: none;
+}
+
+/* Field-error summary links -- one per failed field, inside the existing
+   `.banner--danger` form-error banner (`client_new.html`/`client_edit.html`). */
+.banner__links {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-base);
+}
+
+.banner__links a {
+  color: var(--danger);
+  font-weight: var(--font-label-weight);
+  text-decoration: underline;
+}
+
+/* The shared flash banner's own close control (`base.html`). A generic
+   `.banner` may also carry one via `shell.js`'s delegated dismiss handler. */
+.banner__dismiss {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.banner__dismiss:hover {
+  background: var(--surface-sunken);
+}
+
+/* Toast region -- fixed to the viewport, stacked bottom-right, above
+   everything else on the page. Empty by default; `shell.js`'s toast queue
+   (job 11) and the `[data-flash]` -> toast promotion (job 12) populate it. */
+.toast-region {
+  position: fixed;
+  z-index: 1000;
+  right: var(--space-lg);
+  bottom: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-width: min(420px, calc(100vw - 2 * var(--space-lg)));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  padding: var(--space-md) var(--space-base);
+  margin: 0;
+  border-radius: var(--radius-md);
+  border-left: 3px solid;
+  box-shadow: var(--elevation-overlay);
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-line);
+  pointer-events: auto;
+  animation: toast-slide-in 0.2s ease-out;
+}
+
+.toast--success {
+  background: var(--success-surface);
+  border-left-color: var(--success);
+  color: var(--ink-primary);
+}
+
+.toast--warning {
+  background: var(--warning-surface);
+  border-left-color: var(--warning);
+  color: var(--ink-primary);
+}
+
+.toast--danger {
+  background: var(--danger-surface);
+  border-left-color: var(--danger);
+  color: var(--ink-primary);
+}
+
+.toast__text {
+  flex: 1 1 auto;
+}
+
+.toast__close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toast__close:hover {
+  background: var(--surface-sunken);
+}
+
+@keyframes toast-slide-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Skeleton -- a shimmering placeholder block. Primitive only in this story
+   (Boundaries: no template has a genuinely unknown-content load to wire it
+   to yet). */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Spinner -- a small inline loading ring. Used inside a locked submit
+   button's own label (`shell.js` job 13, `[data-submit-lock]` forms). */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: var(--space-xs);
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--radius-full);
+  animation: spinner-spin 0.6s linear infinite;
+  vertical-align: -2px;
+}
+
+@keyframes spinner-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

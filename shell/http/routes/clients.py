@@ -58,6 +58,7 @@ from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_run import ReportRun
 from shell.http.app import get_session
 from shell.http.auth import log_client_deleted
+from shell.http.flash import _flash_context_processor
 from shell.http.form import FormNotUtf8, FormTooLarge, parse_form
 from shell.ports.geocoder import Geocoder
 
@@ -66,7 +67,9 @@ __all__ = ["get_geocoder", "router"]
 router = APIRouter()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+_templates = Jinja2Templates(
+    directory=_TEMPLATES_DIR, context_processors=[_flash_context_processor]
+)
 
 #: The form fields every submission must carry, non-blank -- no partial
 #: submission accepted (AC1).
@@ -142,11 +145,17 @@ def _render_form(
     error: str | None = None,
     form: dict[str, str] | None = None,
     candidates: list[PlaceCandidate] | None = None,
+    field_errors: dict[str, str] | None = None,
 ) -> Response:
     return _templates.TemplateResponse(
         request,
         "client_new.html",
-        {"error": error, "form": form or {}, "candidates": _candidate_context(candidates)},
+        {
+            "error": error,
+            "form": form or {},
+            "candidates": _candidate_context(candidates),
+            "field_errors": field_errors,
+        },
         status_code=status_code,
     )
 
@@ -161,6 +170,7 @@ def _render_edit_form(
     form: dict[str, str] | None = None,
     candidates: list[PlaceCandidate] | None = None,
     warning: bool = False,
+    field_errors: dict[str, str] | None = None,
 ) -> Response:
     return _templates.TemplateResponse(
         request,
@@ -173,6 +183,7 @@ def _render_edit_form(
             "form": form or {},
             "candidates": _candidate_context(candidates),
             "warning": warning,
+            "field_errors": field_errors,
             # Presentation-only (Story 9.4): decides whether the delete modal
             # and the no-JS confirm page name the retained superseded chart.
             "has_superseded_chart": _has_superseded_chart(session, client.id),
@@ -293,6 +304,7 @@ async def create_client(
             status_code=422,
             error=f"Required: {', '.join(missing)}.",
             form=fields,
+            field_errors={field: "This field is required." for field in missing},
         )
 
     if len(fields["name"]) > _MAX_NAME_LENGTH:
@@ -301,6 +313,7 @@ async def create_client(
             status_code=422,
             error=f"name must be at most {_MAX_NAME_LENGTH} characters.",
             form=fields,
+            field_errors={"name": f"name must be at most {_MAX_NAME_LENGTH} characters."},
         )
 
     try:
@@ -311,6 +324,7 @@ async def create_client(
             status_code=422,
             error=f"birth_date is invalid: {error}",
             form=fields,
+            field_errors={"birth_date": f"birth_date is invalid: {error}"},
         )
 
     try:
@@ -321,6 +335,7 @@ async def create_client(
             status_code=422,
             error=f"birth_time is invalid: {error}",
             form=fields,
+            field_errors={"birth_time": f"birth_time is invalid: {error}"},
         )
 
     birth_local_time = datetime.combine(birth_date, birth_time)
@@ -337,13 +352,20 @@ async def create_client(
                 return _render_form(request, status_code=200, form=fields, candidates=resolution)
             resolved = resolution
     except PlaceResolutionError as error:
-        return _render_form(request, status_code=422, error=str(error), form=fields)
+        return _render_form(
+            request,
+            status_code=422,
+            error=str(error),
+            form=fields,
+            field_errors={"birthplace": str(error)},
+        )
     except _CANDIDATE_DECODE_ERRORS as error:
         return _render_form(
             request,
             status_code=422,
             error=f"the chosen birthplace candidate is invalid: {error}",
             form=fields,
+            field_errors={"birthplace": f"the chosen birthplace candidate is invalid: {error}"},
         )
 
     birth_instant_utc = (birth_local_time - resolved.utc_offset).replace(tzinfo=UTC)
@@ -356,6 +378,9 @@ async def create_client(
             birth_instant_utc, resolved.latitude, resolved.longitude, computation_config
         )
     except (ValueError, EphemerisIntegrityError) as error:
+        # Not field-attributable: no field on this form maps to "the
+        # ephemeris computation itself failed" -- stays a form-level-only
+        # message, unchanged (this story's I/O & Edge-Case Matrix).
         return _render_form(request, status_code=422, error=str(error), form=fields)
 
     client = create_client_with_chart(
@@ -370,17 +395,25 @@ async def create_client(
     )
     session.commit()
 
-    # A minimal HTML fragment, not plain text: keeps the "created." wording
-    # the two success tests assert on and adds a link straight to the new
-    # Client's chart-verification view (epic-2-retro-item-14) -- an inline
-    # anchor, not a redirect, so the response stays 200 and still names the
-    # outcome (a 303 would be followed to the SVG page and lose both).
-    return Response(
-        content=(
-            f"Client {client.id} created. "
-            f'<a href="/clients/{client.id}/chart">View chart</a>'
-        ),
-        media_type="text/html",
+    # A real template, not a bare fragment (Story 9.8 closes Story 9.4's
+    # deferral): keeps the exact "created." wording the success tests assert
+    # on and the same link straight to the new Client's chart-verification
+    # view (epic-2-retro-item-14) -- still a 200, not a redirect (a 303 to
+    # the SVG page would be followed and lose the outcome) -- now delivered
+    # inside base.html's chrome, with the success message riding as `flash`
+    # in the template context rather than a fourth, bespoke delivery path.
+    # `flash.message` is plain text, escaped like any other Jinja variable;
+    # the chart link is `client_action_result.html`'s own markup, driven by
+    # `chart_href`, never HTML smuggled through the flash message.
+    return _templates.TemplateResponse(
+        request,
+        "client_action_result.html",
+        {
+            "flash": {"kind": "success", "message": f"Client {client.id} created."},
+            "chart_href": f"/clients/{client.id}/chart",
+            "heading": "Clienti",
+        },
+        status_code=200,
     )
 
 
@@ -456,6 +489,7 @@ async def correct_client(
             status_code=422,
             error=f"Required: {', '.join(missing)}.",
             form=fields,
+            field_errors={field: "This field is required." for field in missing},
         )
 
     if len(fields["name"]) > _MAX_NAME_LENGTH:
@@ -466,6 +500,7 @@ async def correct_client(
             status_code=422,
             error=f"name must be at most {_MAX_NAME_LENGTH} characters.",
             form=fields,
+            field_errors={"name": f"name must be at most {_MAX_NAME_LENGTH} characters."},
         )
 
     try:
@@ -478,6 +513,7 @@ async def correct_client(
             status_code=422,
             error=f"birth_date is invalid: {error}",
             form=fields,
+            field_errors={"birth_date": f"birth_date is invalid: {error}"},
         )
 
     try:
@@ -490,6 +526,7 @@ async def correct_client(
             status_code=422,
             error=f"birth_time is invalid: {error}",
             form=fields,
+            field_errors={"birth_time": f"birth_time is invalid: {error}"},
         )
 
     birth_local_time = datetime.combine(birth_date, birth_time)
@@ -520,6 +557,7 @@ async def correct_client(
             status_code=422,
             error=str(error),
             form=fields,
+            field_errors={"birthplace": str(error)},
         )
     except _CANDIDATE_DECODE_ERRORS as error:
         return _render_edit_form(
@@ -529,6 +567,7 @@ async def correct_client(
             status_code=422,
             error=f"the chosen birthplace candidate is invalid: {error}",
             form=fields,
+            field_errors={"birthplace": f"the chosen birthplace candidate is invalid: {error}"},
         )
 
     # Commit right after a successful resolve (via `resolve()` or
@@ -556,6 +595,8 @@ async def correct_client(
             birth_instant_utc, resolved.latitude, resolved.longitude, computation_config
         )
     except (ValueError, EphemerisIntegrityError) as error:
+        # Not field-attributable, mirrors create_client's own chart-
+        # computation failure -- stays a form-level-only message.
         return _render_edit_form(
             request,
             client=client,
@@ -591,15 +632,18 @@ async def correct_client(
     )
     session.commit()
 
-    # See create_client: a minimal HTML fragment keeping the "corrected."
-    # wording plus an inline link to the chart view (epic-2-retro-item-14),
-    # not a redirect.
-    return Response(
-        content=(
-            f"Client {client.id} corrected. "
-            f'<a href="/clients/{client.id}/chart">View chart</a>'
-        ),
-        media_type="text/html",
+    # See create_client: a real template keeping the exact "corrected."
+    # wording plus the same link to the chart view (epic-2-retro-item-14),
+    # still a 200, not a redirect.
+    return _templates.TemplateResponse(
+        request,
+        "client_action_result.html",
+        {
+            "flash": {"kind": "success", "message": f"Client {client.id} corrected."},
+            "chart_href": f"/clients/{client.id}/chart",
+            "heading": "Clienti",
+        },
+        status_code=200,
     )
 
 
@@ -674,7 +718,19 @@ async def delete_client(
     session.commit()
     log_client_deleted(client_id)
 
-    return Response(content=f"Client {client_id} deleted.", media_type="text/plain")
+    # See create_client: a real template keeping the exact "deleted."
+    # wording, still a 200, not a redirect. No chart link -- the Client
+    # (and every chart it had) no longer exists to link to.
+    return _templates.TemplateResponse(
+        request,
+        "client_action_result.html",
+        {
+            "flash": {"kind": "success", "message": f"Client {client_id} deleted."},
+            "chart_href": None,
+            "heading": "Clienti",
+        },
+        status_code=200,
+    )
 
 
 def _backup_is_stale(session: Session) -> bool:

@@ -36,6 +36,7 @@ from shell.adapters.postgres.style_guide import (
     current_style_guide,
 )
 from shell.http.app import get_session
+from shell.http.flash import _flash_context_processor, set_flash
 from shell.http.form import FormNotUtf8, FormTooLarge, parse_form
 
 __all__ = ["router"]
@@ -43,7 +44,9 @@ __all__ = ["router"]
 router = APIRouter()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+_templates = Jinja2Templates(
+    directory=_TEMPLATES_DIR, context_processors=[_flash_context_processor]
+)
 
 #: A generous ceiling on the /style-guide/edit POST body. The Style Guide
 #: itself (see data/style-guide.seed.md) runs to several thousand words of
@@ -163,7 +166,14 @@ async def save_style_guide(
             status_code=409,
         )
 
-    return RedirectResponse(f"/style-guide/{style_guide.version}", status_code=303)
+    response = RedirectResponse(f"/style-guide/{style_guide.version}", status_code=303)
+    set_flash(
+        response,
+        "success",
+        "Nuova versione salvata.",
+        environment=request.app.state.settings.environment,
+    )
+    return response
 
 
 @router.get("/style-guide/{version}", include_in_schema=False)

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_empty_state.html" import empty_state %}
 {% block title %}Reports — {{ client.name }} — astro-report{% endblock %}
 {% block page_header %}{% include "_client_tabs.html" %}{% endblock %}
 {% block content %}
@@ -23,6 +24,6 @@
         {% endfor %}
       </ul>
       {% else %}
-      <p>No Reports yet for this Client.</p>
+      {{ empty_state("Nessun report per " + client.name + ".", "/clients", "Vai a Clienti") }}
       {% endif %}
 {% endblock %}

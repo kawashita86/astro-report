@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_empty_state.html" import empty_state %}
 {% block title %}Corpus — astro-report{% endblock %}
 {% block page_header %}
       <div class="page-header">
@@ -43,9 +44,6 @@
         {% endfor %}
       </ul>
       {% else %}
-      <div class="list-empty">
-        <p>Nessun report passato è stato ancora aggiunto.</p>
-        <a class="page-header__action" href="/corpus/new">Aggiungi il primo</a>
-      </div>
+      {{ empty_state("Nessun report passato è stato ancora aggiunto.", "/corpus/new", "Aggiungi il primo") }}
       {% endif %}
 {% endblock %}

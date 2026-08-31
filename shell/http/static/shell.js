@@ -1,8 +1,8 @@
 /*
  * astro-report application-shell behaviour — first-party, no dependencies.
  *
- * Ten jobs, all progressive enhancements over a shell that already works
- * without JavaScript:
+ * Thirteen jobs, all progressive enhancements over a shell that already
+ * works without JavaScript:
  *
  *   1. Theme toggle — flip `data-theme` on <html>, persist the choice to
  *      localStorage (wrapped in try/catch: a private window or blocked storage
@@ -36,16 +36,31 @@
  *      focusable `role="alert"` `.banner--danger` so a keyboard / screen
  *      reader user lands on the error.
  *
- *   6. Report-run stage view (Story 9.5) — pause the `#run-status` HTMX poll
- *      while the tab is hidden (`document.hidden`), so a backgrounded tab
- *      never spends a request; reveal the inline `[data-poll-error]`
- *      `role="alert"` banner on `htmx:responseError` / `htmx:sendError` from
- *      that region, and hide it again once a poll succeeds. The polling
- *      cadence and stop condition are still server-driven (the `hx-*`
- *      attributes render only while `poll_active` is true,
- *      `shell/http/templates/report_run_poll.html`) — this job only pauses/
- *      resumes the already-present trigger and surfaces a transient network
- *      failure; it starts no timer of its own.
+ *   6. Report-run stage view (Story 9.5, extended by Story 9.8) — pause the
+ *      `#run-status` HTMX poll while the tab is hidden (`document.hidden`),
+ *      so a backgrounded tab never spends a request; reveal the inline
+ *      `[data-poll-error]` `role="alert"` banner on `htmx:responseError` /
+ *      `htmx:sendError` from that region, and hide it again once a poll
+ *      succeeds. The polling cadence and stop condition are still
+ *      server-driven (the `hx-*` attributes render only while `poll_active`
+ *      is true, `shell/http/templates/report_run_poll.html`) — this job
+ *      only pauses/resumes the already-present `every 2s` trigger; it
+ *      starts no timer of its own.
+ *
+ *      Story 9.8 adds backoff on top: each consecutive poll failure gates
+ *      the *next automatic* tick behind a growing delay (5s after the 1st
+ *      failure, 15s after the 2nd and every one after that) by vetoing
+ *      `htmx:beforeRequest` for ticks that land before that gate opens —
+ *      the same `event.preventDefault()` shape the hidden-tab pause above
+ *      already uses, never a change to the `every 2s` attribute itself
+ *      (AD-20's server semantics, and `report_run_poll.html`'s own polling
+ *      cadence, are untouched). `[data-poll-retry]` (`Riprova`) appears once
+ *      the 2nd failure lands and, on click, dispatches a `poll-retry` event
+ *      on `document.body` — the extended `hx-trigger`
+ *      (`every 2s, poll-retry from:body`) fires an immediate request for
+ *      it, which this job's gate always lets through (an operator-requested
+ *      retry is never itself throttled). A success resets the failure count
+ *      and the gate, and hides `Riprova` again.
  *
  *   7. Regenerate-confirm modal (Story 9.5) — intercept the Gate-failure
  *      panel's `[data-regen-trigger]` button on `/draft`, open the inline
@@ -92,6 +107,31 @@
  *      text stays in the DOM -- readable, selectable, screen-reader visible,
  *      just visually clamped to 6 lines with no toggle -- per the epic's
  *      "JS only upgrades ... in-place disclosure" rule.
+ *
+ *   11. Toast queue (Story 9.8) — `showToast(kind, message)` appends a
+ *      `.toast` into `[data-toast-region]` (`base.html`, fixed to the
+ *      viewport). FIFO-capped at 3: a 4th queued toast dismisses the oldest
+ *      first. A `"success"` toast auto-dismisses after ~5s, pausing that
+ *      timer on `mouseenter` and resuming the remaining time on
+ *      `mouseleave`; `"warning"`/`"danger"` toasts never auto-dismiss and
+ *      carry their own `.toast__close` button instead.
+ *
+ *   12. `[data-flash]` → toast promotion (Story 9.8) — on load, if the
+ *      shared flash banner (`base.html`) is present, read its kind/message
+ *      and hand them to `showToast` (job 11), then hide the plain banner —
+ *      the JS-enhanced experience is the toast; without JS the banner
+ *      itself is what's shown (still dismissible via a delegated click
+ *      listener on every `.banner__dismiss`, this job's other half, which
+ *      covers the flash banner and any other `.banner` that grows one).
+ *
+ *   13. Submit-button lock + spinner (Story 9.8) — on submit, every
+ *      `[data-submit-lock]` form disables its own `button[type="submit"]`
+ *      and gives it a `.spinner`, and marks every descendant `.field` both
+ *      `aria-disabled` and locked via CSS `pointer-events: none` — never
+ *      the native `disabled` attribute on a field itself, which would drop
+ *      that field's value from the very submission already in flight. The
+ *      lock is one-way for the lifetime of the page: a 422 re-render is a
+ *      fresh page load, which starts unlocked again.
  *
  * All shell transitions are disabled by tokens.css under
  * `prefers-reduced-motion`; this file adds no scripted animation.
@@ -478,19 +518,56 @@
     errorSummary.focus();
   }
 
-  /* ---- 6. Report-run stage view (Story 9.5) ------------------------------ */
+  /* ---- 6. Report-run stage view (Story 9.5, backoff added Story 9.8) ----- */
 
-  // The poll region's own `hx-trigger="every 2s"` only renders while the run
-  // is still advanceable (`poll_active`, `report_run_poll.html`); this job
-  // pauses that already-present trigger while the tab is hidden, rather than
-  // starting a timer of its own — `document.hidden` is re-checked on every
-  // tick htmx would otherwise fire on.
+  //: 5s after the 1st consecutive poll failure, 15s from the 2nd onward —
+  //: this story's I/O & Edge-Case Matrix ("Poll fails once, then twice").
+  var POLL_BACKOFF_MS_FIRST = 5000;
+  var POLL_BACKOFF_MS_SUBSEQUENT = 15000;
+  //: How many consecutive failures before `[data-poll-retry]` (`Riprova`)
+  //: is revealed.
+  var POLL_RETRY_VISIBLE_AT_FAILURE = 2;
+
+  var pollBackoff = { failureCount: 0, nextAllowedAt: 0 };
+
+  function isRunStatusElt(elt) {
+    if (!elt) {
+      return false;
+    }
+    return elt.id === "run-status" || (elt.closest && !!elt.closest("#run-status"));
+  }
+
+  // The poll region's own `hx-trigger="every 2s, poll-retry from:body"` only
+  // renders while the run is still advanceable (`poll_active`,
+  // `report_run_poll.html`); this job pauses/gates that already-present
+  // trigger, rather than starting a timer of its own or touching the
+  // trigger's cadence.
   document.body.addEventListener("htmx:beforeRequest", function (event) {
     var elt = event.detail && event.detail.elt;
-    if (!elt || !document.hidden) {
+    if (!isRunStatusElt(elt)) {
       return;
     }
-    if (elt.id === "run-status" || (elt.closest && elt.closest("#run-status"))) {
+
+    // Paused while the tab is hidden — `document.hidden` is re-checked on
+    // every tick htmx would otherwise fire on.
+    if (document.hidden) {
+      event.preventDefault();
+      return;
+    }
+
+    // A manual `Riprova` click (job below) dispatches its own `poll-retry`
+    // event on `document.body`; the request it triggers always fires
+    // immediately, bypassing the backoff gate below — an operator-requested
+    // retry is never itself throttled.
+    var requestConfig = event.detail.requestConfig;
+    var triggeringEvent = requestConfig && requestConfig.triggeringEvent;
+    if (triggeringEvent && triggeringEvent.type === "poll-retry") {
+      return;
+    }
+
+    // The backoff gate on the automatic `every 2s` tick: vetoed until
+    // `pollBackoff.nextAllowedAt` has passed.
+    if (Date.now() < pollBackoff.nextAllowedAt) {
       event.preventDefault();
     }
   });
@@ -506,18 +583,44 @@
     return region ? region.querySelector("[data-poll-error]") : null;
   }
 
-  document.body.addEventListener("htmx:responseError", function (event) {
-    var banner = pollErrorBanner(event.detail && event.detail.target);
+  function pollRetryButton(elt) {
+    if (!elt || !elt.querySelector) {
+      return null;
+    }
+    if (elt.id === "run-status") {
+      return elt.querySelector("[data-poll-retry]");
+    }
+    var region = elt.closest ? elt.closest("#run-status") : null;
+    return region ? region.querySelector("[data-poll-retry]") : null;
+  }
+
+  function onPollFailure(elt) {
+    var banner = pollErrorBanner(elt);
     if (banner) {
       banner.hidden = false;
     }
+
+    pollBackoff.failureCount += 1;
+    var delayMs =
+      pollBackoff.failureCount >= POLL_RETRY_VISIBLE_AT_FAILURE
+        ? POLL_BACKOFF_MS_SUBSEQUENT
+        : POLL_BACKOFF_MS_FIRST;
+    pollBackoff.nextAllowedAt = Date.now() + delayMs;
+
+    if (pollBackoff.failureCount >= POLL_RETRY_VISIBLE_AT_FAILURE) {
+      var retryButton = pollRetryButton(elt);
+      if (retryButton) {
+        retryButton.hidden = false;
+      }
+    }
+  }
+
+  document.body.addEventListener("htmx:responseError", function (event) {
+    onPollFailure(event.detail && event.detail.target);
   });
 
   document.body.addEventListener("htmx:sendError", function (event) {
-    var banner = pollErrorBanner(event.detail && event.detail.elt);
-    if (banner) {
-      banner.hidden = false;
-    }
+    onPollFailure(event.detail && event.detail.elt);
   });
 
   document.body.addEventListener("htmx:afterOnLoad", function (event) {
@@ -525,10 +628,32 @@
     if (!xhr || xhr.status < 200 || xhr.status >= 300) {
       return;
     }
-    var banner = pollErrorBanner(event.detail && event.detail.elt);
+    var elt = event.detail && event.detail.elt;
+    var banner = pollErrorBanner(elt);
     if (banner) {
       banner.hidden = true;
     }
+    var retryButton = pollRetryButton(elt);
+    if (retryButton) {
+      retryButton.hidden = true;
+    }
+    pollBackoff.failureCount = 0;
+    pollBackoff.nextAllowedAt = 0;
+  });
+
+  // The `Riprova` click itself: dispatched on `document.body`, matching the
+  // `poll-retry from:body` trigger — listening on `body` rather than
+  // `#run-status` survives that element being replaced wholesale by every
+  // `hx-swap="outerHTML"` poll response.
+  document.body.addEventListener("click", function (event) {
+    var button =
+      event.target && event.target.closest
+        ? event.target.closest("[data-poll-retry]")
+        : null;
+    if (!button) {
+      return;
+    }
+    document.body.dispatchEvent(new CustomEvent("poll-retry"));
   });
 
   /* ---- 7. Regenerate-confirm modal (Story 9.5) --------------------------- */
@@ -721,5 +846,174 @@
     var expanded = text.classList.toggle("is-expanded");
     button.setAttribute("aria-expanded", expanded ? "true" : "false");
     button.textContent = expanded ? "Comprimi" : "Espandi";
+  });
+
+  /* ---- 11. Toast queue (Story 9.8) --------------------------------------- */
+
+  var TOAST_MAX = 3;
+  var TOAST_SUCCESS_MS = 5000;
+
+  var toastRegion = document.querySelector("[data-toast-region]");
+  var toastQueue = [];
+
+  function dismissToast(entry) {
+    if (!entry || entry.dismissed) {
+      return;
+    }
+    entry.dismissed = true;
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+      entry.timer = null;
+    }
+    var index = toastQueue.indexOf(entry);
+    if (index !== -1) {
+      toastQueue.splice(index, 1);
+    }
+    if (entry.el && entry.el.parentNode) {
+      entry.el.parentNode.removeChild(entry.el);
+    }
+  }
+
+  function scheduleToastAutoDismiss(entry) {
+    if (entry.kind !== "success") {
+      return;
+    }
+    if (entry.remainingMs == null) {
+      entry.remainingMs = TOAST_SUCCESS_MS;
+    }
+    entry.startedAt = Date.now();
+    entry.timer = setTimeout(function () {
+      dismissToast(entry);
+    }, entry.remainingMs);
+  }
+
+  function showToast(kind, message) {
+    if (!toastRegion || !message) {
+      return null;
+    }
+
+    // FIFO cap: a 4th queued toast dismisses the oldest first.
+    while (toastQueue.length >= TOAST_MAX) {
+      dismissToast(toastQueue[0]);
+    }
+
+    var el = document.createElement("p");
+    el.className = "toast toast--" + kind;
+    el.setAttribute("role", kind === "success" ? "status" : "alert");
+
+    var text = document.createElement("span");
+    text.className = "toast__text";
+    text.textContent = message;
+    el.appendChild(text);
+
+    var entry = {
+      el: el,
+      kind: kind,
+      timer: null,
+      dismissed: false,
+      remainingMs: null,
+      startedAt: 0,
+    };
+
+    if (kind === "success") {
+      // Hover pauses the auto-dismiss countdown; leaving resumes it with
+      // whatever time was left, never a fresh 5s.
+      el.addEventListener("mouseenter", function () {
+        if (entry.timer) {
+          clearTimeout(entry.timer);
+          entry.timer = null;
+          entry.remainingMs = Math.max(0, entry.remainingMs - (Date.now() - entry.startedAt));
+        }
+      });
+      el.addEventListener("mouseleave", function () {
+        scheduleToastAutoDismiss(entry);
+      });
+      scheduleToastAutoDismiss(entry);
+    } else {
+      // warning/danger persist until explicitly closed.
+      var close = document.createElement("button");
+      close.type = "button";
+      close.className = "toast__close";
+      close.setAttribute("aria-label", "Chiudi");
+      close.textContent = "×";
+      close.addEventListener("click", function () {
+        dismissToast(entry);
+      });
+      el.appendChild(close);
+    }
+
+    toastQueue.push(entry);
+    toastRegion.appendChild(el);
+    return entry;
+  }
+
+  /* ---- 12. [data-flash] -> toast promotion; generic banner dismiss ------- */
+
+  function flashMessageText(banner) {
+    // Only the banner's own direct text nodes -- not the `.banner__dismiss`
+    // button's "×" label -- mirrors `base.html`'s markup, where the message
+    // is a bare text node immediately followed by that button.
+    var text = "";
+    for (var i = 0; i < banner.childNodes.length; i++) {
+      var node = banner.childNodes[i];
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.textContent;
+      }
+    }
+    return text.trim();
+  }
+
+  var flashBanner = document.querySelector("[data-flash]");
+  if (flashBanner) {
+    var flashKind = flashBanner.getAttribute("data-flash-kind") || "success";
+    showToast(flashKind, flashMessageText(flashBanner));
+    // The JS-enhanced experience is the toast; without JS the banner itself
+    // is what's shown.
+    flashBanner.hidden = true;
+  }
+
+  // Delegated so it covers the flash banner and any other `.banner` that
+  // grows a `.banner__dismiss` control later.
+  document.body.addEventListener("click", function (event) {
+    var dismissButton =
+      event.target && event.target.closest
+        ? event.target.closest(".banner__dismiss")
+        : null;
+    if (!dismissButton) {
+      return;
+    }
+    var banner = dismissButton.closest(".banner");
+    if (banner) {
+      banner.hidden = true;
+    }
+  });
+
+  /* ---- 13. Submit-button lock + spinner (Story 9.8) ----------------------- */
+
+  var lockForms = Array.prototype.slice.call(
+    document.querySelectorAll("[data-submit-lock]")
+  );
+  lockForms.forEach(function (form) {
+    form.addEventListener("submit", function () {
+      var submitButton = form.querySelector('button[type="submit"]');
+      if (submitButton && !submitButton.disabled) {
+        submitButton.disabled = true;
+        submitButton.setAttribute("aria-busy", "true");
+        var spinner = document.createElement("span");
+        spinner.className = "spinner";
+        spinner.setAttribute("aria-hidden", "true");
+        submitButton.insertBefore(spinner, submitButton.firstChild);
+      }
+
+      // Never the native `disabled` attribute on a field itself -- it would
+      // silently drop that field's value from the submission already in
+      // flight. `pointer-events: none` (tokens.css) plus `aria-disabled`
+      // does the locking instead.
+      var fields = form.querySelectorAll(".field");
+      Array.prototype.forEach.call(fields, function (field) {
+        field.classList.add("is-locked");
+        field.setAttribute("aria-disabled", "true");
+      });
+    });
   });
 })();

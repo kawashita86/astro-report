@@ -34,13 +34,16 @@ from shell.adapters.postgres.backup_record import backup_is_stale
 from shell.adapters.postgres.client import Client
 from shell.adapters.postgres.report_run import ReportRun
 from shell.http.app import get_session
+from shell.http.flash import _flash_context_processor
 
 __all__ = ["router"]
 
 router = APIRouter()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+_templates = Jinja2Templates(
+    directory=_TEMPLATES_DIR, context_processors=[_flash_context_processor]
+)
 
 #: How many recent runs the dashboard lists, newest-updated first. A named
 #: module constant so the cap is one edit and one thing to assert against.

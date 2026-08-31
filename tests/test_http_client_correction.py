@@ -575,6 +575,9 @@ def test_an_oversized_name_is_refused_naming_it(
 
     assert response.status_code == 422
     assert "name" in response.text
+    assert "field--invalid" in response.text
+    assert 'aria-describedby="name-error"' in response.text
+    assert 'href="#name"' in response.text
 
     db_session.refresh(seeded)
     assert seeded.name == "Ada Lovelace"
@@ -659,6 +662,8 @@ def test_a_chart_computation_failure_is_refused_and_the_old_chart_stays_current(
 
     assert response.status_code == 422
     assert "simulated ephemeris failure" in response.text
+    assert "field--invalid" not in response.text
+    assert "banner__links" not in response.text
     charts = _charts_for(db_session, seeded.id)
     assert len(charts) == 1
     assert charts[0].superseded_at is None

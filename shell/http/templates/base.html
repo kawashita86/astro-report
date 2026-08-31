@@ -95,10 +95,20 @@
         {% endblock %}
         <main id="main-content" class="{% block main_class %}{% endblock %}" tabindex="-1">
           {% block page_header %}{% endblock %}
+          {% if flash %}
+          <p
+            class="banner banner--{{ flash.kind }}"
+            role="{{ 'alert' if flash.kind != 'success' else 'status' }}"
+            data-flash
+            data-flash-kind="{{ flash.kind }}"
+            tabindex="-1"
+          >{{ flash.message }}<button type="button" class="banner__dismiss" aria-label="Chiudi">×</button></p>
+          {% endif %}
           {% block content %}{% endblock %}
         </main>
       </div>
     </div>
+    <div class="toast-region" data-toast-region aria-live="polite" aria-atomic="false"></div>
     <script src="/static/shell.js" defer></script>
   </body>
 </html>

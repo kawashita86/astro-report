@@ -257,6 +257,103 @@ def test_a_full_page_poll_renders_through_base_html() -> None:
     assert "Assemblaggio del Payload" in full_page  # transits_ready's own caption
 
 
+# --- report_run_poll: the backoff/Riprova wiring (Story 9.8) -------------------
+
+
+def test_the_poll_region_carries_the_extended_trigger_and_the_riprova_button() -> None:
+    """Code Map — ``report_run_poll.html`` gains ``poll-retry from:body`` on
+    the existing ``hx-trigger`` (the ``every 2s`` cadence itself is untouched)
+    and a hidden ``[data-poll-retry]`` button beside ``[data-poll-error]``."""
+    fragment = _render_poll(hx_request=True)
+
+    assert 'hx-trigger="every 2s, poll-retry from:body"' in fragment
+    assert "data-poll-retry" in fragment
+    retry_at = fragment.index("data-poll-retry")
+    assert "hidden" in fragment[retry_at : retry_at + 80]
+    assert "Riprova" in fragment
+
+
+# --- tokens.css / shell.js: the toast/skeleton/spinner primitives (Story 9.8) --
+
+
+def test_tokens_css_defines_the_toast_skeleton_and_spinner_primitives() -> None:
+    """Code Map — the ``PROVISIONAL — Story 9.8`` block defines
+    ``.toast-region``/``.toast``, ``.skeleton``, ``.spinner``,
+    ``.banner__dismiss`` and a ``.banner--success`` variant."""
+    css = (_STATIC_DIR / "tokens.css").read_text(encoding="utf-8")
+
+    for selector in (
+        ".toast-region",
+        ".toast {",
+        ".toast--success",
+        ".toast--warning",
+        ".toast--danger",
+        ".toast__close",
+        ".skeleton {",
+        ".spinner {",
+        ".banner__dismiss",
+        ".banner--success",
+    ):
+        assert selector in css, f"tokens.css is missing {selector!r}"
+
+
+def test_reduced_motion_also_kills_the_toast_skeleton_and_spinner_animations() -> None:
+    """Boundaries — the existing ``prefers-reduced-motion`` block
+    (tokens.css:491-504 before this story) is extended to disable the new
+    toast slide-in, skeleton shimmer, and spinner spin animations."""
+    css = (_STATIC_DIR / "tokens.css").read_text(encoding="utf-8")
+
+    rm_block = css.split("@media (prefers-reduced-motion: reduce)", 1)[1]
+    rm_block = rm_block.split("\n}\n", 1)[0]
+    assert ".toast {" in rm_block
+    assert ".skeleton::after {" in rm_block
+    assert ".spinner {" in rm_block
+    assert rm_block.count("animation: none;") >= 4  # stage-track dot + the 3 new ones
+
+
+def test_shell_js_wires_the_poll_backoff_and_manual_retry() -> None:
+    """AC — the backoff gate (5s/15s) and the manual ``Riprova`` retry are
+    wired client-side only: a veto on ``htmx:beforeRequest`` for the
+    already-present ``every 2s`` trigger, never a change to that trigger's
+    own cadence or to any server route."""
+    js = (_STATIC_DIR / "shell.js").read_text(encoding="utf-8")
+
+    assert "5000" in js
+    assert "15000" in js
+    assert "poll-retry" in js
+    assert "pollBackoff" in js
+    assert "[data-poll-retry]" in js
+    assert 'new CustomEvent("poll-retry")' in js
+    assert "htmx:beforeRequest" in js
+
+
+def test_shell_js_wires_the_toast_queue_and_flash_promotion() -> None:
+    """AC — the toast queue (FIFO cap 3, success auto-dismiss ~5s with
+    hover-pause, warning/danger persist with a close control) and the
+    ``[data-flash]`` -> toast promotion on load."""
+    js = (_STATIC_DIR / "shell.js").read_text(encoding="utf-8")
+
+    assert "function showToast(" in js
+    assert "TOAST_MAX = 3" in js
+    assert "mouseenter" in js and "mouseleave" in js
+    assert "[data-flash]" in js
+    assert "data-toast-region" in js
+    assert ".banner__dismiss" in js
+
+
+def test_shell_js_wires_the_submit_lock_without_the_native_disabled_attribute() -> None:
+    """Boundaries — form-lock never sets the native ``disabled`` attribute on
+    a field (it would drop that field's value from the submission); only the
+    submit ``<button>`` is actually disabled, fields are locked via
+    ``aria-disabled`` + CSS ``pointer-events``."""
+    js = (_STATIC_DIR / "shell.js").read_text(encoding="utf-8")
+
+    assert "[data-submit-lock]" in js
+    assert "submitButton.disabled = true" in js
+    assert 'field.setAttribute("aria-disabled", "true")' in js
+    assert "field.disabled" not in js
+
+
 # --- login renders through base.html, chrome suppressed -------------------------
 
 

@@ -8,7 +8,7 @@
         id="run-status"
         {% if poll_active %}
         hx-get="/report-runs/{{ run.id }}"
-        hx-trigger="every 2s"
+        hx-trigger="every 2s, poll-retry from:body"
         hx-swap="outerHTML"
         {% endif %}
       >
@@ -27,6 +27,7 @@
         <p class="banner banner--danger" role="alert" data-poll-error hidden>
           Connessione persa — nuovo tentativo…
         </p>
+        <button type="button" class="btn btn--secondary" data-poll-retry hidden>Riprova</button>
 
         {% if run.stage == "payload_ready" or (run.stage == "draft_ready" and not gate_failed) %}
         <p><a href="/report-runs/{{ run.id }}/payload">Vedi Payload</a></p>

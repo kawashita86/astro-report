@@ -32,13 +32,16 @@ from sqlmodel import Session, select
 from shell.adapters.postgres.client import Client, StoredNatalChart
 from shell.http import chart_wheel
 from shell.http.app import get_session
+from shell.http.flash import _flash_context_processor
 
 __all__ = ["router"]
 
 router = APIRouter()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+_templates = Jinja2Templates(
+    directory=_TEMPLATES_DIR, context_processors=[_flash_context_processor]
+)
 
 
 @router.get("/clients/{client_id}/chart", include_in_schema=False)

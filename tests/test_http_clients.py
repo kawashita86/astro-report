@@ -317,6 +317,13 @@ def test_all_fields_unambiguous_birthplace_persists_client_and_chart(
     # Client's chart-verification view, still 200, still names the outcome.
     assert f'href="/clients/{clients[0].id}/chart"' in response.text
 
+    # Story 9.8: the response now extends base.html's chrome (Story 9.4's
+    # deferral, closed) -- not just the same wording as the old bare
+    # fragment. Proven by the shell's sidebar nav and the toast-region
+    # primitive, neither of which the old fragment ever carried.
+    assert "data-toast-region" in response.text
+    assert ">Clienti<" in response.text
+
 
 # --- Real NominatimGeocoder through create_client (epic-2 retro item 10) --------
 
@@ -521,6 +528,24 @@ def test_an_oversized_name_is_refused_naming_it(
     assert response.status_code == 422
     assert "name" in response.text
     assert _clients(db_session) == []
+    assert "field--invalid" in response.text
+    assert 'aria-describedby="name-error"' in response.text
+    assert 'id="name-error"' in response.text
+
+
+def test_a_missing_required_field_marks_it_invalid_with_a_linked_summary(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    _use_geocoder(app_instance, _FakeGeocoder(resolve_result=_RESOLVED_PLACE))
+    form = {key: value for key, value in _VALID_FORM.items() if key != "name"}
+
+    response = authenticated_client.post("/clients", data=form)
+
+    assert response.status_code == 422
+    assert "field--invalid" in response.text
+    assert 'aria-describedby="name-error"' in response.text
+    assert 'href="#name"' in response.text
+    assert _clients(db_session) == []
 
 
 # --- Malformed request body ----------------------------------------------------------
@@ -575,6 +600,9 @@ def test_an_unparsable_date_or_time_field_is_refused_naming_it(
     assert response.status_code == 422
     assert f"{field} is invalid" in response.text
     assert _clients(db_session) == []
+    assert f'aria-describedby="{field}-error"' in response.text
+    assert f'id="{field}-error"' in response.text
+    assert f'href="#{field}"' in response.text
 
 
 # --- Malformed resubmitted candidate ------------------------------------------------------
@@ -636,6 +664,10 @@ def test_a_chart_computation_failure_is_refused_and_persists_no_partial_client(
     assert "simulated ephemeris failure" in response.text
     assert _clients(db_session) == []
     assert _charts(db_session) == []
+    # Not field-attributable (spec I/O Matrix): stays a form-level-only message,
+    # no field is marked invalid and the summary carries no field links.
+    assert "field--invalid" not in response.text
+    assert "banner__links" not in response.text
 
 
 # --- Duplicate name -------------------------------------------------------------------
@@ -757,7 +789,8 @@ def test_a_client_with_no_reports_shows_an_empty_list(
     response = authenticated_client.get(f"/clients/{ada.id}/reports")
 
     assert response.status_code == 200
-    assert "No Reports" in response.text
+    assert f"Nessun report per {ada.name}." in response.text
+    assert 'href="/clients"' in response.text
 
 
 def test_a_client_with_several_reports_lists_them_by_month_most_recent_first(

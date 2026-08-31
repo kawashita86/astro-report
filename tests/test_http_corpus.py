@@ -138,6 +138,32 @@ def test_posting_prose_inserts_one_unpaired_row_and_redirects(
     assert rows[0].client_id is None
 
 
+def test_the_flash_cookie_is_set_on_the_redirect_and_cleared_after_the_next_page(
+    authenticated_client: TestClient,
+) -> None:
+    """Story 9.8 -- the flash mechanism round trip, proved through one route
+    (``POST /corpus``): the ``303`` sets the ``flash`` cookie; the redirect's
+    destination ``GET`` shows the message as a banner and
+    ``FlashClearMiddleware`` deletes the cookie from that response, so it is
+    no longer present in the client's cookie jar afterward -- gone, not
+    shown a second time on a further page load."""
+    redirect_response = authenticated_client.post(
+        "/corpus", data={"content": "Cara cliente, questo mese..."}, follow_redirects=False
+    )
+
+    assert redirect_response.status_code == 303
+    assert "flash" in redirect_response.cookies
+
+    destination = authenticated_client.get(redirect_response.headers["location"])
+
+    assert destination.status_code == 200
+    assert "Voce aggiunta." in destination.text
+    assert 'data-flash-kind="success"' in destination.text
+    # FlashClearMiddleware deleted the cookie from `destination`'s own
+    # response -- it is gone from the client's cookie jar from here on.
+    assert authenticated_client.cookies.get("flash") is None
+
+
 def test_a_posted_entry_then_appears_in_the_list(
     authenticated_client: TestClient,
 ) -> None:

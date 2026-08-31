@@ -1,0 +1,22 @@
+{#
+  The three client-mutation success responses (Story 9.8): create, correct,
+  delete. Story 9.4 deferred these to "Story 9.8 consolidates" -- they used
+  to be a bare `Response(...)` fragment outside the app shell entirely, kept
+  a 200 (never a redirect: epic-2-retro-item-14 -- a 303 to the chart SVG
+  would be followed and lose the outcome). Only the body changed: the exact
+  wording and the chart link are unchanged, now delivered through
+  `base.html`'s chrome so the shared flash block applies uniformly.
+
+  `flash` is passed straight in the route's own template context (not the
+  cookie path -- these three responses are never reached via a redirect);
+  `base.html`'s `{% if flash %}` block renders it the same way either way.
+#}
+{% extends "base.html" %}
+{% block title %}{{ heading }} — astro-report{% endblock %}
+{% block page_header %}<h1>{{ heading }}</h1>{% endblock %}
+{% block content %}
+      {% if chart_href %}
+      <p><a href="{{ chart_href }}">View chart</a></p>
+      {% endif %}
+      <p><a href="/clients">Back to Clienti</a></p>
+{% endblock %}

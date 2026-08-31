@@ -1,0 +1,23 @@
+{#
+  Shared list-empty macro (Story 9.8), consolidating the identical
+  `.list-empty` markup `client_list.html`/`corpus_list.html` already carried
+  and bringing `home.html`'s dashboard and `client_reports.html`'s Client
+  Reports tab up to it.
+
+  A macro, not an `{% include %}`: the existing shared-partial precedent
+  (`_client_tabs.html`) is an include because its inputs (`client`,
+  `active_tab`) are already ambient in every including route's context.
+  Empty-state text/action varies per call site with no shared ambient
+  variable, so a parameterized macro avoids adding a context key to five
+  unrelated routes just to satisfy an include contract.
+
+  `message` is one line of body copy; `href`/`label` are the one primary
+  action every call site carries (this story's I/O & Edge-Case Matrix: "one
+  Italian line + one primary action").
+#}
+{% macro empty_state(message, href, label) %}
+<div class="list-empty">
+  <p>{{ message }}</p>
+  <a class="page-header__action" href="{{ href }}">{{ label }}</a>
+</div>
+{% endmacro %}

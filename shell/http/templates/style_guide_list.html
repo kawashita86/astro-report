@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_empty_state.html" import empty_state %}
 {% block title %}Guida di stile — astro-report{% endblock %}
 {% block page_header %}
       <div class="page-header">
@@ -38,7 +39,7 @@
         </table>
       </div>
       {% else %}
-      <p class="list-panel__meta">Nessuna versione precedente.</p>
+      {{ empty_state("Nessuna versione precedente.", "/style-guide/edit", "Modifica") }}
       {% endif %}
       {% endif %}
 {% endblock %}
