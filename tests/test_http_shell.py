@@ -221,11 +221,13 @@ def _render_poll(*, hx_request: bool) -> str:
             "failure_reason": None,
         },
     )()
+    fake_client = type("_Client", (), {"id": "def", "name": "Abbate Chiara"})()
     stage_track = build_stage_track(fake_run.stage, failed=False, gate_failed=False)
     caption = stage_caption(fake_run.stage, failed=False, gate_failed=False, failure_reason=None)
     return env.get_template("report_run_poll.html").render(
         request=fake_request,
         run=fake_run,
+        client=fake_client,
         stage_track=stage_track,
         stage_caption=caption,
         gate_failed=False,

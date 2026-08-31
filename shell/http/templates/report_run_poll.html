@@ -1,7 +1,8 @@
 {% extends "_bare.html" if request.headers.get("hx-request") else "base.html" %}
 {% block title %}Report — astro-report{% endblock %}
 {% block page_header %}
-      <h1>Report — {{ run.month }}</h1>
+      {% include "_report_run_breadcrumb.html" %}
+      <h1>Report</h1>
 {% endblock %}
 {% block content %}
       <div

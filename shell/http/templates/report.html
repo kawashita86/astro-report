@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Report — astro-report{% endblock %}
+{% block page_header %}{% include "_report_run_breadcrumb.html" %}{% endblock %}
 {% block content %}
-      <h1>Report <button type="button" class="badge-mono" data-copy-chip>{{ run.month }}</button></h1>
+      <h1>Report</h1>
 
       <div class="exportbar">
         <span class="status-badge status-badge--success">Verifica superata</span>

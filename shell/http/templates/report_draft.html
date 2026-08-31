@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Bozza — astro-report{% endblock %}
+{% block page_header %}{% include "_report_run_breadcrumb.html" %}{% endblock %}
 {% block content %}
       <h1>Bozza</h1>
 
@@ -44,7 +45,7 @@
           </div>
         </div>
       </div>
-      {% elif run %}
+      {% elif run.failed_at %}
       <section class="panel panel--danger">
         <h2>Generazione non riuscita</h2>
         <p class="panel__body">{{ run.failure_reason }}</p>

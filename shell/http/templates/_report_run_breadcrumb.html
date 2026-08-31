@@ -1,0 +1,26 @@
+{#
+  Shared breadcrumb for the four report-run-scoped screens (Story 9.6
+  amendment, correct-course 2026-08-31): the stage view (report_run_poll.html),
+  Draft (report_draft.html), Payload (report_payload.html), and the passed
+  Report (report.html). EXPERIENCE.md's own route map states this exactly:
+  `/report-runs/{run_id} -- breadcrumb: Clienti / {nome} / {mese}`.
+
+  Contract: the including route passes `client` (the run's Client) and `run`
+  (for `run.month`). Clienti links to the Clienti list; the client's name
+  links to their Report tab -- the natural "back" destination, matching
+  `_client_tabs.html`'s own breadcrumb precedent. The month renders as the
+  same click-to-copy mono chip used everywhere else a `YYYY-MM` code is
+  shown (DESIGN.md: "render every ID / hash / month code as a monospace
+  chip").
+#}
+      <p class="breadcrumb">
+        <a href="/clients">Clienti</a> /
+        <a href="/clients/{{ client.id }}/reports">{{ client.name }}</a> /
+        <button
+          type="button"
+          class="badge-mono"
+          data-copy-chip
+          aria-current="page"
+          >{{ run.month }}</button
+        >
+      </p>

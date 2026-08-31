@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Payload — astro-report{% endblock %}
+{% block page_header %}{% include "_report_run_breadcrumb.html" %}{% endblock %}
 
 {% macro render_value(value) -%}
   {%- if value is mapping -%}

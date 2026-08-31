@@ -2733,3 +2733,182 @@ def test_the_report_view_shows_the_recorded_disposition_and_hides_the_forms(
     disposition_section = response.text.split('id="disposition"')[1].split("</div>")[0]
     assert "<form" not in disposition_section
     assert "<button" not in disposition_section
+
+
+# --- Report-run breadcrumb: Clienti / {nome} / {mese} (Story 9.6 amendment,
+# --- correct-course 2026-08-31) -------------------------------------------------
+
+
+def _breadcrumb_markup(client: Client, run: ReportRun) -> tuple[str, str, str]:
+    """The three fragments the shared `_report_run_breadcrumb.html` partial
+    must render, in order -- kept as one helper so a class/markup change to
+    the partial only needs updating here. The month chip is checked by its
+    `aria-current` + text content rather than one exact tag string, since
+    the partial wraps its attributes onto multiple lines."""
+    return (
+        '<a href="/clients">Clienti</a>',
+        f'<a href="/clients/{client.id}/reports">{client.name}</a>',
+        f'aria-current="page"\n          >{run.month}</button',
+    )
+
+
+def test_the_payload_view_carries_the_report_run_breadcrumb(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+    store_report_payload(db_session, run=run, frozen=_a_frozen_payload_with_one_aspect())
+
+    body = authenticated_client.get(f"/report-runs/{run.id}/payload").text
+
+    clienti, name, month = _breadcrumb_markup(ada, run)
+    assert clienti in body
+    assert name in body
+    assert month in body
+    assert body.index(clienti) < body.index(name) < body.index(month)
+
+
+def test_the_draft_view_carries_the_report_run_breadcrumb_even_when_passing(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """The breadcrumb must render on a *passing* run's Draft view too -- the
+    route only ever added `run` to the template context for a failed run
+    before this amendment, so this is the scenario that was previously
+    unreachable."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+    )
+    db_session.commit()
+
+    body = authenticated_client.get(f"/report-runs/{run.id}/draft").text
+
+    clienti, name, month = _breadcrumb_markup(ada, run)
+    assert clienti in body
+    assert name in body
+    assert month in body
+
+
+def test_the_passed_report_view_carries_the_report_run_breadcrumb(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    body = authenticated_client.get(f"/report-runs/{run.id}/report").text
+
+    clienti, name, month = _breadcrumb_markup(ada, run)
+    assert clienti in body
+    assert name in body
+    assert month in body
+
+
+def test_the_full_page_stage_view_carries_the_report_run_breadcrumb(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+
+    body = authenticated_client.get(f"/report-runs/{run.id}").text
+
+    clienti, name, month = _breadcrumb_markup(ada, run)
+    assert clienti in body
+    assert name in body
+    assert month in body
+
+
+def test_an_htmx_poll_fragment_carries_no_breadcrumb(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """The breadcrumb lives in `page_header`, which `_bare.html` (the HTMX
+    fragment's base) never renders -- confirms the partial doesn't leak into
+    the polled fragment swapped in every 2s."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01")
+    db_session.add(run)
+    db_session.commit()
+
+    body = authenticated_client.get(
+        f"/report-runs/{run.id}", headers={"hx-request": "true"}
+    ).text
+
+    assert '<a href="/clients">Clienti</a>' not in body
+
+
+def test_the_draft_view_carries_the_report_run_breadcrumb_when_terminally_failed(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """The pre-existing code path (`run.failed_at is not None`) that already
+    added `run` to the template context before this amendment -- confirms
+    the `{% elif run %}` -> `{% elif run.failed_at %}` template change
+    (needed because `run` is now always in context) didn't disturb it."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="draft_ready",
+        failed_at=datetime(2026, 1, 20, 12, 0, 0, tzinfo=UTC),
+        failure_reason="stage 'gate_passed' failed 5 consecutive times: simulated DB error",
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+    )
+    db_session.commit()
+
+    body = authenticated_client.get(f"/report-runs/{run.id}/draft").text
+
+    assert "Generazione non riuscita" in body  # the non-Gate failure panel still renders
+    clienti, name, month = _breadcrumb_markup(ada, run)
+    assert clienti in body
+    assert name in body
+    assert month in body
+
+
+def test_the_passed_report_view_shows_the_correct_clients_name_not_a_decoys(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """`bundle.client` (`_load_passed_report_bundle`) must be *this* run's
+    Client, not merely *a* Client -- proven with a second, unrelated Client
+    in the same database whose name must never appear."""
+    ada = _create_client_with_real_chart(db_session, name="Ada Lovelace")
+    decoy = _create_client_with_real_chart(db_session, name="Grace Hopper")
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    body = authenticated_client.get(f"/report-runs/{run.id}/report").text
+
+    assert f'<a href="/clients/{ada.id}/reports">Ada Lovelace</a>' in body
+    assert decoy.name not in body
+    assert str(decoy.id) not in body

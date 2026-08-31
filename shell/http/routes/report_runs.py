@@ -357,6 +357,7 @@ def poll_report_run(
     gate_failed = _current_cycle_gate_failure(session, run) is not None
     context = {
         "run": run,
+        "client": client,
         "stage_track": build_stage_track(run.stage, failed=failed, gate_failed=gate_failed),
         "stage_caption": stage_caption(
             run.stage,
@@ -444,12 +445,22 @@ def view_report_payload(
     if client is None:
         raise RuntimeError(f"ReportPayload {stored.id} references a missing Client.")
 
+    run = session.get(ReportRun, run_id)
+    if run is None:
+        raise RuntimeError(f"ReportPayload {stored.id} references a missing ReportRun.")
+
     localized = localize_payload(stored.payload, iana_zone=client.iana_zone)
 
     return _templates.TemplateResponse(
         request,
         "report_payload.html",
-        {"payload": localized, "section_titles": SECTION_TITLES, "field_titles": FIELD_TITLES},
+        {
+            "payload": localized,
+            "section_titles": SECTION_TITLES,
+            "field_titles": FIELD_TITLES,
+            "client": client,
+            "run": run,
+        },
     )
 
 
@@ -518,6 +529,12 @@ def view_report_draft(
         "section_order": SECTION_ORDER,
         "list_section_names": LIST_SECTION_NAMES,
         "section_titles": SECTION_TITLES,
+        # Story 9.6 amendment (correct-course 2026-08-31): the breadcrumb
+        # needs `client`/`run` on every visit, not only a failed one -- the
+        # `if run.failed_at` branch below still only adds the Gate-failure
+        # extras, unchanged.
+        "client": client,
+        "run": run,
     }
     if run.failed_at is not None:
         stored_gate_result = _current_cycle_gate_failure(session, run)
@@ -526,7 +543,6 @@ def view_report_draft(
             {**violation, "kind_label": violation_kind_label(violation["kind"])}
             for violation in violations
         ]
-        context["run"] = run
         context["gate_failed"] = stored_gate_result is not None
 
     return _templates.TemplateResponse(request, "report_draft.html", context)
@@ -594,6 +610,7 @@ def view_report(
             "section_titles": SECTION_TITLES,
             "run_id": run_id,
             "run": bundle.run,
+            "client": bundle.client,
             "gate_result": stored_gate_result,
             "regeneration_note": regeneration_note,
             "latest_export": _latest_export_record(session, run_id),
