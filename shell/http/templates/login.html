@@ -4,21 +4,47 @@
 {% block app_header %}{% endblock %}
 {% block main_class %}auth-view{% endblock %}
 {% block content %}
-      <h1>Accedi</h1>
-      {% if error %}
-      <p role="alert">Password errata.</p>
-      {% endif %}
-      <form method="post" action="/login">
-        <input type="hidden" name="next" value="{{ next | default('/') }}" />
-        <label for="password">Password</label>
-        <input
-          type="password"
-          id="password"
-          name="password"
-          autocomplete="current-password"
-          required
-          autofocus
-        />
-        <button type="submit">Accedi</button>
-      </form>
+      <div class="auth-view__card">
+        <svg
+          class="auth-view__mark"
+          viewBox="0 0 48 48"
+          width="48"
+          height="48"
+          aria-hidden="true"
+        >
+          <ellipse
+            class="auth-view__mark-ring"
+            cx="24"
+            cy="24"
+            rx="21"
+            ry="7.5"
+            transform="rotate(-20 24 24)"
+          />
+          <circle class="auth-view__mark-body" cx="24" cy="24" r="9" />
+        </svg>
+
+        <h1>Accedi</h1>
+
+        {% if error %}
+        <div class="banner banner--danger" role="alert" tabindex="-1">
+          <span class="banner__text" id="password-error">Password errata.</span>
+        </div>
+        {% endif %}
+
+        <form method="post" action="/login" data-submit-lock>
+          <input type="hidden" name="next" value="{{ next | default('/') }}" />
+          <div class="field{% if error %} field--invalid{% endif %}">
+            <label for="password">Password</label>
+            <input
+              type="password"
+              id="password"
+              name="password"
+              autocomplete="current-password"
+              required
+              {% if error %}aria-invalid="true" aria-describedby="password-error"{% else %}autofocus{% endif %}
+            />
+          </div>
+          <button type="submit" class="btn btn--primary">Accedi</button>
+        </form>
+      </div>
 {% endblock %}

@@ -280,11 +280,57 @@ h3 {
   font-weight: var(--font-heading-weight);
 }
 
-/* Sign-in has no sidebar/header: give its lone column a centred measure. */
-.auth-view {
+/* Sign-in has no sidebar/header (`.app-main > main` still fills the
+ * `.app-shell`'s full `min-height: 100vh` on its own) -- Story 9.1
+ * amendment (correct-course 2026-08-31): centre the column vertically too,
+ * not just horizontally with top padding, and hold that at any viewport
+ * down to 320px. */
+/* `.app-main > main { padding: var(--content-pad); }` (below) has higher
+ * specificity than a bare `.auth-view` class rule and would otherwise win
+ * outright -- `main.auth-view` matches it. */
+.app-main > main.auth-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xxl) var(--space-md);
+}
+
+.auth-view__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
   max-width: 360px;
-  margin: 0 auto;
-  padding-top: var(--space-xxl);
+}
+
+.auth-view__card h1 {
+  margin: 0 0 var(--space-lg);
+}
+
+.auth-view__card form {
+  width: 100%;
+}
+
+.auth-view__card .banner {
+  width: 100%;
+}
+
+/* A small inline mark -- a ringed planet, on-theme for an astrology tool --
+ * built from the existing brand ramp only (DESIGN.md: one hue, no
+ * gradients), never a new asset or a font dependency. */
+.auth-view__mark {
+  margin-bottom: var(--space-lg);
+}
+
+.auth-view__mark-body {
+  fill: var(--primary-700);
+}
+
+.auth-view__mark-ring {
+  fill: none;
+  stroke: var(--primary-500);
+  stroke-width: 2;
 }
 
 /* ---------------------------------------------------------------------------

@@ -340,6 +340,72 @@ def test_the_login_screen_is_fully_italian_with_one_h1(client: TestClient) -> No
     assert "Sign in" not in failure
 
 
+def test_the_login_screen_is_a_centred_card_with_an_inline_mark(client: TestClient) -> None:
+    """Story 9.1 amendment (correct-course 2026-08-31) — the sign-in screen
+    is a flex-centred column (`.auth-view`) around a `.auth-view__card`
+    carrying a small inline SVG mark above the `<h1>`, no new asset. The
+    mark is decorative (`aria-hidden`) -- the `<h1>`/`<title>` already say
+    what the screen is, so a screen reader doesn't need it named too."""
+    body = client.get("/login").text
+
+    assert 'class="auth-view"' in body
+    assert 'class="auth-view__card"' in body
+    assert 'class="auth-view__mark"' in body
+    assert 'aria-hidden="true"' in body
+    assert 'role="img"' not in body
+    # No external image/font request -- the mark is inline SVG shapes only.
+    assert "<img" not in body
+    assert body.index('class="auth-view__mark"') < body.index("<h1>Accedi</h1>")
+
+
+def test_the_login_password_field_uses_the_shared_field_styling(
+    client: TestClient,
+) -> None:
+    """The password input previously had no `.field` wrapper -- unlike every
+    other form in the app -- so it rendered with none of `tokens.css`'s
+    input styling (border, radius, focus ring)."""
+    body = client.get("/login").text
+
+    assert 'class="field"' in body
+    assert '<label for="password">Password</label>' in body
+    assert '<button type="submit" class="btn btn--primary">Accedi</button>' in body
+
+
+def test_the_login_password_field_autofocuses_on_a_fresh_visit(client: TestClient) -> None:
+    body = client.get("/login").text
+
+    assert "autofocus" in body
+
+
+def test_the_login_failure_banner_matches_the_apps_shared_banner_pattern(
+    client: TestClient,
+) -> None:
+    body = client.post("/login", data={"password": "wrong password"}).text
+
+    assert 'class="banner banner--danger"' in body
+    assert 'role="alert"' in body
+    assert 'tabindex="-1"' in body
+    assert 'id="password-error"' in body
+    assert "Password errata." in body
+
+
+def test_a_failed_login_drops_autofocus_and_links_the_field_to_the_error(
+    client: TestClient,
+) -> None:
+    """On the error re-render, `autofocus` on the password field would win
+    the browser's initial-focus race against `shell.js` moving focus to the
+    banner, and (for a no-JS visitor) would skip past the error message
+    entirely -- so the field drops `autofocus` and instead gets marked
+    invalid and linked to the error, matching every other form's pattern
+    (`client_new.html`/`client_edit.html`)."""
+    body = client.post("/login", data={"password": "wrong password"}).text
+
+    assert "autofocus" not in body
+    assert 'class="field field--invalid"' in body
+    assert 'aria-invalid="true"' in body
+    assert 'aria-describedby="password-error"' in body
+
+
 def test_a_non_utf8_login_body_fails_cleanly_rather_than_crashing(client: TestClient) -> None:
     response = client.post(
         "/login",

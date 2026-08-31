@@ -509,10 +509,14 @@
 
   /* ---- 5. Form-level error summary takes focus -------------------------- */
 
-  // On a 422 re-render the three client-mutation templates emit a focusable
-  // `role="alert"` `.banner--danger`; move focus to it so a keyboard / screen
-  // reader user lands on the error. This deferred script runs post-parse, so
-  // the banner (only present on the error re-render) is already in the DOM.
+  // On a 422 (or, for `/login`, a 401) re-render, the three client-mutation
+  // templates and `login.html` emit a focusable `role="alert"` `.banner--
+  // danger`; move focus to it so a keyboard / screen reader user lands on
+  // the error. This deferred script runs post-parse, so the banner (only
+  // present on the error re-render) is already in the DOM -- and runs after
+  // native `autofocus` has already applied, so this always wins when it
+  // finds a banner (`login.html` itself also drops `autofocus` server-side
+  // on the error branch, so a no-JS reload doesn't skip past the message).
   var errorSummary = document.querySelector(".banner--danger[tabindex='-1']");
   if (errorSummary) {
     errorSummary.focus();
