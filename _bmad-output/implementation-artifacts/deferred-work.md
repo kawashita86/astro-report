@@ -786,3 +786,23 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-9-9-italian-everywhere-and-the-accessibility-floor.md`
   summary: Several routes this story touched (e.g. `view_report_payload`, `_load_passed_report_bundle`) still raise bare `HTTPException(status_code=404)`/`401` with no custom `detail`, which FastAPI serializes as the default English `{"detail":"Not Found"}` body — a residual English surface "Italian everywhere" doesn't fully close.
   evidence: Blind-hunter review of Story 9.9's diff; these bare `HTTPException` call sites predate this story and are outside its stated Boundaries (translating rendered template/route-flash strings, not raw framework error bodies), so it's not this story's fix to make.
+
+- source_spec: none
+  summary: Unauthenticated browser navigation to any guarded route should redirect (302) to `/login?next=<path>` instead of returning the bare empty-body 401, scoped to navigational requests only (`Accept: text/html`, no `HX-Request`); dashboard recent-run rows in `home.html` should become links to the run's Report or stage view.
+  evidence: Split from the 2026-08-31 correct-course batch (`sprint-change-proposal-2026-08-31.md`) — amends Story 9.2's AC in `epics.md`. Deferred behind the higher-priority Story 9.3 fix (Nuovo report control) to keep each shippable change reviewable independently.
+
+- source_spec: none
+  summary: Report-run screens (stage view, Draft, Payload, Report) render no breadcrumb naming the Client and month, contradicting `EXPERIENCE.md`'s own route map (`breadcrumb: Clienti / {nome} / {mese}`).
+  evidence: Split from the 2026-08-31 correct-course batch (`sprint-change-proposal-2026-08-31.md`) — amends Story 9.6's AC in `epics.md`. Deferred behind Story 9.3 and 9.2's fixes.
+
+- source_spec: none
+  summary: The sign-in screen (`login.html`) should be a vertically centred flex column with a small inline SVG wordmark, not just horizontally centred with top padding.
+  evidence: Split from the 2026-08-31 correct-course batch (`sprint-change-proposal-2026-08-31.md`) — amends Story 9.1's AC in `epics.md`. Deferred behind Stories 9.3, 9.2, 9.6's fixes; new scope, not a defect.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-3-nuovo-report-start-button.md`
+  summary: A submission to `POST /clients/{id}/report-runs` that fails validation (a malformed month bypassing the new form's client-side `pattern`, e.g. a non-JS client) or 404s (the chart deleted between page render and submit) lands the operator on FastAPI's raw JSON error body, not an Italian-language flash/banner.
+  evidence: `start_report_run` (`shell/http/routes/report_runs.py`) is unchanged by this story and always raised a bare `HTTPException` here — pre-existing across the app (already noted for other routes in an earlier deferred-work entry from Story 9.9's review). This story is the first to add a UI form that posts here, making the gap reachable through normal use rather than only a direct POST, but fixing the app-wide bare-`HTTPException` pattern is out of this story's scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-3-nuovo-report-start-button.md`
+  summary: The Report tab's `Nuovo report` control sits at the top of the scrollable content column rather than in the sticky page-header's primary-action slot (`.page-header__action`, used for "Nuovo cliente" on the Clienti list) — on a Client with a long report history it can scroll out of view.
+  evidence: Blind-hunter review of this story's diff. The `page_header` block on this route is already occupied by the shared `_client_tabs.html` partial (breadcrumb + tabs), common to all three Client-scoped tabs, so combining it with a per-tab primary action needs a small partial redesign shared across Anagrafica/Tema/Report — wider than this story's scope. Not urgent: EXPERIENCE.md's own batch-flow example reaches the control immediately on landing on the tab, before any scrolling.

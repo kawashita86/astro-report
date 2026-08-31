@@ -1087,6 +1087,24 @@ h3 {
   background: var(--danger-surface);
 }
 
+/* The Report tab's start-run control (Story 9.3) — a single field beside its
+ * submit button rather than the full 560px stacked form, since it is one
+ * value with a sensible default (EXPERIENCE.md Month Selection), not a form
+ * to fill in. */
+.new-run-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-md);
+  max-width: 320px;
+  margin-bottom: var(--space-xl);
+}
+
+.new-run-form .field {
+  flex: 1 1 200px;
+  margin-bottom: 0;
+}
+
 /* Danger form-error banner — mirrors `.banner--warning` with the danger role. */
 .banner--danger {
   background: var(--danger-surface);

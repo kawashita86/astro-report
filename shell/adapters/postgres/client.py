@@ -38,6 +38,7 @@ __all__ = [
     "StoredNatalChart",
     "correct_client_and_chart",
     "create_client_with_chart",
+    "current_chart_for_client",
     "delete_client_and_derived",
     "deserialize_natal_chart",
     "list_clients",
@@ -216,6 +217,22 @@ def deserialize_natal_chart(stored: StoredNatalChart) -> NatalChart:
             for aspect in stored.aspects
         ),
     )
+
+
+def current_chart_for_client(session: Session, client_id: UUID) -> StoredNatalChart | None:
+    """The current (non-superseded) ``StoredNatalChart`` for ``client_id``, or
+    ``None`` if it has none -- the one "can a run start against this Client"
+    predicate every caller that gates on a chart needs (Story 9.3's Report-tab
+    ``Nuovo report`` control and ``report_runs.py``'s ``start_report_run``/
+    ``drive_report_run`` both used their own copy of this query before this
+    function existed to share).
+    """
+    return session.exec(
+        select(StoredNatalChart).where(
+            StoredNatalChart.client_id == client_id,
+            StoredNatalChart.superseded_at.is_(None),
+        )
+    ).first()
 
 
 def list_clients(session: Session) -> list[Client]:

@@ -12,6 +12,27 @@
       </p>
       {% endif %}
 
+      {% if has_chart %}
+      <form method="post" action="/clients/{{ client.id }}/report-runs" class="new-run-form" data-submit-lock>
+        <div class="field">
+          <label for="month">Mese del report</label>
+          <input
+            type="text"
+            id="month"
+            name="month"
+            required
+            pattern="\d{4}-(0[1-9]|1[0-2])"
+            value="{{ default_month }}"
+            inputmode="numeric"
+            maxlength="7"
+            autocomplete="off"
+          />
+          <p class="field__help">Mese del report — AAAA-MM</p>
+        </div>
+        <button type="submit" class="btn btn--primary">Nuovo report</button>
+      </form>
+      {% endif %}
+
       {% if entries %}
       <ul>
         {% for entry in entries %}

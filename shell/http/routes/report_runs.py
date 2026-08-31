@@ -35,7 +35,11 @@ from sqlmodel import Session, select
 
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
-from shell.adapters.postgres.client import Client, StoredNatalChart, deserialize_natal_chart
+from shell.adapters.postgres.client import (
+    Client,
+    current_chart_for_client,
+    deserialize_natal_chart,
+)
 from shell.adapters.postgres.export_record import (
     ExportRecord,
     record_send_disposition,
@@ -115,13 +119,12 @@ _DISPOSITION_VALUES = {value for value, _label in DISPOSITION_CHOICES}
 _GATE_RESULT_CORRELATION_WINDOW = timedelta(seconds=2)
 
 
-def _current_chart(session: Session, client_id: UUID) -> StoredNatalChart | None:
-    return session.exec(
-        select(StoredNatalChart).where(
-            StoredNatalChart.client_id == client_id,
-            StoredNatalChart.superseded_at.is_(None),
-        )
-    ).first()
+#: Kept as a module-local alias (rather than calling
+#: ``current_chart_for_client`` at each call site) purely so a reader
+#: scanning this file doesn't need to jump to the adapter module to see
+#: which chart "current" means here -- the two call sites below are the
+#: whole of its usage.
+_current_chart = current_chart_for_client
 
 
 def _current_cycle_gate_failure(session: Session, run: ReportRun) -> StoredGateResult | None:

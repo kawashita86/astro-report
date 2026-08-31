@@ -51,6 +51,7 @@ from shell.adapters.postgres.client import (
     StoredNatalChart,
     correct_client_and_chart,
     create_client_with_chart,
+    current_chart_for_client,
     delete_client_and_derived,
     list_clients,
 )
@@ -840,10 +841,21 @@ def list_client_reports(
     :func:`_backup_is_stale`, chosen as this page's Design Notes explain
     Francesco returns here repeatedly during a batch and this app has no
     shared layout or home page today.
+
+    Also passes ``has_chart`` and ``default_month`` (Story 9.3, correct-course
+    2026-08-31) for the template's **Nuovo report** control -- EXPERIENCE.md's
+    Month Selection section specifies a ``YYYY-MM`` field on this exact tab,
+    prefilled to the next calendar month, that posts to the existing
+    ``POST /clients/{id}/report-runs`` (unchanged by this story). ``has_chart``
+    gates whether that control renders at all: starting a run with no stored
+    chart is already a 404 at submission (``report_runs.py::start_report_run``),
+    so a Client with none simply never sees the control.
     """
     client = session.get(Client, client_id)
     if client is None:
         raise HTTPException(status_code=404)
+
+    has_chart = current_chart_for_client(session, client_id) is not None
 
     rows = session.exec(
         select(Report, ReportRun)
@@ -877,5 +889,28 @@ def list_client_reports(
             "active_tab": "report",
             "entries": entries,
             "backup_stale": _backup_is_stale(session),
+            "has_chart": has_chart,
+            "default_month": _next_calendar_month(),
         },
     )
+
+
+def _next_calendar_month(today: date | None = None) -> str:
+    """``YYYY-MM`` for the calendar month after ``today`` -- the default the
+    Report tab's ``Nuovo report`` month field prefills (EXPERIENCE.md Month
+    Selection: "the field defaults to the next calendar month," since the
+    product forecasts the coming month and the common case is one
+    keystroke-free submit).
+
+    ``today`` defaults to ``datetime.now(UTC).date()`` (explicit override
+    only for tests, e.g. to exercise the December-to-January rollover without
+    waiting for December) -- the rest of this codebase's clock reads are UTC
+    (AGENTS.md), and this default can read one day off Francesco's Italy wall
+    clock only within the narrow window around midnight UTC near a month
+    boundary; he can always retype the field.
+    """
+    if today is None:
+        today = datetime.now(UTC).date()
+    if today.month == 12:
+        return f"{today.year + 1}-01"
+    return f"{today.year}-{today.month + 1:02d}"

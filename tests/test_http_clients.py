@@ -858,6 +858,75 @@ def test_a_client_with_no_reports_shows_an_empty_list(
     assert "Reports for" not in body
 
 
+@pytest.mark.parametrize(
+    ("today", "expected"),
+    [
+        (date(2026, 5, 15), "2026-06"),
+        (date(2026, 1, 1), "2026-02"),
+        (date(2026, 12, 15), "2027-01"),  # the year-rollover branch
+    ],
+)
+def test_next_calendar_month_rolls_the_year_over_in_december(
+    today: date, expected: str
+) -> None:
+    assert clients_module._next_calendar_month(today=today) == expected
+
+
+def test_a_client_with_a_chart_sees_the_new_run_form_defaulted_to_next_month(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, _chart = _create_client_with_chart(app_instance, db_session)
+    expected_month = clients_module._next_calendar_month()
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    body = response.text
+    assert f'<form method="post" action="/clients/{ada.id}/report-runs"' in body
+    assert 'name="month"' in body
+    assert 'pattern="\\d{4}-(0[1-9]|1[0-2])"' in body
+    assert 'required' in body
+    assert f'value="{expected_month}"' in body
+    assert "Mese del report — AAAA-MM" in body
+    assert '<button type="submit" class="btn btn--primary">Nuovo report</button>' in body
+
+
+def test_a_client_with_no_chart_has_no_new_run_form(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    client_row = Client(
+        name="Senza Tema",
+        birth_date=date(2026, 1, 1),
+        birth_time=time_of_day(0, 0),
+        latitude=Decimal("41.9028"),
+        longitude=Decimal("12.4964"),
+        iana_zone="Europe/Rome",
+    )
+    db_session.add(client_row)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/clients/{client_row.id}/reports")
+
+    assert response.status_code == 200
+    assert "report-runs" not in response.text
+    assert "Nuovo report" not in response.text
+
+
+def test_a_client_whose_only_chart_is_superseded_has_no_new_run_form(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    chart.superseded_at = datetime.now(UTC)
+    db_session.add(chart)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert "report-runs" not in response.text
+    assert "Nuovo report" not in response.text
+
+
 def test_a_client_with_several_reports_lists_them_by_month_most_recent_first(
     authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
 ) -> None:
