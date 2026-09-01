@@ -158,7 +158,12 @@ def test_happy_path_returns_a_populated_draft_with_all_eight_fields() -> None:
         energia_generale=[
             {"text": "Il mese si apre con energia stabile.", "entry_ids": [_KNOWN_ID]}
         ],
-        giorni_favorevoli=[{"text": "Una buona giornata per iniziare progetti.", "entry_ids": []}],
+        giorni_favorevoli=[
+            {
+                "text": "Una buona giornata per iniziare progetti.",
+                "entry_ids": [_ANOTHER_KNOWN_ID],
+            }
+        ],
     )
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)

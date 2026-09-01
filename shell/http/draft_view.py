@@ -18,6 +18,7 @@ rest on.
 from __future__ import annotations
 
 from dataclasses import fields as dataclass_fields
+from datetime import datetime
 from typing import Any
 
 from core.types.generation import GeneratedDraft, Sentence
@@ -166,8 +167,18 @@ def _render_list(
     citing Sentence's text and localized to ``iana_zone``. A Sentence's
     ``entry_ids`` only enrich an entry, never gate whether it appears (this
     story's Design Notes): every entry is emitted, cited or not.
+
+    Sorted chronologically by the entry's own date field before localizing
+    (Story 3.7 left this to "a later story/view"): sorting the raw UTC ISO
+    strings via ``datetime.fromisoformat`` rather than the localized
+    ``dd/MM/yyyy HH:mm`` strings, since the latter's day-first format is not
+    lexically sortable and localization itself never runs here for display
+    order.
     """
-    entries = payload["day_lists"][list_name]
+    entries = sorted(
+        payload["day_lists"][list_name],
+        key=lambda entry: datetime.fromisoformat(_entry_date(entry)),
+    )
     localized_entries = localize_payload({"entries": entries}, iana_zone=iana_zone)["entries"]
     return [
         {

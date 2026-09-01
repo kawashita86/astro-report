@@ -152,6 +152,64 @@ def test_an_uncited_day_list_entry_still_renders_date_only_never_dropped() -> No
     assert attention["date"] == "15/01/2026 03:00"
 
 
+def test_list_sections_are_sorted_chronologically_regardless_of_payload_order() -> None:
+    """``payload["day_lists"]`` entries need not already be date-ordered
+    (Story 3.7 explicitly left sorting to "a later story/view") -- the
+    rendered list must come back sorted oldest-first regardless."""
+    payload = {
+        "day_lists": {
+            "giorni_favorevoli": [
+                {
+                    "id": "fav-late",
+                    "kind": "lunation",
+                    "lunation_kind": "full_moon",
+                    "occurred_at": "2026-01-25T09:00:00+00:00",
+                    "longitude": "15.0",
+                    "natal_house": 3,
+                },
+                {
+                    "id": "fav-early",
+                    "kind": "aspect",
+                    "transiting_body": "venus",
+                    "natal_point": "sun",
+                    "aspect": "trine",
+                    "perfected_at": "2026-01-05T15:00:00+00:00",
+                    "never_perfected": False,
+                    "orb_entry_at": "2026-01-03T12:00:00+00:00",
+                    "orb_exit_at": "2026-01-07T12:00:00+00:00",
+                },
+                {
+                    "id": "fav-mid",
+                    "kind": "station",
+                    "body": "mars",
+                    "direction": "retrograde",
+                    "station_at": "2026-01-15T09:00:00+00:00",
+                    "longitude": "10.0",
+                },
+            ],
+            "giorni_di_attenzione": [],
+        }
+    }
+    draft = GeneratedDraft(
+        energia_generale=(),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+    rendered = render_draft(draft, payload, iana_zone=_IANA_ZONE)
+
+    assert [item["entry_ids"][0] for item in rendered["giorni_favorevoli"]] == [
+        "fav-early",
+        "fav-mid",
+        "fav-late",
+    ]
+
+
 def test_render_draft_covers_exactly_the_two_list_sections() -> None:
     assert set(LIST_SECTION_NAMES) == {"giorni_favorevoli", "giorni_di_attenzione"}
 

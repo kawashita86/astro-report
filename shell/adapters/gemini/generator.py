@@ -7,10 +7,11 @@ Holds no database handle, no filesystem access and no tool definitions
 network call to Gemini. The Style Guide and both ``ReportTheme``s are turned
 into a prompt asking for cited structure, never free prose (AD-6); the
 response is parsed against the exact eight-Section shape and validated --
-every cited ``entry_id`` must be present somewhere in ``payload``, and
-neither ``giorni_favorevoli`` nor ``giorni_di_attenzione`` may contain a
-date-shaped token (dates there are code-projected upstream, Story 3.7) --
-before a ``GeneratedDraft`` is ever returned.
+every cited ``entry_id`` must be present somewhere in ``payload``, neither
+``giorni_favorevoli`` nor ``giorni_di_attenzione`` may contain a date-shaped
+token (dates there are code-projected upstream, Story 3.7), and every entry
+in ``payload["day_lists"]`` must be cited by at least one sentence in its
+own Section -- before a ``GeneratedDraft`` is ever returned.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from core.types.memory import AspectChange, ReportTheme, RetrogradeChange, Theme
 from shell.adapters.generation.validation import (
     _SECTION_FIELD_NAMES,
     _validate_citations,
+    _validate_day_list_coverage,
     _validate_no_date_tokens,
 )
 from shell.ports.generator import StyleGuideVersion
@@ -139,6 +141,7 @@ class GeminiGenerator:
         draft = _build_draft(data)
         _validate_citations(draft, payload)
         _validate_no_date_tokens(draft)
+        _validate_day_list_coverage(draft, payload)
         return draft
 
 
@@ -312,7 +315,12 @@ def _build_prompt(
         "valido).\n\n"
         'Le Sezioni "giorni_favorevoli" e "giorni_di_attenzione" non devono MAI '
         "contenere una data (né un giorno del mese con un nome di mese, né una "
-        "data in formato ISO): le date sono già proiettate a monte dal codice."
+        "data in formato ISO): le date sono già proiettate a monte dal codice. "
+        "Ogni singolo id presente in payload['day_lists']['giorni_favorevoli'] deve "
+        "essere citato da almeno una frase nella Sezione \"giorni_favorevoli\", e ogni "
+        "id in payload['day_lists']['giorni_di_attenzione'] deve essere citato da "
+        "almeno una frase nella Sezione \"giorni_di_attenzione\": nessun evento di "
+        "queste due liste può restare senza una frase che lo descriva."
         f"{continuity_block}\n\n"
         f"--- PAYLOAD (JSON) ---\n{payload_json}\n"
     )

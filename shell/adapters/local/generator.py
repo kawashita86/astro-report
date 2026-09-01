@@ -27,6 +27,7 @@ from shell.adapters.generation.validation import (
     _SECTION_FIELD_NAMES,
     _collect_known_entry_ids,
     _validate_citations,
+    _validate_day_list_coverage,
     _validate_no_date_tokens,
 )
 from shell.ports.generator import StyleGuideVersion
@@ -78,4 +79,5 @@ class RecordedResponseGenerator:
         draft = GeneratedDraft(**fields)
         _validate_citations(draft, payload)
         _validate_no_date_tokens(draft)
+        _validate_day_list_coverage(draft, payload)
         return draft

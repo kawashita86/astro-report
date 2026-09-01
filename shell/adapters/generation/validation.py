@@ -30,6 +30,7 @@ __all__ = [
     "_SECTION_FIELD_NAMES",
     "_collect_known_entry_ids",
     "_validate_citations",
+    "_validate_day_list_coverage",
     "_validate_no_date_tokens",
 ]
 
@@ -147,3 +148,38 @@ def _validate_no_date_tokens(draft: GeneratedDraft) -> None:
                     "date-shaped token; dates in this Section are code-projected "
                     "upstream (Story 3.7) and must never be written by the model.",
                 )
+
+
+def _validate_day_list_coverage(draft: GeneratedDraft, payload: dict[str, Any]) -> None:
+    """Every entry in ``payload["day_lists"][section]`` must be cited by at
+    least one Sentence in that same Section.
+
+    ``shell/http/draft_view.py::_render_list`` renders every day-list entry
+    regardless of citation (an uncited entry still shows its date, with no
+    caption) -- deliberately so a code-projected date is never dropped just
+    because the model skipped it. But a day-list item with no caption at all
+    is a visibly incomplete Report, not a legitimate output: unlike the other
+    six Sections, Sections 6/7 have a closed, code-known set of entries the
+    model is being handed to describe, so "the model wrote nothing about
+    this one" is checkable and worth catching here, before export, rather
+    than leaving a blank line for Francesco to notice.
+    """
+    day_lists = payload.get("day_lists", {})
+    for section in _DATE_TOKEN_SECTIONS:
+        known_ids = {
+            entry["id"]
+            for entry in day_lists.get(section, [])
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+        }
+        cited_ids = {
+            entry_id for sentence in getattr(draft, section) for entry_id in sentence.entry_ids
+        }
+        missing = known_ids - cited_ids
+        if missing:
+            raise GenerationError(
+                "day_list_coverage_validation",
+                f"Section {section!r} has {len(missing)} day-list entry id(s) with no "
+                f"citing sentence: {sorted(missing)!r}. Every entry in "
+                "payload['day_lists'] must be described by at least one sentence in "
+                "its own Section.",
+            )
