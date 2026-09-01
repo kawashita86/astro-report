@@ -118,10 +118,11 @@ def _kinds(result: GateResult) -> list[str]:
 # --- Matrix row: invented body -------------------------------------------------
 
 
-def test_a_claimed_planet_absent_from_its_cited_entries_facts_is_invented() -> None:
-    """The cited entry is a Lunation -- a kind that never exposes a body/sign
-    fact (Design Notes category table) -- so zero of the Claim's cited
-    entries assert anything in that category at all."""
+def test_a_claimed_planet_not_matching_the_cited_lunations_moon_fact_is_contradicted() -> None:
+    """Since the Story 5.2 amendment, a cited Lunation always asserts
+    ``"moon"`` -- a real, non-empty fact -- so a Claim naming a different
+    planet (Saturn) against it is a mismatch against a known fact
+    (``"contradicted_fact"``), not an absence of any fact at all."""
     lunation = Lunation(
         kind="new_moon",
         occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
@@ -140,9 +141,33 @@ def test_a_claimed_planet_absent_from_its_cited_entries_facts_is_invented() -> N
     result = run_gate(draft, frozen, _VOCABULARY)
 
     assert result.passed is False
-    assert _kinds(result) == ["invented_fact"]
+    assert _kinds(result) == ["contradicted_fact"]
     assert result.violations[0].section == "energia_generale"
     assert result.violations[0].entry_ids == (lunation_id,)
+    assert result.violations[0].detail == (
+        "claims body/sign saturn, but the cited entries assert moon."
+    )
+
+
+def test_a_claimed_planet_whose_cited_id_resolves_to_no_entry_is_invented() -> None:
+    """Every real Payload entry kind ``_body_sign_facts`` recognizes now
+    asserts some body fact (the Story 5.2 amendment folded ``lunation`` in
+    too), so the ``"invented_fact"`` branch for this category is only
+    reachable when none of a Claim's cited ids resolve to any indexed
+    entry at all -- exercised directly here, since no real entry kind can
+    demonstrate it anymore."""
+    draft = _draft(
+        energia_generale=(
+            Sentence(text="Saturno domina il transito.", entry_ids=("does-not-exist",)),
+        )
+    )
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["invented_fact"]
+    assert result.violations[0].section == "energia_generale"
+    assert result.violations[0].entry_ids == ("does-not-exist",)
 
 
 # --- Matrix row: wrong date -----------------------------------------------------
@@ -201,10 +226,9 @@ def test_a_claimed_house_not_matching_the_cited_lunations_natal_house_is_contrad
 
 def test_golden_example_wrong_house_from_the_design_notes() -> None:
     """Design Notes' literal example. ``"luna"`` is itself a planet token
-    (the Moon), and the cited entry is a Lunation -- a kind that never
-    exposes a body/sign fact -- so this sentence also fails ``invented_fact``
-    for the body/sign category; the spec's example illustrates the house
-    violation specifically, not exclusivity."""
+    (the Moon), and the cited Lunation asserts exactly that body (Story 5.2
+    amendment) -- so this sentence is grounded on body/sign and fails only
+    on the house it also names, not on "luna" itself."""
     lunation = Lunation(
         kind="full_moon",
         occurred_at=datetime(2026, 1, 12, tzinfo=UTC),
@@ -225,10 +249,40 @@ def test_golden_example_wrong_house_from_the_design_notes() -> None:
     result = run_gate(draft, frozen, _VOCABULARY)
 
     assert result.passed is False
+    assert _kinds(result) == ["contradicted_fact"]
     house_violations = [v for v in result.violations if v.kind == "contradicted_fact"]
     assert len(house_violations) == 1
     assert house_violations[0].section == "amore"
     assert house_violations[0].entry_ids == (lunation_id,)
+
+
+def test_a_lunation_grounds_a_luna_claim_with_no_other_violation() -> None:
+    """Story 5.2 amendment's own positive case: a well-formed "Luna
+    Nuova"/"Luna Piena" sentence whose only checkable category is body/sign,
+    citing a matching Lunation, now passes -- the false-positive this
+    amendment exists to fix."""
+    lunation = Lunation(
+        kind="new_moon",
+        occurred_at=datetime(2026, 1, 10, tzinfo=UTC),
+        longitude=Decimal("197.0"),
+        natal_house=9,
+    )
+    frozen = _freeze(lunations=(lunation,))
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+
+    draft = _draft(
+        consiglio_finale=(
+            Sentence(
+                text="La Luna Nuova apre un portale di nuove intenzioni.",
+                entry_ids=(lunation_id,),
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
 
 
 # --- Regression: partial match within one multi-value category (code-review #1) ---
@@ -269,12 +323,15 @@ def test_a_second_unmatched_house_in_the_same_sentence_still_fails() -> None:
 # --- Matrix row: invented body, sign variant --------------------------------------
 
 
-def test_a_claimed_sign_is_always_invented_given_todays_payload_shape() -> None:
+def test_a_claimed_sign_is_contradicted_by_a_cited_lunations_moon_fact() -> None:
     """No entry kind this story checks ever exposes a sign value (Design
     Notes category table; only body names like ``"mars"`` appear in
-    ``transiting_body``/``natal_point``/``body``) -- cited against a
-    Lunation (itself body/sign-silent), a sign-only Claim is always
-    ``invented_fact``."""
+    ``transiting_body``/``natal_point``/``body``, and the Story 5.2
+    amendment's Lunation->``"moon"`` fact is body-only, never a sign). Since
+    the cited Lunation now asserts a real body/sign-category fact
+    (``"moon"``), a sign-only Claim it cannot match is ``contradicted_fact``,
+    not ``invented_fact`` -- the entry does assert something here, just
+    never a sign."""
     lunation = Lunation(
         kind="new_moon",
         occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
@@ -293,7 +350,8 @@ def test_a_claimed_sign_is_always_invented_given_todays_payload_shape() -> None:
     result = run_gate(draft, frozen, _VOCABULARY)
 
     assert result.passed is False
-    assert _kinds(result) == ["invented_fact"]
+    assert _kinds(result) == ["contradicted_fact"]
+    assert result.violations[0].detail == "claims body/sign leo, but the cited entries assert moon."
 
 
 # --- Matrix row: false retrograde -------------------------------------------------
@@ -575,12 +633,6 @@ def test_a_non_claim_sentence_with_no_citation_is_never_policed() -> None:
 
 
 def test_a_draft_with_all_four_violation_classes_injected_fails_once_per_class() -> None:
-    lunation = Lunation(
-        kind="new_moon",
-        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
-        longitude=Decimal("10.0"),
-        natal_house=7,
-    )
     wrong_date_aspect = TransitAspectEvent(
         transiting_body="venus",
         natal_point="sun",
@@ -599,17 +651,18 @@ def test_a_draft_with_all_four_violation_classes_injected_fails_once_per_class()
         orb_entry_at=datetime(2026, 1, 10, tzinfo=UTC),
         orb_exit_at=None,
     )
-    frozen = _freeze(
-        aspects=(wrong_date_aspect, correctly_dated_aspect), lunations=(lunation,)
-    )
+    frozen = _freeze(aspects=(wrong_date_aspect, correctly_dated_aspect))
     frozen_aspects = frozen["sections"]["energia_generale"]["aspects"]
-    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
     wrong_date_id = _find_id(frozen_aspects, transiting_body="venus")
     correctly_dated_id = _find_id(frozen_aspects, transiting_body="jupiter")
 
     draft = _draft(
         energia_generale=(
-            Sentence(text="Saturno domina il transito.", entry_ids=(lunation_id,)),
+            # No real Payload entry kind is body/sign-silent anymore (Story
+            # 5.2 amendment folded "lunation" into the category too) -- an
+            # unresolvable id is the only way left to exercise the
+            # "invented_fact" branch.
+            Sentence(text="Saturno domina il transito.", entry_ids=("does-not-exist",)),
         ),
         amore=(Sentence(text="Il 20 porta una svolta.", entry_ids=(wrong_date_id,)),),
         lavoro=(Sentence(text="Venere illumina il tuo lavoro.", entry_ids=()),),
@@ -725,7 +778,7 @@ def test_a_sentence_failing_all_four_categories_reports_them_in_the_fixed_order(
 
     assert result.passed is False
     assert _kinds(result) == [
-        "invented_fact",  # body/sign: Lunation exposes neither
+        "contradicted_fact",  # body/sign: Lunation asserts "moon", claimed "marte"
         "contradicted_fact",  # house: cited natal_house=3, claimed 7
         "contradicted_fact",  # date: cited day=10, claimed 25
         "invented_fact",  # retrograde: Lunation exposes neither

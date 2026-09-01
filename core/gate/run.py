@@ -250,6 +250,21 @@ def _asserted_retrograde(lowered_text: str, vocabulary: GateVocabulary) -> bool:
 
 
 def _body_sign_facts(entries: list[dict[str, Any]]) -> frozenset[str]:
+    """Story 5.2 amendment: a ``lunation`` entry always asserts ``"moon"``.
+    A Lunation *is* the Moon (Delta-lambda between Moon and Sun crossing 0/180
+    degrees, ``core/types/transits.py::Lunation``) -- its dataclass carries no
+    ``body`` field precisely because that fact never varies, not because the
+    body is unknown or unchecked. The original category table (Design Notes,
+    ``spec-5-2``) omitted ``lunation`` here, which meant every correctly
+    written "Luna Nuova"/"Luna Piena" sentence failed as ``invented_fact``
+    for the word "luna" -- a false positive on every single month's Report,
+    since a Lunation happens monthly and Italian has no natural way to name
+    one without the word. No sign fact is added for the same entry: a
+    Lunation's ``longitude`` would let one be derived, but that is
+    re-deriving astronomy from a raw degree, which this module's Never
+    section forbids (AD-1) -- a sign-naming Claim citing only a Lunation
+    still correctly fails.
+    """
     facts: set[str] = set()
     for entry in entries:
         kind = entry.get("kind")
@@ -262,6 +277,8 @@ def _body_sign_facts(entries: list[dict[str, Any]]) -> frozenset[str]:
             value = entry.get("body")
             if isinstance(value, str):
                 facts.add(value.lower())
+        elif kind == "lunation":
+            facts.add("moon")
     return frozenset(facts)
 
 
