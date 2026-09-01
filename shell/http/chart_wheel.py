@@ -75,10 +75,12 @@ def build_subject(client: Client, chart: StoredNatalChart) -> AstrologicalSubjec
     recomputed via Kerykeion's own subject factory (ARCHITECTURE-SPINE.md
     FR-5; the story's Boundaries & Constraints).
 
-    ``city``/``nation`` are placeholders -- Kerykeion requires the fields for
-    its chart header, but this view is Francesco's own verification tool,
-    never Client-facing, and no birthplace name is stored (only coordinates
-    and an IANA zone).
+    ``city`` carries the Client's stored ``birthplace_name`` (AD-16, amended
+    2026-09-01); ``nation`` stays empty because Kerykeion's own header
+    renders ``f"{city}, {nation}"`` and the stored name is already the
+    geocoder's full place string -- splitting it into two fields would only
+    reconstruct what it already was. This view is Francesco's own
+    verification tool, never Client-facing.
     """
     planet_points: dict[str, KerykeionPointModel] = {}
     active_points: list[str] = []
@@ -130,7 +132,7 @@ def build_subject(client: Client, chart: StoredNatalChart) -> AstrologicalSubjec
         # Escaping here is the only place in this pipeline that can stop a
         # Client name from becoming a stored-XSS payload in the browser.
         "name": html.escape(client.name, quote=True),
-        "city": "",
+        "city": html.escape(client.birthplace_name or "", quote=True),
         "nation": "",
         "lng": float(client.longitude),
         "lat": float(client.latitude),

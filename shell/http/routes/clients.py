@@ -480,9 +480,11 @@ def client_edit_form(
 ) -> Response:
     """The correction form, prefilled from the stored Client row (Story 2.7).
 
-    Birthplace has no stored free-text form to prefill from -- only resolved
-    lat/lon/zone are stored -- so it starts blank and must be retyped even to
-    reconfirm the same place; ``PLACE_CACHE`` makes that cheap.
+    Birthplace is prefilled from the Client's own stored ``birthplace_name``
+    (AD-16, amended 2026-09-01) exactly like every other field -- Francesco
+    can leave it as-is to reconfirm the same place, or replace it to correct
+    it; either way it is re-resolved on submission, ``PLACE_CACHE`` making a
+    reconfirmation cheap.
     """
     client = session.get(Client, client_id)
     if client is None:
@@ -492,7 +494,7 @@ def client_edit_form(
         "name": client.name,
         "birth_date": client.birth_date.isoformat(),
         "birth_time": client.birth_time.strftime("%H:%M"),
-        "birthplace": "",
+        "birthplace": client.birthplace_name or "",
     }
     return _render_edit_form(request, client=client, session=session, status_code=200, form=form)
 

@@ -2,9 +2,9 @@
 
 Consulted before every geocode call and written through after a fresh
 unambiguous resolution. Per AD-16 it is an accelerator only, never a source
-of truth once a Client has persisted its own immutable lat/lon/zone snapshot
--- nothing here is ever read back into an already-created Client. Keyed on
-the *normalized* query text so trivial variation (case, surrounding
+of truth once a Client has persisted its own immutable lat/lon/zone/name
+snapshot -- nothing here is ever read back into an already-created Client.
+Keyed on the *normalized* query text so trivial variation (case, surrounding
 whitespace) still hits the cache; the geocoder, not this module, is the
 source of truth for what a query resolves to.
 """
@@ -39,6 +39,14 @@ class PlaceCache(SQLModel, table=True):
     latitude: Decimal
     longitude: Decimal
     iana_zone: str
+    #: The geocoder's own name for the match, cached alongside the
+    #: coordinates so a cache hit can still supply one without re-querying
+    #: Nominatim (AD-16, amended 2026-09-01). Nullable: a row cached before
+    #: this column existed honestly has no recorded name, mirroring
+    #: ``Client.birthplace_name``'s own nullability. ``lookup_cached_place()``
+    #: passes a legacy ``NULL`` straight through as ``None`` rather than
+    #: fabricating a value.
+    display_name: str | None = Field(default=None, max_length=500)
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,7 @@ class CachedPlace:
     latitude: Decimal
     longitude: Decimal
     iana_zone: str
+    display_name: str | None
 
 
 def normalize_place_text(place_text: str) -> str:
@@ -67,7 +76,12 @@ def lookup_cached_place(session: Session, place_text: str) -> CachedPlace | None
     ).first()
     if row is None:
         return None
-    return CachedPlace(latitude=row.latitude, longitude=row.longitude, iana_zone=row.iana_zone)
+    return CachedPlace(
+        latitude=row.latitude,
+        longitude=row.longitude,
+        iana_zone=row.iana_zone,
+        display_name=row.display_name,
+    )
 
 
 def store_resolved_place(
@@ -77,6 +91,7 @@ def store_resolved_place(
     latitude: Decimal,
     longitude: Decimal,
     iana_zone: str,
+    display_name: str,
 ) -> None:
     """Write-through after a fresh unambiguous resolution.
 
@@ -99,6 +114,7 @@ def store_resolved_place(
                     latitude=latitude,
                     longitude=longitude,
                     iana_zone=iana_zone,
+                    display_name=display_name,
                 )
             )
             session.flush()

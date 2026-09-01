@@ -77,6 +77,7 @@ class NominatimGeocoder:
                 longitude=cached.longitude,
                 iana_zone=cached.iana_zone,
                 utc_offset=self._historical_offset(cached.iana_zone, birth_local_time),
+                display_name=cached.display_name,
             )
 
         candidates = self._geocode(place_text)
@@ -93,6 +94,7 @@ class NominatimGeocoder:
         match = candidates[0]
         latitude = _to_decimal(match.latitude)
         longitude = _to_decimal(match.longitude)
+        display_name = match.address
         iana_zone = self._zone_for(latitude, longitude)
         # Computed before the cache write so an ambiguous/nonexistent birth
         # instant is rejected before a place is ever persisted to the cache.
@@ -103,12 +105,14 @@ class NominatimGeocoder:
             latitude=latitude,
             longitude=longitude,
             iana_zone=iana_zone,
+            display_name=display_name,
         )
         return ResolvedPlace(
             latitude=latitude,
             longitude=longitude,
             iana_zone=iana_zone,
             utc_offset=utc_offset,
+            display_name=display_name,
         )
 
     def resolve_candidate(
@@ -127,6 +131,7 @@ class NominatimGeocoder:
             longitude=candidate.longitude,
             iana_zone=iana_zone,
             utc_offset=utc_offset,
+            display_name=candidate.display_name,
         )
 
     def _lookup_cache(self, place_text: str) -> CachedPlace | None:

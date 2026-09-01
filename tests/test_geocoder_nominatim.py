@@ -77,6 +77,8 @@ def test_a_single_unambiguous_match_resolves(session: Session) -> None:
     # Coordinates carry at least four decimal places (FR-2).
     assert -result.latitude.as_tuple().exponent >= 4
     assert -result.longitude.as_tuple().exponent >= 4
+    # The geocoder's own name for the match, carried through (AD-16, amended 2026-09-01).
+    assert result.display_name == "Rome, Italy"
 
 
 def test_a_1975_italian_birth_resolves_to_cest_not_cet(session: Session) -> None:
@@ -120,9 +122,11 @@ def test_a_repeat_place_is_served_from_cache_without_a_new_geocoder_query(
     geocoder.resolve("Rome, Italy", datetime(2026, 1, 15, 12, 0))
     assert len(geolocator.calls) == 1
 
-    geocoder.resolve("Rome, Italy", datetime(2026, 6, 15, 12, 0))
+    second = geocoder.resolve("Rome, Italy", datetime(2026, 6, 15, 12, 0))
 
     assert len(geolocator.calls) == 1, "the second resolution must not re-query the geocoder"
+    assert isinstance(second, ResolvedPlace)
+    assert second.display_name == "Rome, Italy", "a cache hit still supplies the place name"
 
 
 def test_a_cache_hit_still_derives_the_offset_from_the_new_birth_instant(
@@ -264,6 +268,7 @@ def test_resolve_candidate_resolves_zone_and_offset(session: Session) -> None:
         longitude=Decimal("12.4829"),
         iana_zone="Europe/Rome",
         utc_offset=timedelta(hours=2),  # CEST, mirroring the 1975 resolve() case
+        display_name="Rome, Italy",  # from the chosen PlaceCandidate (AD-16, amended 2026-09-01)
     )
 
 

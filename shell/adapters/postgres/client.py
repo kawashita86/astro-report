@@ -66,8 +66,8 @@ _CLIENT_CASCADE_TABLES: frozenset[str] = frozenset(
 
 class Client(SQLModel, table=True):
     """A Client's identity and its immutable birthplace snapshot (AD-16):
-    latitude, longitude and IANA zone, resolved once at creation and never
-    re-read from ``PLACE_CACHE`` afterward.
+    latitude, longitude, IANA zone and the geocoded place name, resolved once
+    at creation and never re-read from ``PLACE_CACHE`` afterward.
 
     No uniqueness constraint on ``name`` -- two Clients may share a name and
     persist as distinct rows.
@@ -92,6 +92,16 @@ class Client(SQLModel, table=True):
     #: a generous bound with no HTTP-boundary check needed (not a raw form
     #: field).
     iana_zone: str = Field(max_length=64)
+    #: The geocoder's own name for the resolved place -- part of the same
+    #: immutable snapshot as latitude/longitude/iana_zone (AD-16, amended
+    #: 2026-09-01), captured at resolution time so the Anagrafica form and
+    #: the chart wheel can show it back without ever re-geocoding. Nullable
+    #: for the same reason ``0021_gate_vocabulary_hash``'s columns are: a
+    #: Client row written before this column existed honestly has no
+    #: recorded name to backfill -- ``NULL`` means "not recorded", not a
+    #: partial write. Every Client created or corrected after this column
+    #: exists always has one, unconditionally.
+    birthplace_name: str | None = Field(default=None, max_length=500)
 
 
 class StoredNatalChart(SQLModel, table=True):
@@ -272,6 +282,7 @@ def create_client_with_chart(
         latitude=resolved_place.latitude,
         longitude=resolved_place.longitude,
         iana_zone=resolved_place.iana_zone,
+        birthplace_name=resolved_place.display_name,
     )
     chart = _build_stored_chart(
         client_id=client.id,
@@ -334,6 +345,7 @@ def correct_client_and_chart(
     client.latitude = resolved_place.latitude
     client.longitude = resolved_place.longitude
     client.iana_zone = resolved_place.iana_zone
+    client.birthplace_name = resolved_place.display_name
     session.add(client)
 
     session.flush()

@@ -41,6 +41,7 @@ _RESOLVED_PLACE = ResolvedPlace(
     longitude=_LONGITUDE,
     iana_zone="America/Chicago",
     utc_offset=timedelta(hours=-6),  # CST; not read by create_client_with_chart
+    display_name="Chicago, IL",
 )
 _BIRTH_INSTANT_UTC = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
 
@@ -103,6 +104,9 @@ def test_the_client_stores_its_own_immutable_place_snapshot(session: Session) ->
     assert stored.latitude == _LATITUDE
     assert stored.longitude == _LONGITUDE
     assert stored.iana_zone == "America/Chicago"
+    # AD-16, amended 2026-09-01: the geocoded place name joins the same
+    # immutable snapshot as lat/lon/zone.
+    assert stored.birthplace_name == "Chicago, IL"
 
 
 def test_nothing_persists_without_an_explicit_commit(session: Session) -> None:
@@ -139,6 +143,7 @@ def test_client_and_chart_string_columns_are_bounded() -> None:
     ``migrations/versions/0014_bound_string_columns.py``."""
     assert Client.__table__.c.name.type.length == 200
     assert Client.__table__.c.iana_zone.type.length == 64
+    assert Client.__table__.c.birthplace_name.type.length == 500
     assert StoredNatalChart.__table__.c.computation_config_content_hash.type.length == 64
 
 

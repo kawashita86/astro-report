@@ -263,9 +263,12 @@ No arrow runs from `core` to `shell`. There is no exception.
 - **Rule:** the `Client` type has no optional birth fields and no partial constructor. Birthplace
   resolution and historical-offset resolution complete before a Client is persisted; failure means no
   Client row. There is no noon chart, no solar-house fallback and no house-less path anywhere in the
-  codebase. The Client stores its **own immutable snapshot** of the resolved latitude, longitude and
-  IANA zone; `PLACE_CACHE` is a lookup accelerator consulted before geocoding and never a source of
-  truth afterwards, so a later geocoder correction can never silently alter a chart already computed.
+  codebase. The Client stores its **own immutable snapshot** of the resolved latitude, longitude,
+  IANA zone, **and the geocoded place name that produced them** (amended 2026-09-01: the name is
+  captured at resolution time from the same `Geocoder` call, so it never requires a separate lookup
+  or a second source of truth); `PLACE_CACHE` is a lookup accelerator consulted before geocoding and
+  never a source of truth afterwards, so a later geocoder correction can never silently alter a
+  chart already computed.
 
 ### AD-17 — Durability is an operator action with a visible staleness signal
 

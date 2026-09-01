@@ -82,6 +82,7 @@ _RESOLVED_PLACE = ResolvedPlace(
     longitude=_LONGITUDE,
     iana_zone="America/Chicago",
     utc_offset=timedelta(hours=-6),
+    display_name="Fort Worth, TX",
 )
 
 _VALID_FORM = {
@@ -359,6 +360,9 @@ def test_all_fields_unambiguous_birthplace_persists_client_and_chart(
     assert clients[0].latitude == _LATITUDE
     assert clients[0].longitude == _LONGITUDE
     assert clients[0].iana_zone == "America/Chicago"
+    # AD-16, amended 2026-09-01: the geocoded place name joins the same
+    # immutable snapshot as lat/lon/zone.
+    assert clients[0].birthplace_name == "Fort Worth, TX"
 
     # epic-2-retro-item-14: the success body links straight to the new
     # Client's chart-verification view, still 200, still names the outcome.
@@ -411,12 +415,14 @@ def test_a_fresh_place_via_the_real_geocoder_is_written_through_to_place_cache(
     assert clients[0].latitude == Decimal("52.52")
     assert clients[0].longitude == Decimal("13.405")
     assert clients[0].iana_zone == "Europe/Berlin"
+    assert clients[0].birthplace_name == "Berlin, Germany"
 
     cached = lookup_cached_place(db_session, "Berlin, Germany")
     assert cached is not None, "the fresh place was not written through to PLACE_CACHE"
     assert cached.latitude == Decimal("52.52")
     assert cached.longitude == Decimal("13.405")
     assert cached.iana_zone == "Europe/Berlin"
+    assert cached.display_name == "Berlin, Germany"
 
 
 def test_a_second_create_of_the_same_place_is_served_from_place_cache(
@@ -450,6 +456,9 @@ def test_a_second_create_of_the_same_place_is_served_from_place_cache(
     clients = _clients(db_session)
     assert len(clients) == 2
     assert len(geolocator.calls) == 1, "the second create must be served from PLACE_CACHE"
+    assert all(client.birthplace_name == "Berlin, Germany" for client in clients), (
+        "a cache-served resolution still supplies the place name"
+    )
 
     assert clients[0].iana_zone == clients[1].iana_zone == "Europe/Berlin"
     assert clients[0].latitude == clients[1].latitude == Decimal("52.52")
@@ -512,7 +521,9 @@ def test_choosing_a_candidate_persists_and_never_re_queries_resolve(
     response = authenticated_client.post("/clients", data=form)
 
     assert response.status_code == 200, response.text
-    assert len(_clients(db_session)) == 1
+    clients = _clients(db_session)
+    assert len(clients) == 1
+    assert clients[0].birthplace_name == "Fort Worth, TX"
     assert geocoder.resolve_calls == [], "an explicit choice must never re-query resolve()"
     assert len(geocoder.resolve_candidate_calls) == 1
 

@@ -636,6 +636,9 @@ So that a 1975 Italian birth is read as CEST rather than as today's CET, which i
 **Then** resolution returns latitude and longitude to at least four decimal places
 **And** it returns the IANA zone and the UTC offset in force at that instant at that location, derived from `timezonefinder` and `zoneinfo`, including historical DST rules
 **And** the offset is never the present-day offset for that location
+**And** it returns the geocoder's own place name for the match — the same field already returned for an ambiguous candidate — so the resolved place can be shown back to Francesco later without a second lookup
+
+*(Amended 2026-09-01, correct-course: closes the gap where an unambiguous match discarded its own place name while an ambiguous one already carried it as `PlaceCandidate.display_name`.)*
 
 **Given** a birth in Italy on 1975-06-15
 **When** the birthplace is resolved
@@ -718,9 +721,11 @@ So that a half-formed Client can never silently corrupt Amore, Lavoro and Beness
 
 **Given** a successfully created Client
 **When** the row is written
-**Then** it stores its own immutable snapshot of the resolved latitude, longitude and IANA zone
+**Then** it stores its own immutable snapshot of the resolved latitude, longitude, IANA zone, and the geocoded place name that produced them
 **And** the Natal Chart is computed once and stored with it
 **And** both use UUIDv7 primary keys
+
+*(Amended 2026-09-01, correct-course: the place name enters the same immutable snapshot as lat/lon/zone — see AD-16's amendment — so it is captured here, at creation, not derived later.)*
 
 **Given** two Clients entered with the same name
 **When** both are created
@@ -786,6 +791,9 @@ So that I can eyeball it against what I would have seen on Astro.com before I tr
 **Given** a Client with a stored Natal Chart
 **When** Francesco opens the chart wheel
 **Then** the wheel shows planetary positions, house cusps and natal Aspects
+**And** the wheel's Location header shows the Client's stored geocoded place name, not a blank field
+
+*(Amended 2026-09-01, correct-course: `city`/`nation` were placeholders only because no place name was stored anywhere in the system; that gap is closed by Story 2.3's amendment.)*
 
 **Given** the wheel
 **When** it is rendered
@@ -816,7 +824,7 @@ So that I do not silently invalidate work I have already sent to a client.
 
 **Given** a correction that changes the birthplace
 **When** it is applied
-**Then** the birthplace is re-resolved and the Client's immutable coordinate and zone snapshot is replaced as part of the same change
+**Then** the birthplace is re-resolved and the Client's immutable coordinate, zone and place-name snapshot is replaced as part of the same change
 
 **Given** a Client whose birth data has not changed
 **When** any operation runs
@@ -2018,7 +2026,13 @@ So that entering data is calm and deleting a client is deliberate.
 
 **Given** an ambiguous birthplace
 **When** the geocoder returns candidates
-**Then** the choice appears as an in-form sub-state that preserves the typed input; on correction the birthplace field is never prefilled
+**Then** the choice appears as an in-form sub-state that preserves the typed input
+
+**Given** the correction form for a Client with a stored place name
+**When** it renders
+**Then** the birthplace field is prefilled with that stored name, exactly like every other field on the form; Francesco can leave it as-is to reconfirm the same place or replace it to correct it
+
+*(Amended 2026-09-01, correct-course: reverses the original AC. It existed only because no place name was ever stored to prefill from (AD-16 as originally written) — that constraint is gone. `tests/test_http_client_correction.py`'s `test_the_edit_form_is_prefilled_from_the_client_row_and_birthplace_is_blank` inverts along with it.)*
 
 **Given** the delete-Client action
 **When** Francesco triggers it

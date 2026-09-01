@@ -68,6 +68,7 @@ _RESOLVED_PLACE = ResolvedPlace(
     longitude=_LONGITUDE,
     iana_zone="America/Chicago",
     utc_offset=timedelta(hours=-6),
+    display_name="Fort Worth, TX",
 )
 _BIRTH_INSTANT_UTC = datetime(2026, 1, 1, 6, 0, tzinfo=UTC)
 
@@ -266,6 +267,10 @@ def test_a_client_with_a_stored_chart_shows_the_wheel(
     assert "kr:node='Aspects_Wheel'" in body
     assert "kr:aspectname=" in body
 
+    # Story 2.6, amended 2026-09-01: the Location header shows the Client's
+    # stored geocoded place name, no longer a blank `city`/`nation` pair.
+    assert "Fort Worth, TX" in body
+
 
 # --- Superseded-chart chain at N=2 (epic-2 retro item 12) -----------------------------
 
@@ -399,6 +404,38 @@ def test_a_client_name_with_markup_is_escaped_in_the_svg(
     seeded = _seed_client_with_chart(db_session, name="<script>alert(1)</script>")
 
     response = authenticated_client.get(f"/clients/{seeded.id}/chart")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "<script>alert(1)</script>" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+
+
+def test_a_birthplace_name_with_markup_is_escaped_in_the_svg(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """``build_subject()``'s `city` carries the stored `birthplace_name`
+    (Story 2.6, amended 2026-09-01) into the same unescaped Kerykeion header
+    as the Client name -- it needs the identical escaping."""
+    client = create_client_with_chart(
+        db_session,
+        name="Ada Lovelace",
+        birth_date=date(2026, 1, 1),
+        birth_time=dt_time(0, 0),
+        resolved_place=ResolvedPlace(
+            latitude=_LATITUDE,
+            longitude=_LONGITUDE,
+            iana_zone="America/Chicago",
+            utc_offset=timedelta(hours=-6),
+            display_name="<script>alert(1)</script>",
+        ),
+        natal_chart=_natal_chart(),
+        computation_config=_COMPUTATION_CONFIG,
+        ephemeris_identity=_EPHEMERIS_IDENTITY,
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/clients/{client.id}/chart")
 
     assert response.status_code == 200
     body = response.text

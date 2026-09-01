@@ -76,6 +76,7 @@ _RESOLVED_PLACE = ResolvedPlace(
     longitude=_LONGITUDE,
     iana_zone="America/Chicago",
     utc_offset=timedelta(hours=-6),
+    display_name="Fort Worth, TX",
 )
 
 # The corrected birth data/place -- a different city, so a correction that
@@ -87,6 +88,7 @@ _NEW_RESOLVED_PLACE = ResolvedPlace(
     longitude=_NEW_LONGITUDE,
     iana_zone="America/New_York",
     utc_offset=timedelta(hours=-5),
+    display_name="New York, NY",
 )
 
 _VALID_FORM = {
@@ -407,9 +409,12 @@ def test_anonymous_post_edit_is_rejected(
 # --- Prefilled edit form ----------------------------------------------------------
 
 
-def test_the_edit_form_is_prefilled_from_the_client_row_and_birthplace_is_blank(
+def test_the_edit_form_is_prefilled_from_the_client_row_including_birthplace(
     authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
 ) -> None:
+    """Story 9.4, amended 2026-09-01: birthplace is prefilled from the
+    Client's stored ``birthplace_name`` exactly like every other field --
+    it no longer starts blank now that a name is stored (AD-16, amended)."""
     seeded = _seed_client_with_chart(db_session, app_instance)
 
     response = authenticated_client.get(f"/clients/{seeded.id}/edit")
@@ -421,6 +426,25 @@ def test_the_edit_form_is_prefilled_from_the_client_row_and_birthplace_is_blank(
     assert 'value="00:00"' in body
 
     birthplace_value = re.search(r'name="birthplace"[^>]*value="([^"]*)"', body)
+    assert birthplace_value is not None
+    assert birthplace_value.group(1) == seeded.birthplace_name
+
+
+def test_the_edit_form_leaves_birthplace_blank_for_a_client_with_no_stored_name(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """A Client row written before ``birthplace_name`` existed has ``NULL``
+    (``0022_birthplace_name.py``) -- the form falls back to blank rather than
+    rendering the literal string "None"."""
+    seeded = _seed_client_with_chart(db_session, app_instance)
+    seeded.birthplace_name = None
+    db_session.add(seeded)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/clients/{seeded.id}/edit")
+
+    assert response.status_code == 200
+    birthplace_value = re.search(r'name="birthplace"[^>]*value="([^"]*)"', response.text)
     assert birthplace_value is not None
     assert birthplace_value.group(1) == ""
 
@@ -591,6 +615,7 @@ def test_confirmed_correction_supersedes_the_old_chart_and_updates_the_client(
     assert seeded.latitude == _NEW_LATITUDE
     assert seeded.longitude == _NEW_LONGITUDE
     assert seeded.iana_zone == "America/New_York"
+    assert seeded.birthplace_name == "New York, NY"
 
 
 # --- Oversized name (deferred-work item 41) -----------------------------------------

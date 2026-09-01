@@ -41,6 +41,7 @@ def test_a_stored_place_is_served_from_cache(session: Session) -> None:
         latitude=Decimal("41.8933"),
         longitude=Decimal("12.4829"),
         iana_zone="Europe/Rome",
+        display_name="Rome, Italy",
     )
 
     cached = lookup_cached_place(session, "rome,   ITALY")
@@ -49,6 +50,7 @@ def test_a_stored_place_is_served_from_cache(session: Session) -> None:
     assert cached.latitude == Decimal("41.8933")
     assert cached.longitude == Decimal("12.4829")
     assert cached.iana_zone == "Europe/Rome"
+    assert cached.display_name == "Rome, Italy"
 
 
 def test_storing_the_same_normalized_place_twice_does_not_raise(session: Session) -> None:
@@ -58,6 +60,7 @@ def test_storing_the_same_normalized_place_twice_does_not_raise(session: Session
         latitude=Decimal("45.4642"),
         longitude=Decimal("9.1900"),
         iana_zone="Europe/Rome",
+        display_name="Milan, Italy",
     )
     store_resolved_place(
         session,
@@ -65,6 +68,7 @@ def test_storing_the_same_normalized_place_twice_does_not_raise(session: Session
         latitude=Decimal("45.4642"),
         longitude=Decimal("9.1900"),
         iana_zone="Europe/Rome",
+        display_name="Milan, Italy",
     )
 
     assert lookup_cached_place(session, "Milan, Italy") is not None
