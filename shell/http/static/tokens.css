@@ -617,6 +617,16 @@ h3 {
   line-height: var(--font-small-line);
 }
 
+/* `[hidden]` must beat the flex display above, so it is re-asserted here
+ * (same pattern as `.modal-scrim[hidden]`, and `.btn[hidden]` below).
+ * Without this, a `.banner` rendered with the `hidden` attribute (e.g. the
+ * poll-error banner in `report_run_poll.html`) stays visible. Any component
+ * that sets its own `display` needs this same override -- there is no
+ * single rule that covers them all. */
+.banner[hidden] {
+  display: none;
+}
+
 .banner--warning {
   background: var(--warning-surface);
   border-left-color: var(--warning);
@@ -1097,6 +1107,15 @@ h3 {
   line-height: var(--font-label-line);
   text-decoration: none;
   cursor: pointer;
+}
+
+/* `[hidden]` must beat the inline-flex display above (same reasoning as
+ * `.banner[hidden]` and `.modal-scrim[hidden]`) -- otherwise a `.btn`
+ * rendered with the `hidden` attribute (e.g. `report_run_poll.html`'s
+ * `[data-poll-retry]` "Riprova" button) stays visible on load and every
+ * time `shell.js` toggles its `.hidden` property. */
+.btn[hidden] {
+  display: none;
 }
 
 .btn:disabled,

@@ -856,6 +856,7 @@ def test_a_client_with_no_reports_shows_an_empty_list(
     assert f"<h1>Report di {ada.name}</h1>" in body
     assert f"<title>Report di {ada.name} — astro-report</title>" in body
     assert "Reports for" not in body
+    assert "<h2>Report disponibili</h2>" not in body
 
 
 @pytest.mark.parametrize(
@@ -974,6 +975,18 @@ def test_reopening_a_listed_report_reaches_the_existing_report_route(
 
     assert response.status_code == 200
     assert f'href="/report-runs/{run.id}/report"' in response.text
+
+
+def test_a_client_with_reports_shows_the_available_reports_heading(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    _create_passed_report(db_session, client_id=ada.id, month="2026-01", natal_chart_id=chart.id)
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert "<h2>Report disponibili</h2>" in response.text
 
 
 def test_a_report_run_that_never_passed_the_gate_is_not_listed(

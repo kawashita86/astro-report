@@ -814,3 +814,19 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-9-1-login-centring-and-mark.md`
   summary: The new sign-in screen mark (`.auth-view__mark-ring`/`-body`) relies purely on `fill`/`stroke` CSS custom properties with no consideration for Windows High-Contrast/`forced-colors` mode, and is the only orientation/branding cue on a screen with no sidebar or header.
   evidence: Blind-hunter review of this story's diff. No existing component in this app is verified against `forced-colors` mode either -- this is a pre-existing, app-wide gap the mark inherits rather than introduces, but it's the first purely-decorative SVG shape (vs. text/icon-font) added to the design system, worth a dedicated pass rather than folding into this one small story.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-poll-banner-reports-heading-and-location-display.md`
+  summary: `.corpus-entry__expand` in `corpus_list.html` has the same `[hidden]`-losing-to-`display` cascade bug just fixed for `.banner`/`.btn`, currently masked only because `shell.js` never re-hides it once shown.
+  evidence: `tokens.css` sets `.corpus-entry__expand { display: inline-block; }` with no `.corpus-entry__expand[hidden] { display: none }` override, identical to the pre-fix `.banner`/`.btn` pattern. It will surface as a visible bug the moment a re-hide code path is added.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-poll-banner-reports-heading-and-location-display.md`
+  summary: The `[hidden]`/`display` cascade bug (author `display` beats the UA `[hidden]` rule regardless of specificity) is patched per-component (`.modal-scrim[hidden]`, now `.banner[hidden]`, `.btn[hidden]`) with no single rule guarding every future component that declares its own `display`.
+  evidence: Three separate components have already needed the identical one-line override; nothing in `tokens.css` stops a fourth component from reintroducing the same bug. A generic `[hidden] { display: none !important; }` (or an equally strong low-specificity rule) near the top of the sheet would close the whole class at once, at the cost of deviating from the codebase's current explicit per-component convention.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-poll-banner-reports-heading-and-location-display.md`
+  summary: `client_reports.html`'s `entry.superseded` renders as plain unstyled text `(tema superato)`, while the equivalent state on `client_list.html` (`row.has_superseded_chart`) uses the styled `.row-badge` component.
+  evidence: Same concept (a report/chart made stale by a later correction) gets two different visual treatments across sibling pages -- `client_reports.html`'s `<span>(tema superato)</span>` has no class, `client_list.html` wraps its equivalent marker in `.row-badge`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-poll-banner-reports-heading-and-location-display.md`
+  summary: The Client model (`shell/adapters/postgres/client.py`) never stores the free-text birthplace name -- only resolved `latitude`/`longitude`/`iana_zone` (AD-16's immutable snapshot decision) -- so neither the Anagrafica edit form nor the SVG birth chart's "Location" field can ever display a place name; both are blank/empty by design, not by bug.
+  evidence: `shell/http/routes/clients.py`'s `client_edit_form` docstring and `shell/http/chart_wheel.py`'s `build_subject` docstring both document this explicitly. Displaying an actual place name anywhere would require a schema change (store the geocoded display name at creation) or on-demand reverse geocoding -- a real feature decision, not a one-shot fix.
