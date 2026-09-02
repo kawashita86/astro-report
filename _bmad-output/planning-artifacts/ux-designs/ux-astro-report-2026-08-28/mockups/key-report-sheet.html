@@ -19,7 +19,7 @@
     --border-hairline:#E6E3F0;--border-strong:#CFC9E0;
     --p50:#F5F3FA;--p100:#EBE7F5;--p700:#42297A;
     --link:#5B3FA0;--focus:#8F79C6;
-    --success:#1F7A4D;--success-s:#E7F4EC;
+    --success:#1F7A4D;--success-s:#E7F4EC;--warning:#B45309;--warning-s:#FBF0E1;
   }
   *{box-sizing:border-box}
   body{margin:0;background:#33303c;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;color:var(--ink-primary)}
@@ -44,6 +44,7 @@
   .tabs a.active{color:var(--p700);border-color:var(--p700)}
   .exportbar{display:flex;align-items:center;gap:10px;padding:14px 32px;background:var(--surface-sunken);border-bottom:1px solid var(--border-hairline);font-size:13px;color:var(--ink-secondary)}
   .exportbar .ok{background:var(--success-s);color:var(--success);font-size:11px;font-weight:600;padding:2px 10px;border-radius:9999px}
+  .exportbar .warn{background:var(--warning-s);color:var(--warning);font-size:11px;font-weight:600;padding:2px 10px;border-radius:9999px}
   .btn{font:inherit;font-weight:600;font-size:13px;border-radius:10px;padding:8px 14px;border:1px solid transparent;white-space:nowrap}
   .exportbar .ok{white-space:nowrap}
   .btn-p{background:var(--p700);color:#fff}
@@ -79,6 +80,8 @@
       </div>
       <div class="exportbar">
         <span class="ok">verifica superata</span>
+        <!-- Story 5.7 (correct-course 2026-09-02): stacks beside "verifica superata", doesn't replace it -->
+        <span class="warn">Superato con 2 eccezioni</span>
         <span>dopo 1 rigenerazione · Payload <span class="mono">9b21e0</span> · guida di stile v8</span>
         <span style="margin-left:auto;display:flex;gap:8px">
           <button class="btn btn-p">Esporta PDF</button>

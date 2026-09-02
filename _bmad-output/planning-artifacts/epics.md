@@ -166,7 +166,7 @@ Postgres project (Europe/Frankfurt), and Alembic wired forward-only. **This is E
 - **AD-7 — The Gate is pure, and is the only path to export.** `run_gate(draft, payload) -> GateResult` lives in `core/gate/`, calls no model and performs no I/O. **Exactly one export function exists**; it takes a stored Report ID and reads only Reports whose persisted `GateResult` is `passed`. No function anywhere accepts a draft and produces an exportable artifact.
 - **AD-8 — Claim classification is a versioned closed vocabulary.** A sentence is a **Claim** if and only if it contains a token from the closed Italian astronomical vocabulary — the ten planets, the twelve signs, `casa` with an ordinal, a day-of-month numeral, `retrogrado`, `stazionario`. The vocabulary is a data file versioned alongside the Gate. **Stated limit:** a sentence that leans on a fact without naming it is not policed. *(This is the architecture's answer to PRD Open Question 1.)*
 - **AD-9 — One Generator adapter; no runtime failover.** Exactly one `Generator` adapter is configured. Changing provider is a deliberate configuration change gated on a recorded data-terms verification, never an automatic fallback. Rate limits and transient failures are absorbed by bounded backoff and run checkpointing.
-- **AD-10 — A report run is a checkpointed row advancing through persisted stages.** A `ReportRun` row advances forward only: `natal_ready → transits_ready → payload_ready → draft_ready → gate_passed → exported`. Each stage persists its output before the next begins, including the cited draft structure. Re-driving a run resumes at the first incomplete stage; every stage function is idempotent on its input. **Regeneration under FR-21 replaces the whole Report, never a single failing Section.** Reaching `exported` happens once; each subsequent export writes an `EXPORT_RECORD` row.
+- **AD-10 — A report run is a checkpointed row advancing through persisted stages.** A `ReportRun` row advances forward only: `natal_ready → transits_ready → payload_ready → draft_ready → gate_passed → exported`. Each stage persists its output before the next begins, including the cited draft structure. Re-driving a run resumes at the first incomplete stage; every stage function is idempotent on its input. **Automatic regeneration under FR-21 replaces the whole Report, never a single failing Section.** *(Amended 2026-09-02: `gate_passed` can also be reached by an accepted-violation closure or a hand-corrected sentence re-check — Stories 5.7/5.8 — neither of which is a "regeneration" or touches `regeneration_count`.)* Reaching `exported` happens once; each subsequent export writes an `EXPORT_RECORD` row.
 - **AD-11 — No durable state on the compute host's filesystem.** All durable state lives in Postgres. The container filesystem carries only the vendored ephemeris, templates and application code. Nothing written at runtime is ever read back after a restart.
 - **AD-12 — UTC in the core; local time exists only at the edges.** Every instant computed or stored is UTC. Core functions take explicit timezone-aware inputs and never consult a system clock or default timezone. Conversion to the Client's local time happens only in `shell/http/`. **The analyzed month is a half-open UTC interval** derived once from the Client's local calendar-month boundaries, so an event at 23:30 local on the last day belongs to exactly one Report.
 - **AD-13 — Section composition is data, not code.** The mapping from each of the eight Sections to its Payload selectors is a versioned data file (`data/sections.toml`), loaded by the core as data. Adding a report format adds a mapping, not a branch.
@@ -1505,6 +1505,16 @@ So that the guarantee holds without anyone remembering to check.
 **And** no function anywhere accepts a draft and produces an exportable artifact
 **And** a test asserts this, so a second export path cannot be added quietly
 
+**Given** every violation in a run's current failing `GateResult` has been accepted, or a
+hand-corrected sentence brings the Gate to a genuine pass (Story 5.7/5.8)
+**When** that resolution completes
+**Then** the `REPORT` row is written the same way — a Report still exists only once the Gate's
+objections are resolved, one way or another, never before
+**And** export is still refused for any run whose Report row does not yet exist
+
+*(Amended 2026-09-02, correct-course: the original "only on a passing GateResult" is the automatic
+case; Story 5.7/5.8 add the two human-resolved paths that also satisfy it.)*
+
 ### Story 5.4: Regenerate a failing Report automatically, whole
 
 As Francesco,
@@ -1547,6 +1557,13 @@ So that I can tell a Style Guide problem from a Gate problem instead of guessing
 **When** export is attempted
 **Then** it is refused, and the reason is stated
 
+**Given** a Report that has exhausted its regeneration bound and is shown with its failing Claims
+**When** Francesco reviews each one
+**Then** he can, per violation, accept it after review (Story 5.7) or correct its sentence and
+re-check the Gate alone (Story 5.8) — both additional to, never a replacement for, Rigenera
+
+*(Amended 2026-09-02, correct-course.)*
+
 ### Story 5.6: Keep the Gate's record so a regression is visible early
 
 As Francesco,
@@ -1568,6 +1585,81 @@ So that a rising regeneration rate warns me before a client ever sees the proble
 **Given** a monthly sample of Reports that passed
 **When** Francesco checks them by hand against their stored Payloads
 **Then** the stored draft citations and Payload entries are available to make that check possible — this is the only measure of the Gate's false-negative rate
+
+### Story 5.7: Accept a Gate violation after review, so a Report can complete despite it
+
+As Francesco,
+I want to explicitly accept a specific Gate violation after reading it,
+So that a Report I judge to be fine despite the Gate's objection isn't stuck forever behind a check I disagree with.
+
+**Acceptance Criteria:**
+
+**Given** a run whose current Gate failure is showing its violation cards
+**When** Francesco accepts one
+**Then** that decision is recorded against the specific `StoredGateResult` and violation it was
+reviewed on, append-only — never silently reversible, mirroring every other Gate-adjacent table's
+immutability
+
+**Given** every violation in the current failing `GateResult` has been accepted
+**When** the last one is accepted
+**Then** a `REPORT` row is written immediately, recording how many violations were accepted and
+which failing `GateResult` it was closed against, and the run advances to `gate_passed` — no new
+Gate check is fabricated to justify it
+
+**Given** a Report written this way
+**When** it is shown anywhere — the reading sheet, Report History, Home's status badges, exports
+**Then** it is visibly and permanently flagged as passed with N accepted exceptions, never rendered
+identically to a clean pass
+
+**Given** SM-5's first-generation pass rate
+**When** it is computed
+**Then** a Report closed this way is excluded, exactly as every other post-first-attempt outcome
+already is — confirmed by a test, not a metric-definition change
+
+**Given** SM-7's periodic hand-sample of passed Reports
+**When** it is drawn
+**Then** a Report closed via accepted violations is eligible for that sample like any other passed
+Report
+
+*(New 2026-09-02, correct-course.)*
+
+### Story 5.8: Correct a violated sentence by hand, and re-check only the Gate
+
+As Francesco,
+I want to reword the one sentence a violation names and see immediately whether that fixes it,
+So that a wording problem doesn't cost a full paid regeneration and doesn't put the other seven Sections at risk of coming from a different draft.
+
+**Acceptance Criteria:**
+
+**Given** a violation card naming one sentence in one Section
+**When** Francesco edits that sentence's text and resubmits
+**Then** only that sentence changes — every other sentence in every other Section, and that
+sentence's own citations, carry over unchanged from the draft that failed
+
+**Given** the edited sentence
+**When** it is resubmitted
+**Then** the Groundedness Gate runs again — pure, no model call — against the same stored Payload,
+and a new immutable `ReportDraft`/`StoredGateResult` pair is persisted for this attempt, mirroring
+how an automatic regeneration is persisted, but this correction never increments
+`regeneration_count` and is never bounded by it
+
+**Given** the recheck comes back with zero violations
+**When** it is evaluated
+**Then** a `REPORT` row is written exactly as a normal Gate pass would be — no accepted-exception
+flag, since the Gate genuinely passed the corrected text
+
+**Given** the recheck still finds violations, some already accepted before this edit and
+byte-for-byte unchanged by it
+**When** the new result is evaluated
+**Then** those acceptances carry forward automatically — Francesco is never asked to re-accept a
+violation he didn't touch
+
+**Given** violations remain after carrying acceptances forward
+**When** the draft view re-renders
+**Then** it shows exactly the remaining, unresolved violation cards, each still offering Accept and
+hand-correct
+
+*(New 2026-09-02, correct-course.)*
 
 ---
 
@@ -2069,6 +2161,17 @@ So that I know whether to wait, leave, or regenerate.
 **Then** a `danger` panel headed "Verifica di fondatezza non superata" shows one card per violation — kind, the Sezione, the offending sentence as a blockquote, the detail, and the cited entry IDs as mono chips (or "nessuna")
 **And** each violation card links to its Sezione in the draft below
 **And** the primary action is Rigenera, which replaces the whole Report and increments the regeneration count (AD-10)
+**And** each violation card also offers **Accetta** (Story 5.7) and **Modifica e ricontrolla** — an
+inline textarea prefilled with the sentence (Story 5.8) — both acting on that one violation alone,
+distinct from Rigenera
+
+**Given** a Report completed via one or more accepted violations
+**When** Francesco views it anywhere — stage track, reading sheet, Report History
+**Then** it is visibly marked as passed with N accepted exceptions, never shown identically to a
+clean pass
+
+*(Amended 2026-09-02, correct-course: adds Story 5.7/5.8's actions to the existing Gate-failure
+panel.)*
 
 **Given** a run that failed for a non-Gate reason
 **When** the stage view renders

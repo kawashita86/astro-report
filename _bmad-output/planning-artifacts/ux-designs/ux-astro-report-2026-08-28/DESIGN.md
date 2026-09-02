@@ -2,7 +2,7 @@
 name: astro-report
 description: Visual identity for astro-report — a single-operator internal console (Italian UI) for natal charts, monthly transits, and grounded eight-section Italian reports. Deep-indigo on white, Inter, airy for reading and forms, compact for lists. Light and dark authored.
 status: final
-updated: 2026-08-28
+updated: 2026-09-02
 sources:
   - ../../architecture/architecture-astro-report-2026-08-14/ARCHITECTURE-SPINE.md
 colors:
@@ -438,9 +438,16 @@ the ones specific to this app (behavior lives in EXPERIENCE.md):
 - **Panel** — `lg` radius, `xl` padding. The Gate-failure container, the payload
   disclosure container, the chart-wheel frame.
 - **Badge** — pill, `small` text. Status badges: `success-surface`/`success` for
-  *exported*, `warning-surface`/`warning` for *superseded* / *stale*,
-  `danger-surface`/`danger` for *failed*, `primary-100`/`primary-700` for
-  *in progress*, `surface-sunken`/`ink-secondary` for *draft* / neutral.
+  *exported*, `warning-surface`/`warning` for *superseded* / *stale* / **"Superato
+  con N eccezioni"** (a Report completed via Story 5.7's accepted-violation
+  closure, `accepted_violation_count > 0` — correct-course 2026-09-02), `danger-
+  surface`/`danger` for *failed*, `primary-100`/`primary-700` for *in progress*,
+  `surface-sunken`/`ink-secondary` for *draft* / neutral. Badges **stack**, they
+  don't replace each other, when more than one independent concern applies to
+  the same row — e.g. *esportato* (status) beside *superato* (chart-supersession
+  warning) or beside *"Superato con N eccezioni"* (Gate-exception warning); see
+  `key-home.html`'s "Esposito Sara" row and *Report Run Lifecycle* /
+  *Per-violation review actions* in EXPERIENCE.md.
 - **Mono chip (`badge-mono`)** — `sm` radius, `surface-sunken` fill, monospace. Every
   entry ID, hash, version and `YYYY-MM` code renders as one; click-to-copy.
 - **Banner (inline alert)** — `md` radius, 3px left border in the severity color,

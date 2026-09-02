@@ -595,7 +595,15 @@ surfaced.
 - Regeneration is automatic and bounded.
 - On persistent failure Francesco is shown the Report, the failing Claims, and the Payload entries they
   contradict — never a silent discard.
-- A Report that has not passed the Gate cannot be exported.
+- On persistent failure Francesco may also, per violation and only after reviewing it: **accept** it
+  so the Report can complete despite it — visibly flagged wherever the Report is later shown, and
+  excluded from SM-5's first-generation pass rate — or **hand-correct** the one flagged sentence and
+  re-run the Gate check alone, without a full regeneration.
+- A Report that has not passed the Gate, been closed by accepted exceptions, or been hand-corrected to
+  a genuine pass, cannot be exported.
+
+*(Amended 2026-09-02, correct-course: adds the accept and hand-correct recovery paths alongside
+automatic regeneration.)*
 
 #### FR-22: Retain the Gate result
 

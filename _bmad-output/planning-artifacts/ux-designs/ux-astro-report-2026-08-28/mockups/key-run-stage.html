@@ -68,6 +68,9 @@
   .btn-p{background:var(--p700);color:#fff}
   .btn-s{background:var(--surface-base);color:var(--p700);border-color:var(--border-strong)}
   .btn-d{background:var(--danger);color:#fff}
+  .btn-g{background:transparent;color:var(--ink-secondary);border-color:var(--border-strong)}
+  .btn-g:hover{background:var(--surface-sunken);color:var(--ink-primary)}
+  .btn-sm{padding:6px 12px;font-size:13px;border-radius:8px}
   /* gate panel */
   .gpanel{border:1px solid var(--border-hairline);border-left:3px solid var(--danger);border-radius:14px;padding:22px;background:var(--surface-raised)}
   .gpanel h3{margin:0 0 4px;font-size:18px;color:var(--danger)}
@@ -79,6 +82,19 @@
   .viol .vd{font-size:13px;color:var(--ink-secondary)}
   .viol .cited{margin-top:8px;font-size:12px;color:var(--ink-tertiary)}
   .toc{font-size:12px;color:var(--link);text-decoration:underline;margin-top:6px;display:inline-block}
+  .viol-actions{display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-hairline)}
+  .viol-actions .toc{margin:0 0 0 auto}
+  .viol textarea{width:100%;margin:8px 0;padding:8px 12px;border:1px solid var(--focus);border-radius:8px;background:var(--surface-sunken);font:inherit;font-size:14px;font-style:italic;color:var(--ink-primary);resize:vertical;min-height:56px;box-shadow:0 0 0 3px var(--p100)}
+  /* resolved strip -- collapsed card, Stories 5.7/5.8 (correct-course 2026-09-02) */
+  .strip{display:flex;align-items:center;gap:10px;border:1px solid var(--border-hairline);border-radius:10px;padding:10px 14px;margin-bottom:8px;background:var(--surface-sunken)}
+  .strip .vh{flex:1;font-size:13px;font-weight:600;color:var(--ink-primary);margin:0}
+  .strip .vh span{color:var(--ink-secondary);font-weight:400}
+  .tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;border-radius:9999px;padding:3px 10px}
+  .tag-warn{background:#FDF1E3;color:var(--warning)}
+  .tag-ok{background:#E7F5EE;color:var(--success)}
+  /* passed-with-exceptions badge -- Story 5.7 */
+  .badge{display:inline-flex;align-items:center;font-size:12px;font-weight:700;border-radius:9999px;padding:3px 12px;margin-left:10px;vertical-align:middle}
+  .badge-warn{background:#FDF1E3;color:var(--warning)}
 </style>
 </head>
 <body>
@@ -144,14 +160,44 @@
 
         <div class="gpanel">
           <h3>Verifica di fondatezza non superata</h3>
-          <div class="reason">1 violazione su 42 affermazioni. Rigenerando si sostituisce l'intero report; il contatore di rigenerazioni passa a 1.</div>
+          <div class="reason">3 violazioni su 44 affermazioni. Rigenerando si sostituisce l'intero report; il contatore di rigenerazioni passa a 1. Oppure, per ogni violazione: Accetta, o correggi la frase e ricontrolla solo la Verifica.</div>
 
+          <!-- resolved -- Accetta clicked (Story 5.7): collapses to a one-line strip, warning tone -->
+          <div class="strip">
+            <div class="vh">Affermazione chiusa, citazione vuota <span>— Sezione 3 · Lavoro</span></div>
+            <span class="tag tag-warn">Accettata</span>
+          </div>
+
+          <!-- resolved -- Modifica e ricontrolla fixed it (Story 5.8): collapses to a one-line strip, success tone -->
+          <div class="strip">
+            <div class="vh">Fatto contraddetto dal Payload <span>— Sezione 4 · Denaro</span></div>
+            <span class="tag tag-ok">Corretta</span>
+          </div>
+
+          <!-- open, mid-edit -- Modifica e ricontrolla expanded inline (Story 5.8) -->
           <div class="viol">
             <div class="vh">Affermazione chiusa, citazione vuota <span>— Sezione 6 · Giorni favorevoli</span></div>
-            <blockquote>«Il 14 Marte in Ariete sostiene le decisioni pratiche.»</blockquote>
+            <textarea>Il 14 Marte in Ariete sostiene le decisioni pratiche.</textarea>
             <div class="vd">La frase contiene un termine del vocabolario chiuso (pianeta, numerale del giorno) ma non cita alcuna voce del Payload.</div>
             <div class="cited">Voci citate: <em>nessuna</em></div>
-            <a class="toc" href="#">Vai alla Sezione 6 nella bozza ↓</a>
+            <div class="viol-actions">
+              <button class="btn btn-p btn-sm">Ricontrolla</button>
+              <button class="btn btn-g btn-sm">Annulla</button>
+              <a class="toc" href="#">Vai alla Sezione 6 nella bozza ↓</a>
+            </div>
+          </div>
+
+          <!-- open, default state -->
+          <div class="viol">
+            <div class="vh">Data non ammessa in un giorno-lista <span>— Sezione 7 · Giorni di attenzione</span></div>
+            <blockquote>«Il giorno 22 richiede prudenza nelle comunicazioni.»</blockquote>
+            <div class="vd">Sezione 7 è proiettata dal codice: il modello non può scrivere una data al suo interno.</div>
+            <div class="cited">Voci citate: <span class="mono">e_4f21a</span></div>
+            <div class="viol-actions">
+              <button class="btn btn-g btn-sm">Accetta</button>
+              <button class="btn btn-g btn-sm">Modifica e ricontrolla</button>
+              <a class="toc" href="#">Vai alla Sezione 7 nella bozza ↓</a>
+            </div>
           </div>
         </div>
 

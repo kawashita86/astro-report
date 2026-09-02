@@ -193,10 +193,18 @@ No arrow runs from `core` to `shell`. There is no exception.
   run resumes at the first incomplete stage; **AD-20 fixes what invokes that advance and when — the
   poll request, one stage at a time, never a background job.** Every stage function is idempotent on
   its input.
-  **Regeneration under FR-21 replaces the whole Report, never a single failing Section**, so a
-  regeneration count means one thing and Sections cannot come from different drafts. Reaching
-  `exported` happens once; each subsequent export writes an `EXPORT_RECORD` row rather than moving the
-  stage.
+  **Automatic regeneration under FR-21 replaces the whole Report, never a single failing Section**,
+  so a regeneration count means one thing and Sections cannot come from different drafts. **(Amended
+  2026-09-02, correct-course, Story 5.7/5.8):** `gate_passed` is now reached by one of three routes,
+  not one — an automatic Gate pass; every open violation on the current failing `GateResult`
+  explicitly accepted after review (no draft change, no new Gate check); or one flagged sentence
+  hand-corrected and re-checked by the same pure, model-free Gate call, which persists its own
+  `ReportDraft`/`StoredGateResult` pair exactly as append-only as an automatic attempt, but counted
+  separately from `regeneration_count` and never bounded by it. Only the first route is a
+  "regeneration" in this rule's original sense; the other two are reviewed, human-closed exceptions,
+  and a `REPORT` row produced by the third route records how many violations were accepted so it is
+  never indistinguishable from a clean pass. Reaching `exported` happens once; each subsequent export
+  writes an `EXPORT_RECORD` row rather than moving the stage.
 
 ### AD-11 — No durable state on the compute host's filesystem
 

@@ -3,7 +3,7 @@ name: astro-report
 status: final
 sources:
   - ../../architecture/architecture-astro-report-2026-08-14/ARCHITECTURE-SPINE.md
-updated: 2026-08-28
+updated: 2026-09-02
 ---
 
 # astro-report — Experience Spine
@@ -406,9 +406,9 @@ load-bearing states): [`mockups/key-run-stage.html`](mockups/key-run-stage.html)
 | `transits_ready` | transits done, payload active | *Assemblaggio del Payload* | — |
 | `payload_ready` | payload done, draft active | *Generazione della bozza* | **Vedi Payload** (`/payload`) |
 | `draft_ready` | draft done, gate active | *Verifica di fondatezza* | **Vedi Payload** |
-| `gate_passed` | all six done, export = success | *Pronto per l'esportazione* | **Vedi report**, Esporta PDF/Markdown |
+| `gate_passed` | all six done, export = success | *Pronto per l'esportazione* — a second badge, *"Superato con N eccezioni"* (`warning`), stacks beside the normal status badge when closed via Story 5.7's accepted-violation path; unmarked (as today) on a clean pass or a Story 5.8 hand-correction that reached a genuine pass | **Vedi report**, Esporta PDF/Markdown |
 | `exported` | export node filled | *Esportato il {dd/MM/yyyy HH:mm}* | Ri-esporta (writes an EXPORT_RECORD, stage unchanged), record disposition |
-| **failed** (any stage) | failed node in `danger`, prior nodes as-is | Gate-failure panel or error detail | **Vedi bozza** (cited), **Rigenera**, **Vedi Payload** |
+| **failed** (any stage) | failed node in `danger`, prior nodes as-is | Gate-failure panel or error detail | **Vedi bozza** (cited), **Rigenera**, **Vedi Payload**; per unresolved violation card: **Accetta**, **Modifica e ricontrolla** (Stories 5.7/5.8, see *Per-violation review actions* below) |
 
 ### Rules
 
@@ -436,6 +436,55 @@ load-bearing states): [`mockups/key-run-stage.html`](mockups/key-run-stage.html)
   links to its Sezione in the draft below. Primary action *Rigenera*; secondary
   *Vedi Payload* (to check what the Generator was given). Panel heading:
   *"Verifica di fondatezza non superata"*.
+- **Per-violation review actions** (Stories 5.7/5.8, correct-course 2026-09-02).
+  Every unresolved card gets its own bottom action row, below the cited-entry
+  chips and above the existing *Vai alla Sezione N ↓* link: two `{component.button}`
+  `ghost` buttons, **Accetta** then **Modifica e ricontrolla**, sized and styled
+  like every other tertiary/row-level action (`DESIGN.md` Button component) —
+  never competing visually with the page-level *Rigenera* primary button below
+  the panel, which keeps its exact current copy, position and whole-Report
+  behavior unchanged.
+  - **Accetta**: one click, no confirm modal (unlike Rigenera, which is
+    destructive and does confirm) — accepting is reviewed-and-reversible-in-effect
+    the moment it's clicked, since the underlying decision is append-only and
+    auditable, not a discard. While the request is in flight the button shows an
+    inline spinner and disables (existing Feedback-primitives pattern), then the
+    card **collapses to a one-line resolved strip**: kind + Sezione + an
+    *"Accettata"* tag in `warning` tone (matching the passed-with-exceptions
+    badge below), pinned at the top of the panel above any still-open cards. If
+    accepting was the last open violation, the whole panel is replaced on the
+    next render by the normal `gate_passed` state (Vedi report) — no separate
+    "all done" interstitial.
+  - **Modifica e ricontrolla**: click **expands inline** — the card's own
+    `blockquote` swaps for an editable `{component.input}` `Textarea`, same
+    width as the card, prefilled with the sentence's exact current text; the
+    button row swaps for **Ricontrolla** (`primary`, submits) and **Annulla**
+    (`ghost`, collapses back to the read-only blockquote, discards the edit,
+    no request sent). Submitting shows the same inline spinner + disabled state
+    as Accetta on both buttons, on the card only — the rest of the panel and
+    every other card stay interactive. On response: a card whose sentence now
+    passes **collapses to a one-line resolved strip** tagged *"Corretta"* in
+    `success` tone (this is a genuine Gate pass on the edited text, not an
+    exception — never tagged `warning`/*"Accettata"*); a card that still fails
+    re-renders open with its *updated* detail/citations, ready for another edit
+    or an Accetta. Same last-violation completion rule as Accetta.
+  - **Resolved-strip ordering**: resolved strips (any mix of *Accettata* /
+    *Corretta*) stack at the top of the panel in the order they resolved, oldest
+    first, so Francesco can scan top-to-bottom to confirm he handled everything
+    before the panel disappears; open cards keep full detail below them,
+    unaffected in order.
+  - **Passed-with-exceptions badge**: a `warning`-toned `{component.badge}`
+    reading *"Superato con N eccezioni"* (N = `accepted_violation_count`) sits
+    immediately after the Report's title/date wherever a completed Report is
+    named — the reading-sheet header (`report.html`), each row of Report
+    History, and Home's recent-runs list — **stacked alongside** the row's
+    normal status badge, not replacing it: Home already stacks an independent
+    `warning` badge next to a status badge this way (a superseded-chart warning
+    riding beside *"esportato"*, `key-home.html`'s "Esposito Sara" row), and the
+    accepted-exceptions flag is the same kind of independent caveat, not a
+    different status. A Report with `accepted_violation_count = 0` (a clean
+    pass, or a hand-correction that reached a genuine pass) carries no such
+    badge — it reads identically to every Report that passed on its own.
 - **Batch context.** Home and the Client's Reports tab list every run with a live
   status badge, so a month-end batch of ~30 is scannable: which passed, which
   failed, which are still running. Failing one Client's run never touches the
