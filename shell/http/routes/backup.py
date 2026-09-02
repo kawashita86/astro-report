@@ -8,9 +8,12 @@ downloadable JSON file, in an order a future restore (Story 8.5) can insert
 without ever violating a foreign key: ``client`` first (no dependencies),
 then ``corpus_entry`` and ``natal_chart``/``report_run`` (depend only on
 ``client``), then
-``report``/``report_payload``/``report_draft``/``report_theme``/
-``gate_result`` (depend on ``report_run``, and transitively on ``client``),
-then ``export_record`` (depends on ``report``), and finally ``style_guide``
+``report_payload``/``report_draft``/``report_theme``/``gate_result``
+(depend on ``report_run``, and transitively on ``client``), then
+``gate_violation_review`` (Story 5.7 -- depends on ``report_run`` and
+``gate_result``) and ``report`` (depends on ``report_run`` and, since Story
+5.7's ``closing_gate_result_id``, also on ``gate_result``), then
+``export_record`` (depends on ``report``), and finally ``style_guide``
 (global, independent of everything else). See this module's Design Notes in
 the story spec for the full dependency reasoning.
 
@@ -50,6 +53,7 @@ from shell.adapters.postgres.client import Client, StoredNatalChart
 from shell.adapters.postgres.corpus_entry import CorpusEntry
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
+from shell.adapters.postgres.gate_violation_review import GateViolationReview
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
@@ -66,16 +70,26 @@ router = APIRouter()
 #: Notes): each model only after every model it foreign-keys into, so a
 #: future restore (Story 8.5) can insert the file's arrays in file order
 #: without ever hitting a foreign key that doesn't exist yet.
+#:
+#: ``Report`` moved after ``StoredGateResult`` (Story 5.7): its new
+#: ``closing_gate_result_id`` column is a foreign key to ``gate_result.id``,
+#: so it can no longer sit before it in this order the way it could when its
+#: only foreign key was to ``report_run.id``. ``GateViolationReview`` sits
+#: between the two -- it depends on ``report_run``/``gate_result`` but not on
+#: ``report``, so either side of ``Report`` would be FK-safe; placed
+#: immediately after ``StoredGateResult`` since that is the later of its two
+#: dependencies.
 _BACKUP_MODELS = (
     Client,
     CorpusEntry,
     StoredNatalChart,
     ReportRun,
-    Report,
     ReportPayload,
     ReportDraft,
     StoredReportTheme,
     StoredGateResult,
+    GateViolationReview,
+    Report,
     ExportRecord,
     StyleGuide,
 )

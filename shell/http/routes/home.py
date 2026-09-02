@@ -110,24 +110,31 @@ def home_dashboard(request: Request, session: Session = Depends(get_session)) ->
     # report_bundle`, `shell/http/routes/report_runs.py`), not a re-derived
     # guess from `stage`/`failed_at` (review-loop 1: those two can drift
     # apart, e.g. a `gate_passed` run whose Report was somehow removed, or a
-    # stage added between `gate_passed` and `exported` later).
+    # stage added between `gate_passed` and `exported` later). Keyed to each
+    # Report's own `accepted_violation_count` (Story 5.7) too, so a Report
+    # closed via accepted exceptions can carry its own warning badge here,
+    # not just on the reading sheet and Report History.
     run_ids = [run.id for run, _client in rows]
-    reported_run_ids = set(
-        session.exec(
-            select(Report.report_run_id).where(Report.report_run_id.in_(run_ids))
-        ).all()
-    )
+    reported_rows = session.exec(
+        select(Report.report_run_id, Report.accepted_violation_count).where(
+            Report.report_run_id.in_(run_ids)
+        )
+    ).all()
+    accepted_violation_counts_by_run = {
+        report_run_id: count for report_run_id, count in reported_rows
+    }
 
     runs = []
     for run, client in rows:
         badge_text, badge_variant = _badge_for(run)
-        report_ready = run.id in reported_run_ids
+        report_ready = run.id in accepted_violation_counts_by_run
         runs.append(
             {
                 "client_name": client.name,
                 "month": run.month,
                 "badge_text": badge_text,
                 "badge_variant": badge_variant,
+                "accepted_violation_count": accepted_violation_counts_by_run.get(run.id, 0),
                 "failure_reason": run.failure_reason,
                 "updated_at": run.updated_at.strftime("%d/%m/%Y %H:%M"),
                 # Story 9.2 amendment (correct-course 2026-08-31): a passed

@@ -44,6 +44,7 @@ from shell.adapters.postgres.client import Client, StoredNatalChart
 from shell.adapters.postgres.corpus_entry import CorpusEntry, add_corpus_entry
 from shell.adapters.postgres.export_record import ExportRecord, store_export_record
 from shell.adapters.postgres.gate_result import StoredGateResult
+from shell.adapters.postgres.gate_violation_review import store_gate_violation_review
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
@@ -154,9 +155,14 @@ def _serialize_as_backup(session: Session) -> dict[str, list[dict[str, object]]]
 def _populate_source(session: Session) -> UUID:
     """A full-depth source DB: a real ``gate_passed`` run (Client -> Natal
     Chart -> ReportRun -> Report / Payload / Draft / Theme / GateResult) plus a
-    second ``StyleGuide`` version, a paired ``CorpusEntry`` and an
-    ``ExportRecord`` -- the "fully populated database" the AC names. Returns
-    the ``run_id`` that reached ``gate_passed``."""
+    second ``StyleGuide`` version, a paired ``CorpusEntry``, an
+    ``ExportRecord`` and a ``GateViolationReview`` (Story 5.7) -- the "fully
+    populated database" the AC names. The review row is attached to this
+    run's own (passing) ``StoredGateResult`` purely for round-trip fidelity:
+    the schema itself does not require the reviewed result to be a failing
+    one, and a real accept-closure's actual shape is already covered end to
+    end by ``tests/test_gate_violation_review.py`` / ``tests/test_http_
+    report_runs.py``. Returns the ``run_id`` that reached ``gate_passed``."""
     client, natal_chart = _create_client_and_chart(session)  # + StyleGuide v1
     stored_chart = session.exec(
         select(StoredNatalChart).where(StoredNatalChart.client_id == client.id)
@@ -181,6 +187,20 @@ def _populate_source(session: Session) -> UUID:
         select(Report).where(Report.report_run_id == run.id)
     ).one()
     store_export_record(session, report=stored_report, format="pdf", elapsed_seconds=42)
+    stored_gate_result = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).one()
+    store_gate_violation_review(
+        session,
+        run=run,
+        gate_result=stored_gate_result,
+        violation_index=0,
+        kind="empty_citation",
+        section="lavoro",
+        sentence="a reviewed sentence",
+        entry_ids=[],
+        detail="a reviewed detail",
+    )
     session.commit()
     return run.id
 
@@ -245,6 +265,7 @@ def test_full_pipeline_export_restores_every_table_with_byte_identical_json() ->
     assert counts["report_draft"] == 1
     assert counts["report_theme"] == 1
     assert counts["gate_result"] == 1
+    assert counts["gate_violation_review"] == 1
     assert counts["export_record"] == 1
     assert counts["corpus_entry"] == 1
     assert counts["style_guide"] == 2

@@ -35,6 +35,7 @@ from shell.adapters.postgres.client import (
     delete_client_and_derived,
 )
 from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
+from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_draft import ReportDraft, store_report_draft
 from shell.adapters.postgres.report_payload import ReportPayload, store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
@@ -533,6 +534,81 @@ def test_first_generation_pass_rate_and_regeneration_series_are_directly_queryab
         select(func.avg(StoredGateResult.regeneration_count))
     ).one()
     assert average_regenerations == pytest.approx(sum(regeneration_series) / 4)
+
+
+# --- Story 5.7: a Report closed via accepted violations and SM-5/SM-7 ----------
+
+
+def test_a_report_closed_via_accepted_violations_is_excluded_from_sm5_and_eligible_for_sm7(
+    session: Session,
+) -> None:
+    """Epic-5 context: "A Report closed via accepted violations (Story 5.7)
+    is excluded from SM-5's first-generation pass rate (same treatment as
+    every other post-first-attempt outcome) but is eligible for SM-7's
+    hand-sample like any other passed Report."
+
+    Accept-closure (``shell/http/routes/report_runs.py``'s accept route)
+    never writes a new ``StoredGateResult`` row -- the run's original
+    ``regeneration_count == 0`` failing row stays ``passed=False`` exactly
+    as it was when the Gate itself rejected the draft, so SM-5's own
+    ``regeneration_count == 0`` pass-rate query (proven directly above)
+    needs no special-casing to keep counting it as a non-pass, the same
+    treatment a run resolved by a genuine regeneration already gets. The
+    closing ``Report`` row it *does* write is a real, ordinary ``report``
+    row -- indistinguishable, to a query that only selects from ``report``,
+    from any other passed Report -- so SM-7's hand-sample query needs no
+    special-casing either."""
+    client = _create_client(session)
+    run = _create_run(session, client)
+    violation = _a_violation()
+
+    first_generation_failure = store_gate_result(
+        session,
+        run=run,
+        passed=False,
+        regeneration_count=0,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=(violation,),
+    )
+    session.commit()
+
+    # Mirrors the accept route's own closing write
+    # (`shell/http/routes/report_runs.py`): a `Report` row recording the
+    # accepted count and the closing (failing) `StoredGateResult` it was
+    # reviewed against -- no new Gate check, no new `gate_result` row.
+    store_report(
+        session,
+        run=run,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        accepted_violation_count=1,
+        closing_gate_result_id=first_generation_failure.id,
+    )
+    session.commit()
+
+    # SM-5: the first-generation pass-rate query (proven directly by
+    # `test_first_generation_pass_rate_and_regeneration_series_are_directly_
+    # queryable` above) still finds this run's only `regeneration_count ==
+    # 0` row `passed=False` -- it is correctly excluded from the numerator,
+    # with no accept-closure-specific logic required.
+    first_generation_rows = session.exec(
+        select(StoredGateResult).where(StoredGateResult.regeneration_count == 0)
+    ).all()
+    assert len(first_generation_rows) == 1
+    assert first_generation_rows[0].passed is False
+
+    # SM-7: a plain "every Report" query -- exactly what a monthly hand
+    # -sample would run -- finds this run's closing Report row, indistinguishable
+    # in kind from a clean pass except for its own accepted_violation_count.
+    sampled_reports = session.exec(
+        select(Report).where(Report.report_run_id == run.id)
+    ).all()
+    assert len(sampled_reports) == 1
+    assert sampled_reports[0].accepted_violation_count == 1
+    assert sampled_reports[0].closing_gate_result_id == first_generation_failure.id
 
 
 # --- Design Notes: AC3 from epics.md needs no new production code -------------

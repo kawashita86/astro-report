@@ -27,6 +27,7 @@ from core.types.place import ResolvedPlace
 from shell.adapters.postgres.corpus_entry import CorpusEntry
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
+from shell.adapters.postgres.gate_violation_review import GateViolationReview
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
@@ -58,6 +59,7 @@ _CLIENT_CASCADE_TABLES: frozenset[str] = frozenset(
         "report_draft",
         "report",
         "gate_result",
+        "gate_violation_review",
         "export_record",
         "corpus_entry",
     }
@@ -356,7 +358,7 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     ``ReportRun`` joined the cascade in Story 3.5; ``StoredReportTheme`` in
     Story 4.3; ``ReportDraft`` in Story 4.6; ``Report`` in Story 5.3;
     ``StoredGateResult`` in Story 5.6; ``ExportRecord`` in Story 6.2;
-    ``CorpusEntry`` in Story 7.1).
+    ``CorpusEntry`` in Story 7.1; ``GateViolationReview`` in Story 5.7).
 
     Every ``CorpusEntry`` row *paired* to ``client`` (``client_id == client.id``)
     is deleted in the first batch, before the ``client`` row. A ``CorpusEntry``
@@ -366,8 +368,9 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
 
     Every ``CorpusEntry`` row paired to ``client``, every ``ReportPayload``
     row, every ``StoredReportTheme`` row, every ``ReportDraft`` row, every
-    ``ExportRecord`` row, every ``Report`` row, every ``StoredGateResult``
-    row and every ``ReportRun`` row for ``client``
+    ``ExportRecord`` row, every ``Report`` row, every ``GateViolationReview``
+    row, every ``StoredGateResult`` row and every ``ReportRun`` row for
+    ``client``
     are deleted first, then every ``StoredNatalChart`` row for ``client`` --
     current and superseded -- and only then the ``Client`` row itself:
     children before parent, matching how no foreign key in this codebase
@@ -376,11 +379,20 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     deleted before ``Report`` rows specifically -- ``ExportRecord.report_id``
     (Story 6.2) is itself a foreign key to ``report.id``, so a ``Report`` row
     still referenced by one would violate that constraint if deleted first.
-    ``ReportPayload``, ``StoredReportTheme``, ``ReportDraft``, ``Report`` and
-    ``StoredGateResult`` rows are all deleted before ``ReportRun`` rows
-    specifically -- ``ReportPayload.report_run_id`` (Story 3.8),
-    ``StoredReportTheme.report_run_id`` (Story 4.3), ``ReportDraft.report_run_id``
-    (Story 4.6), ``Report.report_run_id`` (Story 5.3) and
+    ``GateViolationReview`` rows are deleted before ``StoredGateResult`` rows
+    specifically -- ``GateViolationReview.gate_result_id`` (Story 5.7) is
+    itself a foreign key to ``gate_result.id``, so a ``StoredGateResult`` row
+    still referenced by one would violate that constraint if deleted first
+    (``Report.closing_gate_result_id``, also a foreign key to
+    ``gate_result.id`` since Story 5.7, needs no extra ordering here: every
+    ``Report`` row is already deleted before ``StoredGateResult`` rows, the
+    same "children before parent" order this whole cascade already follows).
+    ``ReportPayload``, ``StoredReportTheme``, ``ReportDraft``, ``Report``,
+    ``GateViolationReview`` and ``StoredGateResult`` rows are all deleted
+    before ``ReportRun`` rows specifically -- ``ReportPayload.report_run_id``
+    (Story 3.8), ``StoredReportTheme.report_run_id`` (Story 4.3),
+    ``ReportDraft.report_run_id`` (Story 4.6), ``Report.report_run_id``
+    (Story 5.3), ``GateViolationReview.report_run_id`` (Story 5.7) and
     ``StoredGateResult.report_run_id`` (Story 5.6) are themselves foreign
     keys to ``report_run.id``, so a ``ReportRun`` row still referenced by any
     of them would violate that constraint if deleted first. ``StoredNatalChart``
@@ -435,6 +447,15 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     reports = session.exec(select(Report).where(Report.client_id == client.id)).all()
     for stored_report in reports:
         session.delete(stored_report)
+
+    # Deleted before StoredGateResult rows: GateViolationReview.gate_result_id
+    # (Story 5.7) is a foreign key to gate_result.id -- see this function's
+    # own docstring.
+    gate_violation_reviews = session.exec(
+        select(GateViolationReview).where(GateViolationReview.client_id == client.id)
+    ).all()
+    for stored_review in gate_violation_reviews:
+        session.delete(stored_review)
 
     gate_results = session.exec(
         select(StoredGateResult).where(StoredGateResult.client_id == client.id)

@@ -88,7 +88,7 @@ development_status:
   5-4-regenerate-a-failing-report-automatically-whole: done
   5-5-see-exactly-what-failed-and-what-it-contradicts: done
   5-6-keep-the-gate-s-record-so-a-regression-is-visible-early: done
-  5-7-accept-a-gate-violation-after-review-so-a-report-can-complete: backlog
+  5-7-accept-a-gate-violation-after-review-so-a-report-can-complete: review
   5-8-correct-a-violated-sentence-by-hand-and-re-check-only-the-ga: backlog
   epic-5-retrospective: done
 

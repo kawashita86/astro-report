@@ -15,6 +15,7 @@ from sqlmodel import Session, SQLModel, select
 
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
+from core.types.gate import GateViolation
 from core.types.place import ResolvedPlace
 from shell.adapters.postgres import client as client_module
 from shell.adapters.postgres.backup_record import BackupRecord, store_backup_record
@@ -25,6 +26,8 @@ from shell.adapters.postgres.client import (
     create_client_with_chart,
     delete_client_and_derived,
 )
+from shell.adapters.postgres.gate_result import store_gate_result
+from shell.adapters.postgres.report import store_report
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
 from tests._fk import fk_enforcing_session
@@ -313,6 +316,16 @@ def test_the_cascade_constant_includes_report() -> None:
     assert "report" in client_module._CLIENT_CASCADE_TABLES
 
 
+def test_the_cascade_constant_includes_gate_violation_review() -> None:
+    """Story 5.7: ``gate_violation_review`` must join
+    ``_CLIENT_CASCADE_TABLES`` -- a regression on top of the general
+    invariant test below, naming the table this story added explicitly.
+    ``tests/test_gate_violation_review.py`` covers the actual deletion
+    behavior end to end, including its own before-``gate_result`` ordering
+    requirement."""
+    assert "gate_violation_review" in client_module._CLIENT_CASCADE_TABLES
+
+
 def test_the_cascade_constant_includes_gate_result() -> None:
     """Story 5.6: ``gate_result`` must join ``_CLIENT_CASCADE_TABLES`` -- a
     regression on top of the general invariant test below, naming the table
@@ -414,3 +427,59 @@ def test_delete_client_and_derived_succeeds_with_a_report_run_referencing_a_nata
         ).first()
         is None
     )
+
+
+# --- Story 5.7 regression: Report.closing_gate_result_id must not break deletion ---
+
+
+def test_delete_client_and_derived_succeeds_with_a_report_closed_via_accepted_violations(
+    session: Session,
+) -> None:
+    """``Report.closing_gate_result_id`` (Story 5.7) is a new foreign key
+    *to* ``gate_result.id`` -- the cascade's existing "every ``Report`` row
+    deleted before every ``StoredGateResult`` row" ordering happens to
+    already satisfy it too, but for a different, pre-existing reason
+    (``ExportRecord.report_id``). This exercises that specific new
+    dependency directly, with real foreign-key enforcement on (this
+    module's shared ``session`` fixture), rather than letting it ride on
+    that unrelated coverage."""
+    client = _create(session)
+    session.commit()
+    run = ReportRun(client_id=client.id, month="2026-01", stage="gate_passed")
+    session.add(run)
+    session.commit()
+
+    closing_gate_result = store_gate_result(
+        session,
+        run=run,
+        passed=False,
+        regeneration_count=3,
+        vocabulary_version=1,
+        vocabulary_content_hash="d" * 64,
+        violations=(
+            GateViolation(
+                kind="empty_citation",
+                section="lavoro",
+                sentence="x",
+                entry_ids=(),
+                detail="y",
+            ),
+        ),
+    )
+    session.commit()
+    store_report(
+        session,
+        run=run,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+        gate_vocabulary_content_hash="d" * 64,
+        accepted_violation_count=1,
+        closing_gate_result_id=closing_gate_result.id,
+    )
+    session.commit()
+
+    delete_client_and_derived(session, client=client)
+    session.commit()
+
+    assert session.get(Client, client.id) is None

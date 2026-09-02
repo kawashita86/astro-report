@@ -38,6 +38,16 @@ class Report(SQLModel, table=True):
     it, even though it stores no content of its own (the content stays in
     the already-persisted ``ReportDraft``/``ReportPayload`` rows it points
     at via ``report_run_id``).
+
+    ``accepted_violation_count``/``closing_gate_result_id`` (Story 5.7):
+    default ``0``/``None`` for every clean pass -- the only path that ever
+    populates them is the accept-closure route
+    (``shell/http/routes/report_runs.py``'s accept route), once every
+    violation on the run's current failing ``StoredGateResult`` has been
+    accepted. A non-zero ``accepted_violation_count`` is what tells this row
+    apart from a clean pass everywhere a ``Report`` is named (the
+    "Superato con N eccezioni" badge) -- never faked into the Gate result
+    row itself, which stays ``passed=False`` for that same failing check.
     """
 
     __tablename__ = "report"
@@ -60,6 +70,20 @@ class Report(SQLModel, table=True):
     # hex digest -- though that precedent is NOT NULL, whereas this column
     # is deliberately nullable (pre-`0021` rows have no recorded hash).
     gate_vocabulary_content_hash: str | None = Field(default=None, max_length=64)
+    # Story 5.7: how many violations on the closing `StoredGateResult` were
+    # explicitly accepted rather than genuinely passed. `0` for every clean
+    # pass (the existing `driver.py::_run_gate_passed` call site never
+    # passes this, relying on the default) -- the only value that ever makes
+    # this row indistinguishable from a clean pass on its own.
+    accepted_violation_count: int = Field(default=0)
+    # Story 5.7: the `StoredGateResult` this Report was closed against when
+    # `accepted_violation_count > 0` -- `None` for every clean pass, where
+    # `view_report`'s existing `passed=True` lookup is used instead. Indexed
+    # like every other new FK column added alongside it
+    # (`migrations/versions/0023_gate_violation_review.py`).
+    closing_gate_result_id: UUID | None = Field(
+        default=None, foreign_key="gate_result.id", index=True
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(_UTCDateTime, nullable=False),
@@ -86,6 +110,8 @@ def store_report(
     payload_schema_version: int,
     gate_vocabulary_version: int,
     gate_vocabulary_content_hash: str,
+    accepted_violation_count: int = 0,
+    closing_gate_result_id: UUID | None = None,
 ) -> Report:
     """Persist a passed Groundedness Gate outcome for ``run``, in one flush.
 
@@ -96,6 +122,15 @@ def store_report(
     commits once this and the rest of the ``gate_passed`` stage have
     succeeded. Called only after a passing ``GateResult`` -- never on
     failure (Story 5.3's Boundaries).
+
+    ``accepted_violation_count``/``closing_gate_result_id`` (Story 5.7)
+    default to ``0``/``None`` -- ``driver.py``'s own clean-pass call site
+    never passes either, relying on these defaults, so its behavior is
+    byte-for-byte unchanged. The accept-closure route
+    (``shell/http/routes/report_runs.py``) is the only caller that ever
+    passes non-default values, once every violation on the run's current
+    failing ``StoredGateResult`` has been accepted -- never before, and
+    never for a partial acceptance (this story's Boundaries).
     """
     report = Report(
         client_id=run.client_id,
@@ -104,6 +139,8 @@ def store_report(
         payload_schema_version=payload_schema_version,
         gate_vocabulary_version=gate_vocabulary_version,
         gate_vocabulary_content_hash=gate_vocabulary_content_hash,
+        accepted_violation_count=accepted_violation_count,
+        closing_gate_result_id=closing_gate_result_id,
     )
     session.add(report)
     session.flush()

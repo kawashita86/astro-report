@@ -752,6 +752,14 @@ h3 {
   color: var(--danger);
 }
 
+/* Story 5.7: a Report closed via accepted Gate exceptions -- "Superato con
+ * N eccezioni" -- never identical to a clean pass. Mirrors `.row-badge`
+ * (l.906-914)'s same warning role/token pairing. */
+.status-badge--warning {
+  background: var(--warning-surface);
+  color: var(--warning);
+}
+
 .dash-quick {
   display: flex;
   flex-wrap: wrap;

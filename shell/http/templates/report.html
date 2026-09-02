@@ -6,6 +6,11 @@
 
       <div class="exportbar">
         <span class="status-badge status-badge--success">Verifica superata</span>
+        {% if report.accepted_violation_count %}
+        <span class="status-badge status-badge--warning"
+          >Superato con {{ report.accepted_violation_count }} eccezion{{ "e" if report.accepted_violation_count == 1 else "i" }}</span
+        >
+        {% endif %}
         <p class="report-note">{{ regeneration_note }}</p>
         <div class="exportbar__actions">
           <a class="btn btn--secondary" href="/report-runs/{{ run_id }}/payload">Vedi Payload</a>

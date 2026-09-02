@@ -39,6 +39,11 @@
         {% for entry in entries %}
         <li>
           <a href="/report-runs/{{ entry.run_id }}/report">{{ entry.month }}</a>
+          {% if entry.accepted_violation_count %}
+          <span class="status-badge status-badge--warning"
+            >Superato con {{ entry.accepted_violation_count }} eccezion{{ "e" if entry.accepted_violation_count == 1 else "i" }}</span
+          >
+          {% endif %}
           {% if entry.superseded %}
           <span>(tema superato)</span>
           {% endif %}

@@ -36,6 +36,11 @@
               {% if run.failure_reason %}title="{{ run.failure_reason }}"{% endif %}
               >{{ run.badge_text }}</span
             >
+            {% if run.accepted_violation_count %}
+            <span class="status-badge status-badge--warning"
+              >Superato con {{ run.accepted_violation_count }} eccezion{{ "e" if run.accepted_violation_count == 1 else "i" }}</span
+            >
+            {% endif %}
             <span class="dash-run__time">{{ run.updated_at }}</span>
           </li>
           {% endfor %}

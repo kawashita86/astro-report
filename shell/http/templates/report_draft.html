@@ -9,7 +9,15 @@
         <h2 id="gate-fail-h">Verifica di fondatezza non superata</h2>
         <p class="panel__body">{{ run.failure_reason }}</p>
 
-        {% for v in violations %}
+        {% for v in violations if v.accepted %}
+        <p class="violation-card__detail">
+          <strong class="violation-card__kind">{{ v.kind_label }}</strong>
+          — {{ section_titles[v.section] }} —
+          <span class="status-badge status-badge--warning">Accettata</span>
+        </p>
+        {% endfor %}
+
+        {% for v in violations if not v.accepted %}
         <article class="violation-card">
           <p class="violation-card__kind">{{ v.kind_label }}</p>
           <p>{{ section_titles[v.section] }}</p>
@@ -18,6 +26,9 @@
           <p class="violation-card__chips">
             {% for eid in v.entry_ids %}<button type="button" class="badge-mono" data-copy-chip>{{ eid }}</button>{% else %}nessuna{% endfor %}
           </p>
+          <form method="post" action="/report-runs/{{ run.id }}/violations/{{ v.index }}/accept">
+            <button type="submit" class="btn btn--secondary">Accetta</button>
+          </form>
           <a href="#sezione-{{ v.section }}">Vai a {{ section_titles[v.section] }}</a>
         </article>
         {% endfor %}

@@ -33,6 +33,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from core.errors import EphemerisIntegrityError, PlaceResolutionError
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
+from core.types.gate import GateViolation
 from core.types.place import PlaceCandidate, ResolvedPlace
 from shell.adapters.nominatim.geocoder import NominatimGeocoder
 from shell.adapters.postgres.backup_record import BackupRecord
@@ -42,6 +43,7 @@ from shell.adapters.postgres.client import (
     correct_client_and_chart,
     create_client_with_chart,
 )
+from shell.adapters.postgres.gate_result import store_gate_result
 from shell.adapters.postgres.place_cache import lookup_cached_place
 from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_run import ReportRun
@@ -952,6 +954,70 @@ def test_a_client_with_several_reports_lists_them_by_month_most_recent_first(
     assert response.status_code == 200
     positions = [response.text.index(month) for month in ("2026-03", "2026-02", "2026-01")]
     assert positions == sorted(positions), "months must be listed most recent first"
+
+
+def test_a_report_closed_via_accepted_violations_shows_the_warning_badge(
+    authenticated_client: TestClient, app_instance: FastAPI, db_session: Session
+) -> None:
+    """Story 5.7: Report History carries the "Superato con N eccezioni"
+    badge for a Report closed via accepted exceptions, and no such badge for
+    a clean pass.
+
+    ``accepted_violation_count`` and ``closing_gate_result_id`` are always
+    set together by the real accept-closure route (``shell/http/routes/
+    report_runs.py``'s accept route) -- the fixture mirrors that invariant
+    with a real failing ``StoredGateResult`` rather than leaving
+    ``closing_gate_result_id`` at its default ``None``, which the real route
+    never does once ``accepted_violation_count > 0``."""
+    ada, chart = _create_client_with_chart(app_instance, db_session)
+    accepted_run = ReportRun(
+        client_id=ada.id, month="2026-01", stage="gate_passed", natal_chart_id=chart.id
+    )
+    db_session.add(accepted_run)
+    db_session.commit()
+    closing_gate_result = store_gate_result(
+        db_session,
+        run=accepted_run,
+        passed=False,
+        regeneration_count=3,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=(
+            GateViolation(
+                kind="empty_citation",
+                section="lavoro",
+                sentence="x",
+                entry_ids=(),
+                detail="y",
+            ),
+            GateViolation(
+                kind="invented_fact",
+                section="amore",
+                sentence="z",
+                entry_ids=(),
+                detail="w",
+            ),
+        ),
+    )
+    db_session.commit()
+    store_report(
+        db_session,
+        run=accepted_run,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+        gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        accepted_violation_count=2,
+        closing_gate_result_id=closing_gate_result.id,
+    )
+    db_session.commit()
+    _create_passed_report(db_session, client_id=ada.id, month="2026-02", natal_chart_id=chart.id)
+
+    response = authenticated_client.get(f"/clients/{ada.id}/reports")
+
+    assert response.status_code == 200
+    assert "Superato con 2 eccezioni" in response.text
+    assert response.text.count("status-badge--warning") == 1
 
 
 def test_two_reports_for_the_same_month_are_listed_newest_first_deterministically(

@@ -274,6 +274,47 @@ def test_a_gate_passed_run_row_links_straight_to_its_report(
     assert f'href="/report-runs/{run.id}/report"' in body
 
 
+def test_a_run_closed_via_accepted_violations_shows_the_warning_badge_beside_the_status(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 5.7: a Report with a non-zero ``accepted_violation_count``
+    carries the "Superato con N eccezioni" warning badge stacked alongside
+    the run's normal status badge, never replacing it."""
+    chiara = _make_client(db_session, name="Abbate Chiara")
+    run = _make_run(db_session, client_id=chiara.id, stage="gate_passed")
+    report = Report(
+        client_id=run.client_id,
+        report_run_id=run.id,
+        style_guide_version=1,
+        payload_schema_version=1,
+        gate_vocabulary_version=1,
+        accepted_violation_count=2,
+    )
+    db_session.add(report)
+    db_session.commit()
+
+    body = authenticated_client.get("/").text
+
+    assert "Superato con 2 eccezioni" in body
+    assert "status-badge--warning" in body
+    # The row's own normal status badge is still rendered alongside it, not
+    # replaced by the warning badge.
+    assert f'href="/report-runs/{run.id}/report"' in body
+
+
+def test_a_clean_pass_run_row_shows_no_warning_badge(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    chiara = _make_client(db_session, name="Abbate Chiara")
+    run = _make_run(db_session, client_id=chiara.id, stage="gate_passed")
+    _make_report(db_session, run=run)
+    db_session.commit()
+
+    body = authenticated_client.get("/").text
+
+    assert "eccezioni" not in body
+
+
 def test_an_exported_run_row_links_straight_to_its_report(
     authenticated_client: TestClient, db_session: Session
 ) -> None:

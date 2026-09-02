@@ -31,6 +31,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from shell.adapters.gemini.generator import GeminiGenerator
@@ -46,7 +47,11 @@ from shell.adapters.postgres.export_record import (
     store_export_record,
 )
 from shell.adapters.postgres.gate_result import StoredGateResult
-from shell.adapters.postgres.report import Report
+from shell.adapters.postgres.gate_violation_review import (
+    GateViolationReview,
+    store_gate_violation_review,
+)
+from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
@@ -423,6 +428,183 @@ def regenerate_report_run(
     return response
 
 
+@router.post(
+    "/report-runs/{run_id}/violations/{violation_index}/accept", include_in_schema=False
+)
+def accept_gate_violation(
+    run_id: UUID,
+    violation_index: int,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> Response:
+    """Accept one violation on ``run_id``'s current failing
+    ``StoredGateResult`` after Francesco has reviewed it (Story 5.7) -- a
+    shell-only review decision, append-only, never a fabricated Gate
+    re-check: ``core/gate/run.py::run_gate()`` is never called here.
+
+    404s unless ``_current_cycle_gate_failure(session, run)`` is not
+    ``None`` -- the exact same "current failing result" guard
+    ``regenerate_report_run`` uses, mirroring how ``report_draft.html``
+    only ever renders the Accetta form inside that same branch -- **and**
+    ``violation_index`` is in range of that result's ``violations``. Covers
+    both "no such run" and "already closed" (``run.failed_at is None``,
+    whether via a clean pass, an earlier accept-closure, or any future
+    route): ``_current_cycle_gate_failure`` returns ``None`` immediately
+    once ``failed_at`` is ``None`` (this story's I/O & Edge-Case Matrix).
+
+    Accepting an already-accepted index is a no-op -- idempotent
+    double-submit, not an error and not a second row (this story's
+    Boundaries): the existing reviewed indices are read back first, and
+    ``store_gate_violation_review`` is only called when ``violation_index``
+    is not already among them. This read-then-write check is also backed by
+    a DB-level unique index on ``(gate_result_id, violation_index)``
+    (``migrations/versions/0023_gate_violation_review.py``, review-loop
+    fix): two near-simultaneous submits of the same index could otherwise
+    both pass the in-memory check and each attempt to insert before either
+    commits. The loser's insert raises ``IntegrityError`` once the winner
+    commits -- caught below, rolled back, and treated exactly like a plain
+    double-submit (re-read the now-current reviewed indices and carry on)
+    rather than surfacing a raw 500.
+
+    Once every violation on the current failing result has a review row
+    (this accept made the count equal ``len(violations)``), the closing
+    ``Report`` write happens immediately, in this same request --
+    ``style_guide_version``/``payload_schema_version`` are read off the
+    latest ``ReportDraft``/``ReportPayload``, mirroring
+    ``driver.py::_run_gate_passed``'s own reads exactly, and no new Gate
+    check is run (``run_gate()``/``GateResult``/``StoredGateResult`` stay
+    untouched -- this story's Boundaries). ``run.failed_at``/
+    ``failure_reason`` are cleared and ``run.stage`` advances to
+    ``gate_passed`` on that same write, mirroring
+    ``regenerate_report_run``'s own state-transition shape. ``Report
+    .report_run_id`` is already unique at the DB level (Story 5.3), so two
+    near-simultaneous closing accepts can't silently create two ``Report``
+    rows -- but without handling it here, the loser's commit would raise an
+    unhandled ``IntegrityError`` and surface as a raw 500 (review-loop fix).
+    Caught below, rolled back, and treated as "someone else just closed this
+    run" -- the same redirect the winner itself gets.
+
+    The redirect target differs by outcome (this story's Design Notes): the
+    closing accept redirects to the poll page (``/report-runs/{run_id}``),
+    exactly like ``regenerate_report_run``, since only the closing accept
+    actually changes ``failed_at``/``stage``. An accept that leaves
+    violations still open redirects back to the draft page
+    (``/report-runs/{run_id}/draft``) instead -- the poll page would just
+    show the still-failed state, forcing an extra click back to the panel to
+    accept the next one.
+    """
+    run = session.get(ReportRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404)
+
+    stored_gate_result = _current_cycle_gate_failure(session, run)
+    if stored_gate_result is None:
+        raise HTTPException(status_code=404)
+
+    violations = stored_gate_result.violations
+    if violation_index < 0 or violation_index >= len(violations):
+        raise HTTPException(status_code=404)
+
+    def _reviewed_indices() -> set[int]:
+        return set(
+            session.exec(
+                select(GateViolationReview.violation_index).where(
+                    GateViolationReview.gate_result_id == stored_gate_result.id
+                )
+            ).all()
+        )
+
+    reviewed_indices = _reviewed_indices()
+
+    if violation_index not in reviewed_indices:
+        violation = violations[violation_index]
+        try:
+            store_gate_violation_review(
+                session,
+                run=run,
+                gate_result=stored_gate_result,
+                violation_index=violation_index,
+                kind=violation["kind"],
+                section=violation["section"],
+                sentence=violation["sentence"],
+                entry_ids=violation["entry_ids"],
+                detail=violation["detail"],
+            )
+        except IntegrityError:
+            # A concurrent request for this exact index committed first --
+            # the unique index on (gate_result_id, violation_index) caught
+            # what the in-memory check above raced past. Roll back (a
+            # failed flush poisons the transaction) and re-read: the
+            # concurrent row is now visible, so this is a genuine
+            # double-submit from here on.
+            session.rollback()
+            reviewed_indices = _reviewed_indices()
+        else:
+            reviewed_indices.add(violation_index)
+
+    if len(reviewed_indices) < len(violations):
+        session.commit()
+        response = RedirectResponse(f"/report-runs/{run_id}/draft", status_code=303)
+        set_flash(
+            response,
+            "success",
+            "Violazione accettata.",
+            environment=request.app.state.settings.environment,
+        )
+        return response
+
+    # Every violation on the current failing result now has a review row --
+    # close the run exactly like `driver.py::_run_gate_passed` does on a
+    # clean pass, reading the same rows back the same way, but without
+    # calling `run_gate()` again.
+    stored_draft = session.exec(
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run.id)
+        .order_by(ReportDraft.attempt.desc())
+    ).first()
+    if stored_draft is None:
+        raise RuntimeError(f"ReportRun {run.id} has a Gate failure but no ReportDraft.")
+    stored_payload = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
+    ).first()
+    if stored_payload is None:
+        raise RuntimeError(f"ReportRun {run.id} has a Gate failure but no ReportPayload.")
+
+    try:
+        store_report(
+            session,
+            run=run,
+            style_guide_version=stored_draft.style_guide_version,
+            payload_schema_version=stored_payload.schema_version,
+            gate_vocabulary_version=stored_gate_result.vocabulary_version,
+            gate_vocabulary_content_hash=stored_gate_result.vocabulary_content_hash,
+            accepted_violation_count=len(violations),
+            closing_gate_result_id=stored_gate_result.id,
+        )
+    except IntegrityError:
+        # A concurrent closing accept already wrote this run's Report row
+        # first (`Report.report_run_id` is unique) -- roll back and give
+        # this request the same outcome the winner got, rather than a raw
+        # 500.
+        session.rollback()
+    else:
+        run.failed_at = None
+        run.failure_reason = None
+        run.stage = "gate_passed"
+        run.updated_at = datetime.now(UTC)
+        session.add(run)
+        session.commit()
+
+    response = RedirectResponse(f"/report-runs/{run_id}", status_code=303)
+    set_flash(
+        response,
+        "success",
+        "Violazione accettata: verifica completata con eccezioni.",
+        environment=request.app.state.settings.environment,
+    )
+    return response
+
+
 @router.get("/report-runs/{run_id}/payload", include_in_schema=False)
 def view_report_payload(
     run_id: UUID, request: Request, session: Session = Depends(get_session)
@@ -539,9 +721,28 @@ def view_report_draft(
     if run.failed_at is not None:
         stored_gate_result = _current_cycle_gate_failure(session, run)
         violations = stored_gate_result.violations if stored_gate_result is not None else []
+        # Story 5.7: which violation indices already have an accept review
+        # row, so a page reload after an accept shows a resolved strip
+        # instead of the still-open card -- read only when a current-cycle
+        # Gate failure actually exists (no `stored_gate_result.id` to query
+        # against otherwise).
+        accepted_indices: set[int] = set()
+        if stored_gate_result is not None:
+            accepted_indices = set(
+                session.exec(
+                    select(GateViolationReview.violation_index).where(
+                        GateViolationReview.gate_result_id == stored_gate_result.id
+                    )
+                ).all()
+            )
         context["violations"] = [
-            {**violation, "kind_label": violation_kind_label(violation["kind"])}
-            for violation in violations
+            {
+                **violation,
+                "kind_label": violation_kind_label(violation["kind"]),
+                "index": index,
+                "accepted": index in accepted_indices,
+            }
+            for index, violation in enumerate(violations)
         ]
         context["gate_failed"] = stored_gate_result is not None
 
@@ -576,20 +777,34 @@ def view_report(
     ``StoredGateResult`` row, never off ``run.regeneration_count`` directly
     -- epic-5-retro-item-38's precedent, see this story's Design Notes.
 
+    ``bundle.report.accepted_violation_count > 0`` (Story 5.7) -- this
+    Report was closed via accepted exceptions, not a genuine Gate pass --
+    reads ``stored_gate_result`` back via ``closing_gate_result_id``
+    directly instead of the ``passed.is_(True)`` query: the closing
+    ``StoredGateResult`` row for this path is the *failing* check Francesco
+    reviewed and accepted, so no row with ``passed=True`` exists for this
+    run at all. The existing clean-pass branch below is otherwise
+    unchanged.
+
     Also passes ``latest_export`` (the most recent ``ExportRecord`` for this
     Report, or ``None`` before the first export) and ``disposition_choices``
     (Story 6.3) -- ``report.html`` uses these to show the one-click
     "how did it go out" forms once an export exists and disposition is still
-    unset, or the recorded choice once it is set.
+    unset, or the recorded choice once it is set. Also passes ``report``
+    (``bundle.report``, Story 5.7) so the template can render the
+    "Superato con N eccezioni" badge.
     """
     bundle = _load_passed_report_bundle(session, run_id)
 
-    stored_gate_result = session.exec(
-        select(StoredGateResult)
-        .where(StoredGateResult.report_run_id == run_id)
-        .where(StoredGateResult.passed.is_(True))
-        .order_by(StoredGateResult.regeneration_count.desc())
-    ).first()
+    if bundle.report.accepted_violation_count > 0:
+        stored_gate_result = session.get(StoredGateResult, bundle.report.closing_gate_result_id)
+    else:
+        stored_gate_result = session.exec(
+            select(StoredGateResult)
+            .where(StoredGateResult.report_run_id == run_id)
+            .where(StoredGateResult.passed.is_(True))
+            .order_by(StoredGateResult.regeneration_count.desc())
+        ).first()
     if stored_gate_result is None:
         raise RuntimeError(f"Report {bundle.report.id} has no matching passed StoredGateResult.")
 
@@ -611,6 +826,7 @@ def view_report(
             "run_id": run_id,
             "run": bundle.run,
             "client": bundle.client,
+            "report": bundle.report,
             "gate_result": stored_gate_result,
             "regeneration_note": regeneration_note,
             "latest_export": _latest_export_record(session, run_id),

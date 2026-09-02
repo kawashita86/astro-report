@@ -48,6 +48,10 @@ from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import Client, create_client_with_chart
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
+from shell.adapters.postgres.gate_violation_review import (
+    GateViolationReview,
+    store_gate_violation_review,
+)
 from shell.adapters.postgres.report import Report, store_report
 from shell.adapters.postgres.report_draft import ReportDraft, store_report_draft
 from shell.adapters.postgres.report_payload import ReportPayload, store_report_payload
@@ -1608,6 +1612,347 @@ def test_a_gate_result_2_1s_before_failed_at_is_treated_as_a_stale_prior_cycle(
     assert "Vedi bozza" not in response.text
 
 
+# --- Story 5.7: POST /report-runs/{run_id}/violations/{violation_index}/accept -----
+
+
+def _three_violations() -> tuple[GateViolation, ...]:
+    return (
+        GateViolation(
+            kind="empty_citation", section="lavoro", sentence="v0", entry_ids=(), detail="d0"
+        ),
+        GateViolation(
+            kind="invented_fact", section="amore", sentence="v1", entry_ids=(), detail="d1"
+        ),
+        GateViolation(
+            kind="contradicted_fact", section="denaro", sentence="v2", entry_ids=(), detail="d2"
+        ),
+    )
+
+
+def _a_gate_failed_run_with_violations(
+    db_session: Session, client_id, violations: tuple[GateViolation, ...]
+) -> ReportRun:
+    """A current-cycle Gate-failed run whose ``StoredGateResult`` carries an
+    arbitrary ``violations`` tuple -- generalizes
+    ``_a_current_cycle_gate_failed_run`` (always a single violation) for
+    Story 5.7's accept-route tests, which need more than one violation to
+    exercise "accept one of several" vs. "accept the last one"."""
+    run = _a_bound_exhausted_run(client_id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+        attempt=run.regeneration_count,
+    )
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=violations,
+    )
+    db_session.commit()
+    return run
+
+
+def test_accepting_a_violation_without_a_session_is_401(client: TestClient) -> None:
+    response = client.post(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/violations/0/accept"
+    )
+
+    assert response.status_code == 401
+
+
+def test_accepting_a_violation_on_an_unknown_run_is_404(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.post(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/violations/0/accept"
+    )
+
+    assert response.status_code == 404
+
+
+def test_accepting_a_violation_on_a_run_that_has_not_failed_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.post(f"/report-runs/{run.id}/violations/0/accept")
+
+    assert response.status_code == 404
+
+
+def test_accepting_a_violation_on_a_non_gate_failure_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Mirrors ``regenerate_report_run``'s own guard: a generic terminal
+    failure (Story 4.8) has no correlated ``StoredGateResult``, so there is
+    nothing to accept."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_failed_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.post(f"/report-runs/{run.id}/violations/0/accept")
+
+    assert response.status_code == 404
+
+
+def test_accepting_an_out_of_range_violation_index_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)  # exactly one violation
+
+    response = authenticated_client.post(f"/report-runs/{run.id}/violations/1/accept")
+
+    assert response.status_code == 404
+
+
+def test_accepting_a_negative_violation_index_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)
+
+    response = authenticated_client.post(f"/report-runs/{run.id}/violations/-1/accept")
+
+    assert response.status_code == 404
+
+
+def test_accepting_one_of_several_violations_records_a_review_row_and_leaves_the_run_open(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Accept one of several": a
+    review row is persisted, the run stays ``failed_at`` set, and the
+    redirect goes back to the draft page (this story's Design Notes) --
+    never the poll page, since ``failed_at``/``stage`` are unchanged."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_violations(db_session, ada.id, _three_violations())
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/accept", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/draft"
+    db_session.refresh(run)
+    assert run.failed_at is not None
+    assert run.stage != "gate_passed"
+    reviews = db_session.exec(
+        select(GateViolationReview).where(GateViolationReview.report_run_id == run.id)
+    ).all()
+    assert len(reviews) == 1
+    assert reviews[0].violation_index == 0
+    assert reviews[0].sentence == "v0"
+    assert reviews[0].kind == "empty_citation"
+    assert reviews[0].section == "lavoro"
+    assert reviews[0].detail == "d0"
+    assert db_session.exec(select(Report).where(Report.report_run_id == run.id)).first() is None
+
+    draft_response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+    assert draft_response.status_code == 200
+    assert draft_response.text.count('<article class="violation-card">') == 2
+    assert draft_response.text.count("Accettata") == 1
+    assert "v1" in draft_response.text
+    assert "v2" in draft_response.text
+    # The accepted violation's own sentence text is no longer shown (it only
+    # renders as a resolved strip: kind label + Sezione + the tag).
+    assert "v0" not in draft_response.text
+    assert f'action="/report-runs/{run.id}/violations/1/accept"' in draft_response.text
+    assert f'action="/report-runs/{run.id}/violations/2/accept"' in draft_response.text
+    assert f'action="/report-runs/{run.id}/violations/0/accept"' not in draft_response.text
+
+
+def test_accepting_the_last_open_violation_closes_the_run(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Accept the last one": the
+    closing ``Report`` row is written immediately, recording the accepted
+    count and closing result; the run advances to ``gate_passed`` and its
+    failure state is cleared -- and the redirect goes to the poll page,
+    mirroring ``regenerate_report_run``."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_violations(db_session, ada.id, _three_violations())
+    gate_result = db_session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).one()
+    store_gate_violation_review(
+        db_session,
+        run=run,
+        gate_result=gate_result,
+        violation_index=0,
+        kind="empty_citation",
+        section="lavoro",
+        sentence="v0",
+        entry_ids=(),
+        detail="d0",
+    )
+    store_gate_violation_review(
+        db_session,
+        run=run,
+        gate_result=gate_result,
+        violation_index=1,
+        kind="invented_fact",
+        section="amore",
+        sentence="v1",
+        entry_ids=(),
+        detail="d1",
+    )
+    db_session.commit()
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/2/accept", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}"
+    db_session.refresh(run)
+    assert run.failed_at is None
+    assert run.failure_reason is None
+    assert run.stage == "gate_passed"
+
+    stored_report = db_session.exec(
+        select(Report).where(Report.report_run_id == run.id)
+    ).one()
+    assert stored_report.accepted_violation_count == 3
+    assert stored_report.closing_gate_result_id == gate_result.id
+
+    # No new Gate check was run: the only StoredGateResult row for this run
+    # is still the original failing one (`passed=False`).
+    gate_results = db_session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(gate_results) == 1
+    assert gate_results[0].passed is False
+
+
+def test_double_submitting_an_accept_writes_no_second_row(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Double-submit same violation":
+    no new row, same redirect as a fresh accept."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_violations(db_session, ada.id, _three_violations())
+
+    first = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/accept", follow_redirects=False
+    )
+    second = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/accept", follow_redirects=False
+    )
+
+    assert first.status_code == 303
+    assert second.status_code == 303
+    assert first.headers["location"] == second.headers["location"]
+    reviews = db_session.exec(
+        select(GateViolationReview).where(GateViolationReview.report_run_id == run.id)
+    ).all()
+    assert len(reviews) == 1
+
+
+def test_accepting_a_violation_survives_a_concurrent_duplicate_insert_race(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review-loop fix: two near-simultaneous submits of the same
+    ``violation_index`` could both pass the in-memory "not already
+    reviewed" check before either commits. Simulated here by monkeypatching
+    ``store_gate_violation_review`` to insert and commit the identical row
+    directly (standing in for a concurrent request's own commit landing
+    first) immediately before calling the real function -- the DB-level
+    unique index on ``(gate_result_id, violation_index)``
+    (``migrations/versions/0023_gate_violation_review.py``) then makes the
+    real call's own insert raise ``IntegrityError``, and the route must
+    recover gracefully (no 500, same redirect as an ordinary double-submit)
+    rather than let it propagate. Only one row survives for the index."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_violations(db_session, ada.id, _three_violations())
+    gate_result = db_session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).one()
+
+    real_store = report_runs_module.store_gate_violation_review
+
+    def _racing_store(session, **kwargs):
+        session.add(
+            GateViolationReview(
+                client_id=run.client_id,
+                report_run_id=run.id,
+                gate_result_id=kwargs["gate_result"].id,
+                violation_index=kwargs["violation_index"],
+                kind=kwargs["kind"],
+                section=kwargs["section"],
+                sentence="a concurrently-committed sentence",
+                entry_ids=[],
+                detail="a concurrently-committed detail",
+            )
+        )
+        session.commit()
+        return real_store(session, **kwargs)
+
+    monkeypatch.setattr(report_runs_module, "store_gate_violation_review", _racing_store)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/accept", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/draft"
+    reviews = db_session.exec(
+        select(GateViolationReview)
+        .where(GateViolationReview.gate_result_id == gate_result.id)
+        .where(GateViolationReview.violation_index == 0)
+    ).all()
+    assert len(reviews) == 1
+    assert reviews[0].sentence == "a concurrently-committed sentence"
+
+
+def test_accepting_a_violation_on_an_already_gate_passed_run_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Already closed":
+    ``run.failed_at is None`` (already passed, via any path) -> 404."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.post(f"/report-runs/{run.id}/violations/0/accept")
+
+    assert response.status_code == 404
+
+
+def test_accepting_a_violation_after_the_run_already_closed_via_accept_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """A run closed via accept-closure (this story) is just as "already
+    closed" as any other passed run -- a further accept attempt, even on the
+    same now-stale violation index, must 404 rather than resurrect it."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)  # exactly one violation
+
+    closing = authenticated_client.post(f"/report-runs/{run.id}/violations/0/accept")
+    assert closing.status_code == 200  # follows the redirect by default
+
+    response = authenticated_client.post(f"/report-runs/{run.id}/violations/0/accept")
+
+    assert response.status_code == 404
+
+
 # --- Story 6.1: GET /report-runs/{run_id}/report -----------------------------------
 
 
@@ -1735,6 +2080,57 @@ def test_getting_the_report_for_a_terminally_failed_run_is_404(
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
     assert response.status_code == 404
+
+
+def test_getting_the_report_for_an_accept_closed_run_renders_via_the_closing_gate_result(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """I/O & Edge-Case Matrix, "``view_report`` on an accept-closed Report":
+    ``Report.accepted_violation_count > 0`` and no passing ``StoredGateResult``
+    exists at all for this run -- the view must resolve via
+    ``closing_gate_result_id``, not the ``passed=True`` lookup, and the
+    "Superato con N eccezioni" badge must be present."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)  # exactly one violation
+
+    close_response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/accept", follow_redirects=False
+    )
+    assert close_response.status_code == 303
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert "Superato con 1 eccezione" in response.text
+    assert "status-badge--warning" in response.text
+    assert '<span class="status-badge status-badge--success">Verifica superata</span>' in (
+        response.text
+    )
+    no_passing_gate_result = db_session.exec(
+        select(StoredGateResult)
+        .where(StoredGateResult.report_run_id == run.id)
+        .where(StoredGateResult.passed.is_(True))
+    ).first()
+    assert no_passing_gate_result is None
+
+
+def test_getting_the_report_for_a_clean_pass_shows_no_warning_badge(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    _store_passed_report(
+        db_session, run=run, frozen=frozen, draft=_a_generated_draft_for(frozen)
+    )
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/report")
+
+    assert response.status_code == 200
+    assert "eccezioni" not in response.text
 
 
 def test_getting_the_report_shows_all_eight_sections_and_the_gate_result(

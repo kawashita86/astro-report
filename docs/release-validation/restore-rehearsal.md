@@ -33,13 +33,13 @@ is not enough for a release sign-off; the operator dry-run of `python -m
 shell.restore` against a real Postgres must have been run.
 
 ```toml
-checked = 2026-08-27
+checked = 2026-09-02
 ratified_by = "automated round-trip (tests/test_restore.py); operator dry-run against a real Postgres pending"
-ratified_on = 2026-08-27
+ratified_on = 2026-09-02
 source_backup = "in-process GET /backup serialization of a fully-populated test database (tests/test_restore.py::_populate_source / _serialize_as_backup)"
 target = "empty in-process SQLite schema, foreign keys enforced (tests/test_restore.py::_fk_enforcing_engine); dry-run against an empty Neon Europe/Frankfurt branch still to be run"
-tables_restored = ["client", "corpus_entry", "export_record", "gate_result", "natal_chart", "report", "report_draft", "report_payload", "report_run", "report_theme", "style_guide"]
-rows_restored = 12
+tables_restored = ["client", "corpus_entry", "export_record", "gate_result", "gate_violation_review", "natal_chart", "report", "report_draft", "report_payload", "report_run", "report_theme", "style_guide"]
+rows_restored = 13
 report_reopened = true
 claims_traceable = true
 rehearsed_against = "in-process-sqlite"
@@ -114,18 +114,20 @@ deletes an existing row.
 `tests/test_restore.py` builds a full-depth source database — a real
 `gate_passed` run (Client → Natal Chart → ReportRun → Report / Payload / Draft /
 Theme / GateResult, reusing `tests/test_runner_driver.py`'s `_drive`) plus a
-paired `CorpusEntry`, an `ExportRecord` and a second `StyleGuide` version —
-serializes it byte-for-byte the way `download_backup` does, and restores it into
-a second, empty, `PRAGMA foreign_keys=ON` schema. It asserts:
+paired `CorpusEntry`, an `ExportRecord`, a `GateViolationReview` (Story 5.7) and
+a second `StyleGuide` version — serializes it byte-for-byte the way
+`download_backup` does, and restores it into a second, empty,
+`PRAGMA foreign_keys=ON` schema. It asserts:
 
-- **Every entity class round-tripped.** All eleven `_BACKUP_MODELS` tables
-  restored with matching row counts (12 rows: one each across Clients, Natal
+- **Every entity class round-tripped.** All twelve `_BACKUP_MODELS` tables
+  restored with matching row counts (13 rows: one each across Clients, Natal
   Charts, Report Runs, Reports, Report Payloads, Report Drafts, Report Themes,
-  Gate results, Export records and a Corpus entry, plus two Style Guide
-  versions) and byte-identical JSON-column values (`planets` / `houses` /
-  `aspects`, `payload`, `draft`, `theme`, `violations`, `transit_events`,
-  `ephemeris_files`). `UUID` primary and foreign keys, aware UTC `datetime`s,
-  and the `Decimal` latitude/longitude all reconstructed to their real types.
+  Gate results, Gate violation reviews, Export records and a Corpus entry, plus
+  two Style Guide versions) and byte-identical JSON-column values (`planets` /
+  `houses` / `aspects`, `payload`, `draft`, `theme`, `violations`,
+  `transit_events`, `ephemeris_files`, `entry_ids`). `UUID` primary and foreign
+  keys, aware UTC `datetime`s, and the `Decimal` latitude/longitude all
+  reconstructed to their real types.
 - **A previously exported Report reopened.** `GET /report-runs/{run_id}/report`
   for the run that had reached `gate_passed` before the export returned 200
   against the restored database, with all eight Sections rendered from the

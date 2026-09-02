@@ -880,7 +880,14 @@ def list_client_reports(
     for _stored_report, run in rows:
         chart = charts_by_id.get(run.natal_chart_id) if run.natal_chart_id is not None else None
         superseded = chart is not None and chart.superseded_at is not None
-        entries.append({"run_id": run.id, "month": run.month, "superseded": superseded})
+        entries.append(
+            {
+                "run_id": run.id,
+                "month": run.month,
+                "superseded": superseded,
+                "accepted_violation_count": _stored_report.accepted_violation_count,
+            }
+        )
 
     return _templates.TemplateResponse(
         request,

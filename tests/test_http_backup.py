@@ -30,6 +30,7 @@ from shell.adapters.postgres.client import Client, StoredNatalChart
 from shell.adapters.postgres.corpus_entry import CorpusEntry
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult
+from shell.adapters.postgres.gate_violation_review import GateViolationReview
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_payload import ReportPayload
@@ -65,16 +66,23 @@ LOCAL = Settings(
 #: The exact FK-safe order the spec's Code Map and Design Notes require --
 #: the single source of truth this whole test module checks the route's
 #: output against.
+#:
+#: Story 5.7: ``report`` moved after ``gate_result`` (its new
+#: ``closing_gate_result_id`` column is a foreign key to ``gate_result.id``),
+#: and ``gate_violation_review`` was added right after ``gate_result``, the
+#: later of its own two dependencies (``report_run``, ``gate_result``) --
+#: mirrors ``shell/http/routes/backup.py``'s own ``_BACKUP_MODELS`` order.
 _TABLE_ORDER = [
     "client",
     "corpus_entry",
     "natal_chart",
     "report_run",
-    "report",
     "report_payload",
     "report_draft",
     "report_theme",
     "gate_result",
+    "gate_violation_review",
+    "report",
     "export_record",
     "style_guide",
 ]
@@ -225,6 +233,25 @@ def _make_gate_result(db_session: Session, *, run: ReportRun) -> StoredGateResul
     return gate_result
 
 
+def _make_gate_violation_review(
+    db_session: Session, *, run: ReportRun, gate_result: StoredGateResult
+) -> GateViolationReview:
+    review = GateViolationReview(
+        client_id=run.client_id,
+        report_run_id=run.id,
+        gate_result_id=gate_result.id,
+        violation_index=0,
+        kind="empty_citation",
+        section="lavoro",
+        sentence="a reviewed sentence",
+        entry_ids=[],
+        detail="a reviewed detail",
+    )
+    db_session.add(review)
+    db_session.flush()
+    return review
+
+
 def _make_export_record(db_session: Session, *, report: Report) -> ExportRecord:
     export_record = ExportRecord(
         client_id=report.client_id,
@@ -256,7 +283,12 @@ def _make_style_guide(db_session: Session, *, version: int, content: str) -> Sty
 def _full_chain(db_session: Session, *, name: str = "Ada Lovelace") -> dict:
     """Client -> StoredNatalChart -> ReportRun -> Report/ReportPayload/
     ReportDraft/StoredReportTheme/StoredGateResult -> ExportRecord, the full
-    depth the Populated pipeline matrix row describes."""
+    depth the Populated pipeline matrix row describes. Also includes a
+    GateViolationReview (Story 5.7) against the same StoredGateResult --
+    content-free w.r.t. this chain's Report (a clean-pass Report here, same
+    as before Story 5.7; a real accept-closure would instead review a
+    *failing* result), included purely so this table's own row appears in
+    the populated-pipeline assertion below."""
     client_row = _make_client(db_session, name=name)
     chart = _make_chart(db_session, client_id=client_row.id)
     run = _make_run(db_session, client_id=client_row.id, natal_chart_id=chart.id)
@@ -265,6 +297,9 @@ def _full_chain(db_session: Session, *, name: str = "Ada Lovelace") -> dict:
     draft = _make_draft(db_session, run=run)
     theme = _make_theme(db_session, run=run)
     gate_result = _make_gate_result(db_session, run=run)
+    gate_violation_review = _make_gate_violation_review(
+        db_session, run=run, gate_result=gate_result
+    )
     export_record = _make_export_record(db_session, report=report)
     return {
         "client": client_row,
@@ -275,6 +310,7 @@ def _full_chain(db_session: Session, *, name: str = "Ada Lovelace") -> dict:
         "draft": draft,
         "theme": theme,
         "gate_result": gate_result,
+        "gate_violation_review": gate_violation_review,
         "export_record": export_record,
     }
 
@@ -288,7 +324,7 @@ def test_anonymous_request_is_rejected(client: TestClient) -> None:
     assert response.status_code == 401
 
 
-def test_empty_database_downloads_all_eleven_keys_as_empty_lists(
+def test_empty_database_downloads_all_twelve_keys_as_empty_lists(
     authenticated_client: TestClient,
 ) -> None:
     response = authenticated_client.get("/backup")
@@ -353,6 +389,10 @@ def test_populated_pipeline_includes_every_row_exactly_once_in_fk_safe_order(
         str(ada["gate_result"].id),
         str(grace["gate_result"].id),
     }
+    assert {row["id"] for row in body["gate_violation_review"]} == {
+        str(ada["gate_violation_review"].id),
+        str(grace["gate_violation_review"].id),
+    }
     assert {row["id"] for row in body["export_record"]} == {
         str(ada["export_record"].id),
         str(grace["export_record"].id),
@@ -410,7 +450,7 @@ def test_a_paired_corpus_entry_appears_once_under_corpus_entry(
     authenticated_client: TestClient, db_session: Session
 ) -> None:
     """Story 7.1: a ``corpus_entry`` row paired to a Client (``client_id``
-    set) is one of the eleven ``_BACKUP_MODELS`` tables and appears exactly
+    set) is one of the twelve ``_BACKUP_MODELS`` tables and appears exactly
     once in the export, keyed by ``corpus_entry``, with its ``client_id``
     serialized."""
     ada = _make_client(db_session)
@@ -434,7 +474,7 @@ def test_an_unpaired_corpus_entry_appears_once_with_a_null_client_id(
 ) -> None:
     """After Story 7.1 the only kind of ``corpus_entry`` that can exist is
     unpaired (``client_id`` NULL, no linking UI yet) -- it is still one of
-    the eleven ``_BACKUP_MODELS`` tables and is serialized into the export
+    the twelve ``_BACKUP_MODELS`` tables and is serialized into the export
     exactly once, with ``client_id: null``."""
     entry = _make_corpus_entry(db_session, client_id=None, content="An unpaired past report.")
     db_session.commit()
