@@ -1557,7 +1557,21 @@ def test_a_pre_existing_report_draft_row_makes_draft_ready_a_completed_stage(
     ``draft_ready`` at the same attempt, hits the ``IntegrityError``, and
     recognises the completed stage without a ``with_backoff`` retry -- and,
     critically, without a second paid ``generator.generate()`` call. One
-    ``advance()`` call asserts exactly this."""
+    ``advance()`` call asserts exactly this.
+
+    Story 5.8 amendment: ``_run_draft_ready`` now tags the persisted
+    ``ReportDraft`` with ``next_report_draft_attempt(session, run.id)`` -- a
+    fresh count of existing rows read from the database at call time -- not
+    ``run.regeneration_count`` read from a possibly-stale in-memory ``run``.
+    That means the *count itself* self-heals across the race this test
+    exercises (our poll's own query would see the concurrent winner's
+    already-committed row and correctly compute attempt=1, never colliding).
+    The genuine race this test is about is two callers computing that count
+    from the database at the same instant, before either has committed --
+    simulated here by monkeypatching ``next_report_draft_attempt`` to always
+    return ``0``, exactly the value both concurrent callers would compute if
+    neither had committed yet, so this poll's own insert still collides with
+    the winner's already-committed ``attempt=0`` row."""
     monkeypatch.setitem(
         driver_module._STAGE_BACKOFF_OVERRIDES,
         "draft_ready",
@@ -1574,8 +1588,10 @@ def test_a_pre_existing_report_draft_row_makes_draft_ready_a_completed_stage(
     assert run.stage == "gate_passed"
 
     # Our own poll still sees the pre-race stage in memory, so it re-enters
-    # draft_ready at run.regeneration_count == 0.
+    # draft_ready -- and, simulating the race, still computes attempt 0 too
+    # (see the docstring above).
     run.stage = "payload_ready"
+    monkeypatch.setattr(driver_module, "next_report_draft_attempt", lambda session, run_id: 0)
     generator = _FakeGenerator()
 
     with caplog.at_level(logging.INFO, logger=driver_module._logger.name):

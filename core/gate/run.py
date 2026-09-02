@@ -358,6 +358,7 @@ def _category_violation(
     kind: str,
     section: str,
     sentence: Sentence,
+    sentence_index: int,
     gathered: frozenset[Any],
     asserted: frozenset[Any],
 ) -> GateViolation | None:
@@ -378,6 +379,7 @@ def _category_violation(
             sentence=sentence.text,
             entry_ids=sentence.entry_ids,
             detail=_invented_detail(kind, asserted),
+            sentence_index=sentence_index,
         )
     unmatched = asserted - gathered
     if unmatched:
@@ -387,6 +389,7 @@ def _category_violation(
             sentence=sentence.text,
             entry_ids=sentence.entry_ids,
             detail=_contradicted_detail(kind, unmatched, gathered),
+            sentence_index=sentence_index,
         )
     return None
 
@@ -395,6 +398,7 @@ def _check_claim(
     *,
     section: str,
     sentence: Sentence,
+    sentence_index: int,
     entry_index: dict[str, dict[str, Any]],
     vocabulary: GateVocabulary,
 ) -> list[GateViolation]:
@@ -407,6 +411,7 @@ def _check_claim(
                 entry_ids=sentence.entry_ids,
                 detail="sentence is a Claim (contains a closed-vocabulary token) but cites no "
                 "Payload entry.",
+                sentence_index=sentence_index,
             )
         ]
 
@@ -420,6 +425,7 @@ def _check_claim(
             kind="body/sign",
             section=section,
             sentence=sentence,
+            sentence_index=sentence_index,
             gathered=_body_sign_facts(entries),
             asserted=asserted_bodies_signs,
         )
@@ -432,6 +438,7 @@ def _check_claim(
             kind="house",
             section=section,
             sentence=sentence,
+            sentence_index=sentence_index,
             gathered=_house_facts(entries),
             asserted=asserted_houses,
         )
@@ -444,6 +451,7 @@ def _check_claim(
             kind="date",
             section=section,
             sentence=sentence,
+            sentence_index=sentence_index,
             gathered=_date_facts(entries),
             asserted=asserted_days,
         )
@@ -455,6 +463,7 @@ def _check_claim(
             kind="retrograde",
             section=section,
             sentence=sentence,
+            sentence_index=sentence_index,
             gathered=_retrograde_facts(entries),
             asserted=frozenset({True}),
         )
@@ -464,7 +473,9 @@ def _check_claim(
     return violations
 
 
-def _check_date_token(section: str, sentence: Sentence) -> GateViolation | None:
+def _check_date_token(
+    section: str, sentence: Sentence, sentence_index: int
+) -> GateViolation | None:
     if section not in _DATE_TOKEN_SECTIONS:
         return None
     if _DATE_TOKEN_PATTERN.search(sentence.text) is None:
@@ -478,6 +489,7 @@ def _check_date_token(section: str, sentence: Sentence) -> GateViolation | None:
             f"sentence contains a date-shaped token; dates in Section {section!r} are "
             "code-projected upstream and must never be written by the model."
         ),
+        sentence_index=sentence_index,
     )
 
 
@@ -499,17 +511,18 @@ def run_gate(
     for section_field in dataclass_fields(draft):
         section = section_field.name
         sentences: tuple[Sentence, ...] = getattr(draft, section)
-        for sentence in sentences:
+        for sentence_index, sentence in enumerate(sentences):
             if is_claim(sentence.text, vocabulary):
                 violations.extend(
                     _check_claim(
                         section=section,
                         sentence=sentence,
+                        sentence_index=sentence_index,
                         entry_index=entry_index,
                         vocabulary=vocabulary,
                     )
                 )
-            date_token_violation = _check_date_token(section, sentence)
+            date_token_violation = _check_date_token(section, sentence, sentence_index)
             if date_token_violation is not None:
                 violations.append(date_token_violation)
 

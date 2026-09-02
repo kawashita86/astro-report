@@ -23,16 +23,16 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, Column, Index, event
+from sqlalchemy import JSON, Column, Index, event, func
 from sqlalchemy.orm import Mapper
-from sqlmodel import Field, Session, SQLModel
+from sqlmodel import Field, Session, SQLModel, select
 from uuid6 import uuid7
 
 from core.types.generation import GeneratedDraft
 from shell.adapters.postgres.columns import _UTCDateTime
 from shell.adapters.postgres.report_run import ReportRun
 
-__all__ = ["ReportDraft", "store_report_draft"]
+__all__ = ["ReportDraft", "next_report_draft_attempt", "store_report_draft"]
 
 
 class ReportDraft(SQLModel, table=True):
@@ -128,6 +128,31 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def next_report_draft_attempt(session: Session, run_id: UUID) -> int:
+    """The ``attempt`` value the *next* ``ReportDraft`` for ``run_id`` must
+    use: a plain count of existing ``ReportDraft`` rows for this run (Story
+    5.8 amendment).
+
+    Replaces ``run.regeneration_count`` as the source both
+    ``shell/runner/driver.py``'s ``_run_draft_ready`` and
+    ``shell/http/routes/report_runs.py``'s hand-correction route agree on for
+    "what attempt number comes next" -- the two coincide for the automatic
+    path (a regeneration always mints exactly one new ``ReportDraft`` row per
+    increment of ``regeneration_count``), but only this count stays correct
+    once the hand-correction route can also mint a row without ever touching
+    ``regeneration_count`` (this story's Boundaries).
+
+    Reads ``ReportDraft`` back rather than trusting any in-memory counter,
+    mirroring every other adapter function in this package that only ever
+    ``add()``s/``flush()``es and leaves reads to the caller -- except this one
+    *is* the read, since no single column on ``ReportRun`` can answer this
+    question correctly across both minting paths.
+    """
+    return session.exec(
+        select(func.count()).select_from(ReportDraft).where(ReportDraft.report_run_id == run_id)
+    ).one()
+
+
 def store_report_draft(
     session: Session,
     *,
@@ -141,10 +166,13 @@ def store_report_draft(
     ``attempt``, in one flush.
 
     ``attempt`` defaults to ``0`` (the first, never-regenerated draft);
-    ``shell/runner/driver.py``'s ``_run_draft_ready`` always passes
-    ``run.regeneration_count`` explicitly (Story 5.4). A second call for the
-    same ``(run, attempt)`` pair raises ``IntegrityError`` at the schema
-    level (``ReportDraft.__table_args__``'s unique constraint), not here.
+    ``shell/runner/driver.py``'s ``_run_draft_ready`` and
+    ``shell/http/routes/report_runs.py``'s hand-correction route both always
+    pass ``next_report_draft_attempt(session, run.id)`` explicitly (Story
+    5.4, amended by Story 5.8 to no longer read ``run.regeneration_count``
+    for this). A second call for the same ``(run, attempt)`` pair raises
+    ``IntegrityError`` at the schema level (``ReportDraft.__table_args__``'s
+    unique constraint), not here.
 
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``store_report_theme()``

@@ -1057,25 +1057,27 @@ def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_l
 ) -> None:
     """I/O & Edge-Case Matrix row 4: more than one ``StoredGateResult`` row
     can exist for a run once it has regenerated more than once (Story 5.4) --
-    the row with the highest ``regeneration_count`` is always the one that
-    actually caused the terminal failure, so it is the one shown, even when
-    the currently loaded vocabulary (``request.app.state.gate_vocabulary``)
-    has since diverged from every stored row. This is exactly the drift
+    the row with the latest ``created_at`` is always the one that actually
+    caused the terminal failure, so it is the one shown, even when the
+    currently loaded vocabulary (``request.app.state.gate_vocabulary``) has
+    since diverged from every stored row. This is exactly the drift
     epic-5-retro-item-38 closes: the response must not depend on the live
     vocabulary at all.
 
-    Rows are inserted out of ``regeneration_count`` order (3, then 0, then
-    1) -- ``StoredGateResult.id`` is a time-sortable ``uuid7``, so inserting
-    in ascending ``regeneration_count`` order would let a query that merely
-    orders by insertion/id order pass this test too. Inserting out of order
-    means only a query that actually orders by ``regeneration_count``
-    descending can pick the right row. ``regeneration_count=3`` (not 2) is
-    used for the row that caused the failure: ``_a_bound_exhausted_run()``
-    sets ``run.regeneration_count = 4`` and ``shell/runner/driver.py``'s
-    ``_MAX_REGENERATIONS`` is 3, so the check that actually pushed the count
-    past the bound ran at the pre-increment value of 3, matching how
-    ``advance()``'s ``except GateFailedError`` block calls ``store_gate_result``
-    before incrementing ``run.regeneration_count``.
+    Ordered by ``created_at`` descending, not ``regeneration_count``
+    descending (Story 5.8 amendment): once a hand-correction can mint a new
+    failing ``StoredGateResult`` without ever incrementing
+    ``run.regeneration_count``, two failing rows for the same run can share
+    one ``regeneration_count`` value, so that column no longer reliably picks
+    out the newest row. Rows are built directly (mirrors
+    ``_a_run_with_a_gate_result_offset_by``) with explicit, deliberately
+    out-of-order ``created_at``/``regeneration_count`` pairs -- the highest
+    ``regeneration_count`` (3) is given the *oldest* ``created_at`` -- so only
+    a query that actually orders by ``created_at`` descending picks the right
+    row; one that ordered by ``regeneration_count`` descending instead would
+    pick the wrong one. All three stay within
+    ``_GATE_RESULT_CORRELATION_WINDOW`` of ``run.failed_at``, so every one of
+    them is a candidate "current cycle" row on that count alone.
 
     Also proves ``report_run_id`` isolation: a second ``ReportRun`` gets its
     own ``StoredGateResult`` row with distinguishable violation text, and
@@ -1098,24 +1100,29 @@ def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_l
         draft=draft,
         attempt=3,
     )
-    for count in (3, 0, 1):
-        store_gate_result(
-            db_session,
-            run=run,
-            passed=False,
-            regeneration_count=count,
-            vocabulary_version=1,
-            vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
-            violations=(
-                GateViolation(
-                    kind="empty_citation",
-                    section="lavoro",
-                    sentence=f"regeneration {count} sentence",
-                    entry_ids=(),
-                    detail=f"detail for regeneration {count}",
-                ),
-            ),
+    assert run.failed_at is not None
+    for count, age_seconds in ((3, 1.0), (0, 0.6), (1, 0.0)):
+        db_session.add(
+            StoredGateResult(
+                client_id=ada.id,
+                report_run_id=run.id,
+                passed=False,
+                regeneration_count=count,
+                vocabulary_version=1,
+                vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+                violations=[
+                    {
+                        "kind": "empty_citation",
+                        "section": "lavoro",
+                        "sentence": f"regeneration {count} sentence",
+                        "entry_ids": [],
+                        "detail": f"detail for regeneration {count}",
+                    }
+                ],
+                created_at=run.failed_at - timedelta(seconds=age_seconds),
+            )
         )
+    db_session.commit()
     other_client = _create_client_with_real_chart(db_session, name="Grace Hopper")
     other_run = _a_bound_exhausted_run(other_client.id)
     db_session.add(other_run)
@@ -1167,10 +1174,13 @@ def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_l
     response = authenticated_client.get(f"/report-runs/{run.id}/draft")
 
     assert response.status_code == 200
-    assert "regeneration 3 sentence" in response.text
-    assert "detail for regeneration 3" in response.text
+    # `regeneration 1` has the latest `created_at` (age 0.0s), even though
+    # its own `regeneration_count` (1) is the lowest of the three -- proving
+    # the ordering is by `created_at`, not `regeneration_count`.
+    assert "regeneration 1 sentence" in response.text
+    assert "detail for regeneration 1" in response.text
+    assert "regeneration 3 sentence" not in response.text
     assert "regeneration 0 sentence" not in response.text
-    assert "regeneration 1 sentence" not in response.text
     assert "other run's sentence" not in response.text
     assert "other run's detail" not in response.text
 
@@ -1951,6 +1961,1034 @@ def test_accepting_a_violation_after_the_run_already_closed_via_accept_is_404(
     response = authenticated_client.post(f"/report-runs/{run.id}/violations/0/accept")
 
     assert response.status_code == 404
+
+
+# --- Story 5.8: POST /report-runs/{run_id}/violations/{violation_index}/correct ----
+
+
+def _a_gate_failed_run_with_one_correctable_violation(db_session: Session, client_id) -> ReportRun:
+    """A current-cycle Gate-failed run with exactly one real, independently
+    correctable violation -- produced by a real ``run_gate()`` call (not a
+    hand-built dict), so its ``section``/``sentence_index`` are genuine
+    values the correct route can locate a sentence with."""
+    run = _a_bound_exhausted_run(client_id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = GeneratedDraft(
+        energia_generale=(Sentence(text="Un mese equilibrato.", entry_ids=()),),
+        amore=(
+            Sentence(text="Testo neutro senza vocabolario.", entry_ids=()),
+            Sentence(text="Marte è retrogrado.", entry_ids=()),
+        ),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=0,
+    )
+    vocabulary = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+    result = run_gate(draft, frozen, vocabulary)
+    assert len(result.violations) == 1
+    assert result.violations[0].section == "amore"
+    assert result.violations[0].sentence_index == 1
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=result.vocabulary_version,
+        vocabulary_content_hash=result.vocabulary_content_hash,
+        violations=result.violations,
+    )
+    db_session.commit()
+    return run
+
+
+def _a_two_correctable_violation_draft() -> GeneratedDraft:
+    """Two independent, genuine ``empty_citation`` violations: one in
+    ``lavoro`` (at sentence index 1, alongside a neutral sentence), one in
+    ``denaro`` -- ``GeneratedDraft``'s own field order (``lavoro`` before
+    ``denaro``) is exactly the order ``run_gate()`` reports them in, so the
+    first is always ``violation_index`` 0, the second always 1."""
+    return GeneratedDraft(
+        energia_generale=(),
+        amore=(),
+        lavoro=(
+            Sentence(text="Testo neutro senza vocabolario.", entry_ids=()),
+            Sentence(text="Marte porta energia.", entry_ids=()),
+        ),
+        denaro=(Sentence(text="Venere porta amore.", entry_ids=()),),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+
+def _a_gate_failed_run_with_two_correctable_violations(db_session: Session, client_id) -> ReportRun:
+    run = _a_bound_exhausted_run(client_id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_two_correctable_violation_draft()
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=0,
+    )
+    vocabulary = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+    result = run_gate(draft, frozen, vocabulary)
+    assert [violation.sentence for violation in result.violations] == [
+        "Marte porta energia.",
+        "Venere porta amore.",
+    ]
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=result.vocabulary_version,
+        vocabulary_content_hash=result.vocabulary_content_hash,
+        violations=result.violations,
+    )
+    db_session.commit()
+    return run
+
+
+def _a_three_correctable_violation_draft() -> GeneratedDraft:
+    return GeneratedDraft(
+        energia_generale=(),
+        amore=(),
+        lavoro=(
+            Sentence(text="Testo neutro senza vocabolario.", entry_ids=()),
+            Sentence(text="Marte porta energia.", entry_ids=()),
+        ),
+        denaro=(Sentence(text="Venere porta amore.", entry_ids=()),),
+        benessere=(Sentence(text="Saturno porta struttura.", entry_ids=()),),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+
+def _a_gate_failed_run_with_three_correctable_violations(
+    db_session: Session, client_id
+) -> ReportRun:
+    run = _a_bound_exhausted_run(client_id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_three_correctable_violation_draft()
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=0,
+    )
+    vocabulary = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+    result = run_gate(draft, frozen, vocabulary)
+    assert [violation.sentence for violation in result.violations] == [
+        "Marte porta energia.",
+        "Venere porta amore.",
+        "Saturno porta struttura.",
+    ]
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=result.vocabulary_version,
+        vocabulary_content_hash=result.vocabulary_content_hash,
+        violations=result.violations,
+    )
+    db_session.commit()
+    return run
+
+
+def test_correcting_without_a_session_is_401(client: TestClient) -> None:
+    response = client.post(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/violations/0/correct",
+        data={"sentence_text": "x"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_correcting_on_an_unknown_run_is_404(authenticated_client: TestClient) -> None:
+    response = authenticated_client.post(
+        "/report-runs/01a01abf-0000-7000-8000-000000000000/violations/0/correct",
+        data={"sentence_text": "x"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_correcting_on_a_run_that_has_not_failed_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct", data={"sentence_text": "x"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_correcting_on_a_non_gate_failure_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Mirrors ``accept_gate_violation``'s own guard: a generic terminal
+    failure has no correlated ``StoredGateResult``, so there is nothing to
+    correct."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_failed_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct", data={"sentence_text": "x"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_correcting_an_out_of_range_violation_index_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)  # exactly one violation
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/1/correct", data={"sentence_text": "x"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_correcting_a_negative_violation_index_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/-1/correct", data={"sentence_text": "x"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_correcting_with_a_stale_sentence_index_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """A violation naming a ``sentence_index`` that no longer resolves
+    against the latest ``ReportDraft`` -- the ``IndexError`` guard in the
+    route body -- 404s exactly like a stale/out-of-range ``violation_index``
+    does (this story's I/O & Edge-Case Matrix)."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = GeneratedDraft(
+        energia_generale=(),
+        amore=(Sentence(text="Marte porta energia.", entry_ids=()),),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=0,
+    )
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=(
+            GateViolation(
+                kind="empty_citation",
+                section="amore",
+                sentence="Marte porta energia.",
+                entry_ids=(),
+                detail="d",
+                sentence_index=5,  # stale: "amore" has exactly one sentence, index 0
+            ),
+        ),
+    )
+    db_session.commit()
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct", data={"sentence_text": "x"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_correcting_the_only_violation_to_a_genuine_pass_writes_a_normal_report(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Correct fixes it": a normal
+    ``Report`` row is written -- no accepted-exception flag -- the run
+    reaches ``gate_passed``, and the redirect goes to the poll page."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_one_correctable_violation(db_session, ada.id)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": "Un mese di grande energia."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}"
+    db_session.refresh(run)
+    assert run.failed_at is None
+    assert run.failure_reason is None
+    assert run.stage == "gate_passed"
+
+    stored_report = db_session.exec(select(Report).where(Report.report_run_id == run.id)).one()
+    assert stored_report.accepted_violation_count == 0
+    assert stored_report.closing_gate_result_id is None
+
+    gate_results = db_session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(gate_results) == 2  # the original failing row + the new passing row
+    assert sorted(result.passed for result in gate_results) == [False, True]
+
+    drafts = db_session.exec(select(ReportDraft).where(ReportDraft.report_run_id == run.id)).all()
+    assert len(drafts) == 2
+    latest_draft = max(drafts, key=lambda stored: stored.attempt)
+    assert latest_draft.attempt == 1
+    assert latest_draft.draft["amore"][0]["text"] == "Testo neutro senza vocabolario."
+    assert latest_draft.draft["amore"][1]["text"] == "Un mese di grande energia."
+
+
+def test_correcting_preserves_the_corrected_sentences_own_citations(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's Acceptance Criteria: only the named sentence's text
+    changes -- its own citations carry over unchanged from the draft that
+    failed."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    aspect_id = frozen["day_lists"]["giorni_favorevoli"][0]["id"]
+    draft = GeneratedDraft(
+        energia_generale=(),
+        amore=(Sentence(text="Il 20 porta una svolta.", entry_ids=(aspect_id,)),),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=0,
+    )
+    vocabulary = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+    result = run_gate(draft, frozen, vocabulary)
+    assert [violation.kind for violation in result.violations] == ["contradicted_fact"]
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=result.vocabulary_version,
+        vocabulary_content_hash=result.vocabulary_content_hash,
+        violations=result.violations,
+    )
+    db_session.commit()
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": "Il 10 porta una svolta."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}"
+    db_session.refresh(run)
+    assert run.stage == "gate_passed"
+
+    latest_draft = db_session.exec(
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run.id)
+        .order_by(ReportDraft.attempt.desc())
+    ).first()
+    assert latest_draft is not None
+    assert latest_draft.draft["amore"][0]["text"] == "Il 10 porta una svolta."
+    assert latest_draft.draft["amore"][0]["entry_ids"] == [aspect_id]
+
+
+def test_correcting_one_violation_that_still_fails_leaves_the_run_open_with_one_renumbered_card(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Correct still fails, nothing
+    carried": a new draft/result is persisted; the redirect goes back to the
+    draft page, which shows exactly the one still-open card, re-numbered
+    against the new result."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_two_correctable_violations(db_session, ada.id)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": "Un lavoro tranquillo."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/draft"
+    db_session.refresh(run)
+    assert run.failed_at is not None
+    assert run.stage != "gate_passed"
+    assert db_session.exec(select(Report).where(Report.report_run_id == run.id)).first() is None
+
+    draft_response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+    assert draft_response.status_code == 200
+    assert draft_response.text.count('<article class="violation-card">') == 1
+    assert "Venere porta amore." in draft_response.text
+    assert f'action="/report-runs/{run.id}/violations/0/correct"' in draft_response.text
+    assert f'action="/report-runs/{run.id}/violations/0/accept"' in draft_response.text
+
+
+def test_correcting_one_violation_carries_forward_an_already_accepted_untouched_violation(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Correct still fails, acceptance
+    carries forward": violation B was already accepted (Story 5.7); editing
+    violation A (still failing after the edit) leaves B unchanged, and a new
+    ``GateViolationReview`` row is written for B against the new result
+    automatically -- Francesco is never asked to re-accept it."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_two_correctable_violations(db_session, ada.id)
+
+    accept_response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/1/accept", follow_redirects=False
+    )
+    assert accept_response.status_code == 303
+    assert accept_response.headers["location"] == f"/report-runs/{run.id}/draft"
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": "Giove porta crescita."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/draft"
+    db_session.refresh(run)
+    assert run.failed_at is not None
+    assert run.stage != "gate_passed"
+
+    new_gate_result = db_session.exec(
+        select(StoredGateResult)
+        .where(StoredGateResult.report_run_id == run.id)
+        .order_by(StoredGateResult.created_at.desc())
+    ).first()
+    assert new_gate_result is not None
+    assert [violation["sentence"] for violation in new_gate_result.violations] == [
+        "Giove porta crescita.",
+        "Venere porta amore.",
+    ]
+    reviews = db_session.exec(
+        select(GateViolationReview).where(GateViolationReview.gate_result_id == new_gate_result.id)
+    ).all()
+    assert len(reviews) == 1
+    assert reviews[0].sentence == "Venere porta amore."
+    assert reviews[0].violation_index == 1
+
+    draft_response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+    assert draft_response.status_code == 200
+    assert draft_response.text.count('<article class="violation-card">') == 1
+    assert "Giove porta crescita." in draft_response.text
+    assert "Accettata" in draft_response.text
+    # The carried-forward violation renders only as a resolved strip (kind +
+    # Sezione + the Accettata tag) -- never re-quoted in an open card's own
+    # blockquote, unlike the still-open "Giove porta crescita." one.
+    assert "<blockquote>Venere porta amore.</blockquote>" not in draft_response.text
+    assert "<blockquote>Giove porta crescita.</blockquote>" in draft_response.text
+
+
+def test_correcting_the_last_open_violation_closes_the_run_via_carried_forward_acceptances(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Carry-forward closes the run":
+    violations A and B are accepted before the edit; the edit targets a
+    third, C, which the recheck fixes -- every remaining violation (A and B,
+    carried forward) is now accepted, so the run closes immediately via the
+    same accepted-exceptions ``Report`` write Story 5.7's route uses."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_three_correctable_violations(db_session, ada.id)
+
+    authenticated_client.post(f"/report-runs/{run.id}/violations/0/accept", follow_redirects=False)
+    authenticated_client.post(f"/report-runs/{run.id}/violations/1/accept", follow_redirects=False)
+    db_session.refresh(run)
+    assert run.failed_at is not None  # 2 of 3 accepted, one still open
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/2/correct",
+        data={"sentence_text": "Un mese di grande struttura interiore."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}"
+    db_session.refresh(run)
+    assert run.failed_at is None
+    assert run.failure_reason is None
+    assert run.stage == "gate_passed"
+
+    stored_report = db_session.exec(select(Report).where(Report.report_run_id == run.id)).one()
+    assert stored_report.accepted_violation_count == 2
+
+    new_gate_result = db_session.get(StoredGateResult, stored_report.closing_gate_result_id)
+    assert new_gate_result is not None
+    assert new_gate_result.passed is False
+    assert [violation["sentence"] for violation in new_gate_result.violations] == [
+        "Marte porta energia.",
+        "Venere porta amore.",
+    ]
+    reviews = db_session.exec(
+        select(GateViolationReview).where(GateViolationReview.gate_result_id == new_gate_result.id)
+    ).all()
+    assert len(reviews) == 2
+
+
+def test_correcting_survives_a_concurrent_attempt_mint_race(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Concurrent correct + regenerate
+    on the same run": both compute the same next ``attempt``; the loser's
+    ``ReportDraft`` insert raises ``IntegrityError`` on the unique
+    ``(report_run_id, attempt)`` index -- caught, rolled back, and redirected
+    with a "try again" flash rather than surfacing a raw 500. Simulated by
+    monkeypatching ``next_report_draft_attempt`` to always return the
+    already-used attempt ``0``."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_one_correctable_violation(db_session, ada.id)
+
+    monkeypatch.setattr(report_runs_module, "next_report_draft_attempt", lambda session, run_id: 0)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": "Un mese di grande energia."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/draft"
+    db_session.refresh(run)
+    assert run.failed_at is not None
+    drafts = db_session.exec(select(ReportDraft).where(ReportDraft.report_run_id == run.id)).all()
+    assert len(drafts) == 1  # no second draft persisted
+
+
+def test_correcting_that_closes_the_run_survives_a_concurrent_closer_race(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """This story's I/O & Edge-Case Matrix, "Concurrent closing correct":
+    both compute the closing ``Report`` write; the loser's insert raises
+    ``IntegrityError`` on ``Report.report_run_id``'s own unique index --
+    caught by ``_close_run_via_accepted_violations`` (shared with the accept
+    route), rolled back, and treated as "someone else just closed this run"
+    -- the same redirect the winner gets, never a raw 500. Mirrors
+    ``test_accepting_a_violation_survives_a_concurrent_duplicate_insert_race``'s
+    own racing-write technique.
+
+    Also a durability regression test (code-review fix, 2026-09-02): before
+    that fix, ``correct_gate_violation`` never committed its own new
+    ``ReportDraft``/``StoredGateResult``/carried-forward-review writes before
+    falling through to ``_close_run_via_accepted_violations`` -- so that
+    helper's ``session.rollback()`` on the raced ``IntegrityError`` would
+    have discarded the whole uncommitted transaction, silently wiping out
+    this request's own correction even though the route still returned a
+    "success" redirect. The assertions below confirm the correction's own
+    rows survive the race."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_two_correctable_violations(db_session, ada.id)
+
+    authenticated_client.post(f"/report-runs/{run.id}/violations/1/accept", follow_redirects=False)
+
+    real_store_report = report_runs_module.store_report
+
+    def _racing_store_report(session, **kwargs):
+        session.add(
+            Report(
+                client_id=run.client_id,
+                report_run_id=run.id,
+                style_guide_version=1,
+                payload_schema_version=1,
+                gate_vocabulary_version=1,
+                gate_vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+            )
+        )
+        session.commit()
+        return real_store_report(session, **kwargs)
+
+    monkeypatch.setattr(report_runs_module, "store_report", _racing_store_report)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": "Un lavoro tranquillo."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}"
+    reports = db_session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert len(reports) == 1
+    assert reports[0].accepted_violation_count == 0  # the concurrently-committed row won
+
+    # The correction itself is durable, regardless of the closing-write race:
+    # the original ReportDraft/StoredGateResult plus the new pair this
+    # request's own correction minted.
+    drafts = db_session.exec(select(ReportDraft).where(ReportDraft.report_run_id == run.id)).all()
+    assert len(drafts) == 2
+    gate_results = db_session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(gate_results) == 2
+    new_gate_result = max(gate_results, key=lambda result: result.created_at)
+    assert [violation["sentence"] for violation in new_gate_result.violations] == [
+        "Venere porta amore.",
+    ]
+    # The carried-forward acceptance for "Venere porta amore." (accepted
+    # before the race) survived too, against the new result.
+    reviews = db_session.exec(
+        select(GateViolationReview).where(GateViolationReview.gate_result_id == new_gate_result.id)
+    ).all()
+    assert len(reviews) == 1
+    assert reviews[0].sentence == "Venere porta amore."
+
+
+def test_the_draft_page_offers_modifica_e_ricontrolla_prefilled_with_the_open_violations_sentence(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_one_correctable_violation(db_session, ada.id)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "Modifica e ricontrolla" in response.text
+    assert f'action="/report-runs/{run.id}/violations/0/correct"' in response.text
+    assert '<textarea name="sentence_text">Marte è retrogrado.</textarea>' in response.text
+    assert "Ricontrolla" in response.text
+
+
+# --- Story 5.8 code-review fixes (2026-09-02) ---------------------------------------
+
+
+def _a_draft_with_a_duplicate_content_violation() -> GeneratedDraft:
+    """Two sentences in ``lavoro`` with byte-for-byte identical text: two
+    independent ``empty_citation`` violations that share the exact same
+    ``(kind, section, sentence, entry_ids, detail)`` content -- the
+    duplicate-content case the ``Counter``-based carry-forward fix exists
+    for (a plain ``set`` would treat one acceptance as covering both).
+    ``denaro``'s own violation is the one this fixture's tests correct."""
+    return GeneratedDraft(
+        energia_generale=(),
+        amore=(),
+        lavoro=(
+            Sentence(text="Marte porta energia.", entry_ids=()),
+            Sentence(text="Marte porta energia.", entry_ids=()),
+        ),
+        denaro=(Sentence(text="Venere porta amore.", entry_ids=()),),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+
+def _a_gate_failed_run_with_a_duplicate_content_violation(
+    db_session: Session, client_id
+) -> ReportRun:
+    run = _a_bound_exhausted_run(client_id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_draft_with_a_duplicate_content_violation()
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=0,
+    )
+    vocabulary = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+    result = run_gate(draft, frozen, vocabulary)
+    assert [violation.sentence for violation in result.violations] == [
+        "Marte porta energia.",
+        "Marte porta energia.",
+        "Venere porta amore.",
+    ]
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=result.vocabulary_version,
+        vocabulary_content_hash=result.vocabulary_content_hash,
+        violations=result.violations,
+    )
+    db_session.commit()
+    return run
+
+
+def test_correcting_carries_forward_at_most_as_many_duplicate_content_acceptances_as_were_accepted(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Code-review fix #2: carry-forward matching is a ``Counter`` over the
+    old reviewed rows' own content keys, consumed one-for-one -- not a plain
+    set membership check. Only violation_index 0 (one of the two identical
+    "Marte porta energia." violations) is accepted; correcting the unrelated
+    "Venere porta amore." violation leaves both duplicate-content violations
+    unchanged in the new result. With the bug (a set), both would carry
+    forward as accepted and the run would wrongly close; with the fix,
+    exactly one carries forward and the run stays open with one open card."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_a_duplicate_content_violation(db_session, ada.id)
+
+    accept_response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/accept", follow_redirects=False
+    )
+    assert accept_response.status_code == 303
+    assert accept_response.headers["location"] == f"/report-runs/{run.id}/draft"
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/2/correct",
+        data={"sentence_text": "Un mese di grande prosperità."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/draft"
+    db_session.refresh(run)
+    assert run.failed_at is not None  # not wrongly closed
+
+    new_gate_result = db_session.exec(
+        select(StoredGateResult)
+        .where(StoredGateResult.report_run_id == run.id)
+        .order_by(StoredGateResult.created_at.desc())
+    ).first()
+    assert new_gate_result is not None
+    assert len(new_gate_result.violations) == 2
+    reviews = db_session.exec(
+        select(GateViolationReview).where(GateViolationReview.gate_result_id == new_gate_result.id)
+    ).all()
+    assert len(reviews) == 1  # only one of the two duplicates carried forward
+
+    draft_response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+    assert draft_response.status_code == 200
+    assert draft_response.text.count('<article class="violation-card">') == 1
+    assert draft_response.text.count("Accettata") == 1
+
+
+def test_correcting_a_violation_with_no_stored_sentence_index_key_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Code-review fix #3: a ``StoredGateResult`` row written before this
+    story shipped has no ``"sentence_index"`` key on its violation dict at
+    all (distinct from the already-covered "present but stale" case) --
+    ``violation.get("sentence_index")`` returning ``None`` must 404, never
+    silently default to ``0`` and risk rewriting an unrelated sentence."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = GeneratedDraft(
+        energia_generale=(),
+        amore=(Sentence(text="Marte porta energia.", entry_ids=()),),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=0,
+    )
+    db_session.add(
+        StoredGateResult(
+            client_id=run.client_id,
+            report_run_id=run.id,
+            passed=False,
+            regeneration_count=run.regeneration_count,
+            vocabulary_version=1,
+            vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+            violations=[
+                {
+                    "kind": "empty_citation",
+                    "section": "amore",
+                    "sentence": "Marte porta energia.",
+                    "entry_ids": [],
+                    "detail": "d",
+                    # deliberately no "sentence_index" key -- a pre-Story-5.8 row
+                }
+            ],
+        )
+    )
+    db_session.commit()
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct", data={"sentence_text": "x"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_correcting_a_violation_with_an_unresolvable_section_is_404(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Code-review fix #7: an unresolvable ``section`` on a (hand-built or
+    corrupted) stored violation must 404, never an unguarded
+    ``AttributeError`` surfacing as a raw 500."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = GeneratedDraft(
+        energia_generale=(),
+        amore=(Sentence(text="Marte porta energia.", entry_ids=()),),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=draft,
+        attempt=0,
+    )
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=(
+            GateViolation(
+                kind="empty_citation",
+                section="not_a_real_section",
+                sentence="Marte porta energia.",
+                entry_ids=(),
+                detail="d",
+                sentence_index=0,
+            ),
+        ),
+    )
+    db_session.commit()
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct", data={"sentence_text": "x"}
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("blank_text", ["   ", "\t\n  "])
+def test_correcting_with_blank_sentence_text_writes_nothing_and_redirects_to_the_draft(
+    authenticated_client: TestClient, db_session: Session, blank_text: str
+) -> None:
+    """Code-review fix #4: a blank/whitespace-only submission would persist
+    as an empty ``Sentence`` -- since it contains no closed-vocabulary
+    token, ``is_claim()`` would stop flagging it entirely, silently deleting
+    the sentence's content from Gate scrutiny (and, if it were the last open
+    violation, closing the run as a genuine clean pass with content actually
+    missing). Rejected before anything is read or written.
+
+    A plain empty string (``""``) is not parametrized here: some HTTP client
+    form-encodings drop an empty value from the submitted body entirely,
+    which FastAPI then rejects as a missing required field (422) before this
+    route's own body ever runs -- a transport-level detail, not this fix's
+    own code path. Whitespace-only values are true non-empty strings on the
+    wire and exercise the ``.strip()`` guard directly."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_one_correctable_violation(db_session, ada.id)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": blank_text},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/draft"
+    db_session.refresh(run)
+    assert run.failed_at is not None
+    drafts = db_session.exec(select(ReportDraft).where(ReportDraft.report_run_id == run.id)).all()
+    assert len(drafts) == 1  # nothing written
+    gate_results = db_session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(gate_results) == 1  # nothing written
+
+
+def test_correcting_one_violation_leaves_the_run_open_and_bumps_updated_at(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Code-review fix #9: the "still open" branch persists a real new
+    ReportDraft/StoredGateResult pair for the run without otherwise touching
+    it -- ``run.updated_at`` must still be bumped, the same way the other
+    two outcome branches (genuine pass, carry-forward-closes) already do."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_two_correctable_violations(db_session, ada.id)
+    updated_at_before = run.updated_at
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": "Un lavoro tranquillo."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    db_session.refresh(run)
+    assert run.updated_at > updated_at_before
+
+
+def test_accept_does_not_close_the_run_against_a_result_superseded_by_a_concurrent_correction(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Code-review fix #5: two near-simultaneous requests -- one accepting a
+    violation against the current-cycle result X this request already read,
+    another hand-correcting a different violation on the same X (which
+    mints a newer, later ``StoredGateResult`` Y that supersedes X as the
+    true current-cycle result) -- must not let the accept's own closing
+    check close the run against the now-stale X. Simulated by making
+    ``_current_cycle_gate_failure`` return the stale result X on its first
+    call (mirroring the accept route's own initial read, before the race)
+    and the real, freshly-queried result on every call after (mirroring
+    ``_close_run_via_accepted_violations``'s own re-check finding Y, once a
+    concurrent correction has already landed)."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_current_cycle_gate_failed_run(db_session, ada.id)  # X: exactly one violation
+    stale_gate_result = db_session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).one()
+
+    # Simulate a concurrent hand-correction that has already superseded X
+    # with a newer failing result Y by the time this accept's own closing
+    # check runs.
+    newer_gate_result = StoredGateResult(
+        client_id=run.client_id,
+        report_run_id=run.id,
+        passed=False,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=1,
+        vocabulary_content_hash=_VOCABULARY_CONTENT_HASH,
+        violations=[
+            {
+                "kind": "empty_citation",
+                "section": "lavoro",
+                "sentence": "a different, still-open violation",
+                "entry_ids": [],
+                "detail": "d",
+                "sentence_index": 0,
+            }
+        ],
+        created_at=stale_gate_result.created_at + timedelta(milliseconds=1),
+    )
+    db_session.add(newer_gate_result)
+    db_session.commit()
+
+    real_current_cycle = report_runs_module._current_cycle_gate_failure
+    calls = {"n": 0}
+
+    def _stale_first_then_fresh(session, run_arg):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return stale_gate_result
+        return real_current_cycle(session, run_arg)
+
+    monkeypatch.setattr(report_runs_module, "_current_cycle_gate_failure", _stale_first_then_fresh)
+
+    response = authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/accept", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/report-runs/{run.id}/draft"
+    assert calls["n"] >= 2  # the re-check inside _close_run_via_accepted_violations ran
+    assert db_session.exec(select(Report).where(Report.report_run_id == run.id)).first() is None
+    db_session.refresh(run)
+    assert run.failed_at is not None  # never closed against the stale result
+    # The review row against the stale result X is still written and valid
+    # -- only the closing write is withheld.
+    reviews = db_session.exec(
+        select(GateViolationReview).where(
+            GateViolationReview.gate_result_id == stale_gate_result.id
+        )
+    ).all()
+    assert len(reviews) == 1
 
 
 # --- Story 6.1: GET /report-runs/{run_id}/report -----------------------------------

@@ -23,6 +23,8 @@ before a request ever reaches this module, mirroring
 from __future__ import annotations
 
 import re
+from collections import Counter
+from dataclasses import replace as dataclasses_replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -31,9 +33,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from core.gate.run import run_gate
+from core.types.generation import Sentence
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import (
@@ -46,13 +51,17 @@ from shell.adapters.postgres.export_record import (
     record_send_disposition,
     store_export_record,
 )
-from shell.adapters.postgres.gate_result import StoredGateResult
+from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
 from shell.adapters.postgres.gate_violation_review import (
     GateViolationReview,
     store_gate_violation_review,
 )
 from shell.adapters.postgres.report import Report, store_report
-from shell.adapters.postgres.report_draft import ReportDraft
+from shell.adapters.postgres.report_draft import (
+    ReportDraft,
+    next_report_draft_attempt,
+    store_report_draft,
+)
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.weasyprint.render import html_to_pdf
@@ -149,11 +158,19 @@ def _current_cycle_gate_failure(session: Session, run: ReportRun) -> StoredGateR
     passed run was never asked this question by any caller, but the guard is
     cheap and makes the function total. Otherwise runs the same query
     ``view_report_draft`` already ran pre-Story-9.5 (latest failing row by
-    ``regeneration_count`` descending) and additionally requires
-    ``result.created_at`` to fall within :data:`_GATE_RESULT_CORRELATION_WINDOW`
-    of ``run.failed_at`` -- see that constant's own comment for why this
-    window reliably separates "the check that just failed" from a stale row
-    left behind by an earlier, since-superseded regeneration cycle.
+    ``created_at`` descending -- Story 5.8 amendment, see below) and
+    additionally requires ``result.created_at`` to fall within
+    :data:`_GATE_RESULT_CORRELATION_WINDOW` of ``run.failed_at`` -- see that
+    constant's own comment for why this window reliably separates "the check
+    that just failed" from a stale row left behind by an earlier,
+    since-superseded regeneration cycle.
+
+    Ordered by ``created_at`` descending, not ``regeneration_count``
+    descending (Story 5.8 amendment): once a hand-correction can mint a new
+    failing ``StoredGateResult`` row without incrementing
+    ``run.regeneration_count``, two failing rows for the same run can share
+    one ``regeneration_count`` value, so that column no longer reliably picks
+    out the newest row -- ``created_at`` always does.
     """
     if run.failed_at is None:
         return None
@@ -161,7 +178,7 @@ def _current_cycle_gate_failure(session: Session, run: ReportRun) -> StoredGateR
         select(StoredGateResult)
         .where(StoredGateResult.report_run_id == run.id)
         .where(StoredGateResult.passed.is_(False))
-        .order_by(StoredGateResult.regeneration_count.desc())
+        .order_by(StoredGateResult.created_at.desc())
     ).first()
     if result is None:
         return None
@@ -428,6 +445,121 @@ def regenerate_report_run(
     return response
 
 
+def _close_run_via_accepted_violations(
+    session: Session,
+    run: ReportRun,
+    stored_gate_result: StoredGateResult,
+    violations: list[dict[str, Any]],
+    *,
+    stored_draft: ReportDraft | None = None,
+    stored_payload: ReportPayload | None = None,
+) -> bool:
+    """Close ``run`` via accepted exceptions once every violation on
+    ``stored_gate_result`` has a ``GateViolationReview`` row -- Story 5.7's
+    own closing block, extracted (this story) so Story 5.8's hand-correct
+    -and-recheck route (below) can trigger the exact same completion write
+    when carrying forward acceptances leaves nothing open, without
+    duplicating the read/write shape.
+
+    Returns ``False`` immediately, writing nothing, when fewer
+    ``GateViolationReview`` rows exist for ``stored_gate_result.id`` than
+    ``len(violations)`` -- the caller's own accept/carry-forward action left
+    at least one violation unresolved, so this is not (yet) a completion.
+    Queried fresh from the database rather than trusting a caller-supplied
+    count, so both call sites below share one source of truth for "is this
+    result now fully reviewed."
+
+    Also returns ``False``, writing nothing, when ``stored_gate_result`` is
+    no longer ``run``'s *current* failing result (code-review fix,
+    2026-09-02): a concurrent hand-correction (``correct_gate_violation``
+    below) can mint a newer failing ``StoredGateResult`` for the same run
+    between a caller reading ``stored_gate_result`` and this function
+    actually closing against it, which would otherwise let a stale result
+    get closed instead of the true current one. Re-checking
+    ``_current_cycle_gate_failure`` here, right before the write, closes that
+    window; the review row(s) already written against the stale result stay
+    valid regardless (they are never deleted), and whichever request is
+    actually working against the true current result closes it correctly on
+    its own, later.
+
+    Once every violation has a review row against the true current result,
+    reads ``ReportDraft``/``ReportPayload`` back -- unless the caller already
+    has them (``stored_draft``/``stored_payload``, an optimization
+    ``correct_gate_violation`` uses to avoid re-querying rows it just fetched
+    itself) -- and writes the closing ``Report`` row exactly like
+    ``driver.py::_run_gate_passed`` does on a clean pass -- ``style_guide_version``/
+    ``payload_schema_version`` read off the latest ``ReportDraft``/
+    ``ReportPayload``, no new Gate check ever run (``run_gate()``/
+    ``GateResult``/``StoredGateResult`` stay untouched). ``run.failed_at``/
+    ``failure_reason`` are cleared and ``run.stage`` advances to
+    ``gate_passed`` on that same write, mirroring
+    ``regenerate_report_run``'s own state-transition shape.
+
+    ``Report.report_run_id`` is unique at the DB level, so two
+    near-simultaneous closes can't create two ``Report`` rows -- but without
+    handling it here, the loser's commit would raise an unhandled
+    ``IntegrityError`` and surface as a raw 500. Caught below, rolled back,
+    and treated as "someone else just closed this run": ``True`` is returned
+    either way, since ``run`` ends up closed regardless of which caller's
+    write actually landed.
+    """
+    reviewed_count = session.exec(
+        select(func.count())
+        .select_from(GateViolationReview)
+        .where(GateViolationReview.gate_result_id == stored_gate_result.id)
+    ).one()
+    if reviewed_count < len(violations):
+        return False
+
+    current = _current_cycle_gate_failure(session, run)
+    if current is None or current.id != stored_gate_result.id:
+        # A concurrent hand-correction has already superseded
+        # `stored_gate_result` with a newer failing result (or the run is no
+        # longer in a Gate-failed state at all) -- never close against a
+        # stale result.
+        return False
+
+    if stored_draft is None:
+        stored_draft = session.exec(
+            select(ReportDraft)
+            .where(ReportDraft.report_run_id == run.id)
+            .order_by(ReportDraft.attempt.desc())
+        ).first()
+        if stored_draft is None:
+            raise RuntimeError(f"ReportRun {run.id} has a Gate failure but no ReportDraft.")
+    if stored_payload is None:
+        stored_payload = session.exec(
+            select(ReportPayload).where(ReportPayload.report_run_id == run.id)
+        ).first()
+        if stored_payload is None:
+            raise RuntimeError(f"ReportRun {run.id} has a Gate failure but no ReportPayload.")
+
+    try:
+        store_report(
+            session,
+            run=run,
+            style_guide_version=stored_draft.style_guide_version,
+            payload_schema_version=stored_payload.schema_version,
+            gate_vocabulary_version=stored_gate_result.vocabulary_version,
+            gate_vocabulary_content_hash=stored_gate_result.vocabulary_content_hash,
+            accepted_violation_count=len(violations),
+            closing_gate_result_id=stored_gate_result.id,
+        )
+    except IntegrityError:
+        # A concurrent closer already wrote this run's Report row first
+        # (`Report.report_run_id` is unique) -- roll back and give this
+        # caller the same outcome the winner got, rather than a raw 500.
+        session.rollback()
+    else:
+        run.failed_at = None
+        run.failure_reason = None
+        run.stage = "gate_passed"
+        run.updated_at = datetime.now(UTC)
+        session.add(run)
+        session.commit()
+    return True
+
+
 @router.post(
     "/report-runs/{run_id}/violations/{violation_index}/accept", include_in_schema=False
 )
@@ -467,22 +599,12 @@ def accept_gate_violation(
     rather than surfacing a raw 500.
 
     Once every violation on the current failing result has a review row
-    (this accept made the count equal ``len(violations)``), the closing
-    ``Report`` write happens immediately, in this same request --
-    ``style_guide_version``/``payload_schema_version`` are read off the
-    latest ``ReportDraft``/``ReportPayload``, mirroring
-    ``driver.py::_run_gate_passed``'s own reads exactly, and no new Gate
-    check is run (``run_gate()``/``GateResult``/``StoredGateResult`` stay
-    untouched -- this story's Boundaries). ``run.failed_at``/
-    ``failure_reason`` are cleared and ``run.stage`` advances to
-    ``gate_passed`` on that same write, mirroring
-    ``regenerate_report_run``'s own state-transition shape. ``Report
-    .report_run_id`` is already unique at the DB level (Story 5.3), so two
-    near-simultaneous closing accepts can't silently create two ``Report``
-    rows -- but without handling it here, the loser's commit would raise an
-    unhandled ``IntegrityError`` and surface as a raw 500 (review-loop fix).
-    Caught below, rolled back, and treated as "someone else just closed this
-    run" -- the same redirect the winner itself gets.
+    (this accept made the count equal ``len(violations)``),
+    ``_close_run_via_accepted_violations`` (Story 5.8 extraction, defined
+    above) writes the closing ``Report`` row immediately, in this same
+    request, clears ``run.failed_at``/``failure_reason`` and advances
+    ``run.stage`` to ``gate_passed`` -- see that function's own docstring for
+    exactly what it reads/writes and how it handles a concurrent closer.
 
     The redirect target differs by outcome (this story's Design Notes): the
     closing accept redirects to the poll page (``/report-runs/{run_id}``),
@@ -534,15 +656,14 @@ def accept_gate_violation(
             # A concurrent request for this exact index committed first --
             # the unique index on (gate_result_id, violation_index) caught
             # what the in-memory check above raced past. Roll back (a
-            # failed flush poisons the transaction) and re-read: the
-            # concurrent row is now visible, so this is a genuine
-            # double-submit from here on.
+            # failed flush poisons the transaction) so the session is clean
+            # again -- `_close_run_via_accepted_violations` below re-reads
+            # the reviewed count fresh from the database, so this is a
+            # genuine double-submit from here on without needing this
+            # function to re-read anything itself.
             session.rollback()
-            reviewed_indices = _reviewed_indices()
-        else:
-            reviewed_indices.add(violation_index)
 
-    if len(reviewed_indices) < len(violations):
+    if not _close_run_via_accepted_violations(session, run, stored_gate_result, violations):
         session.commit()
         response = RedirectResponse(f"/report-runs/{run_id}/draft", status_code=303)
         set_flash(
@@ -553,10 +674,154 @@ def accept_gate_violation(
         )
         return response
 
-    # Every violation on the current failing result now has a review row --
-    # close the run exactly like `driver.py::_run_gate_passed` does on a
-    # clean pass, reading the same rows back the same way, but without
-    # calling `run_gate()` again.
+    response = RedirectResponse(f"/report-runs/{run_id}", status_code=303)
+    set_flash(
+        response,
+        "success",
+        "Violazione accettata: verifica completata con eccezioni.",
+        environment=request.app.state.settings.environment,
+    )
+    return response
+
+
+@router.post(
+    "/report-runs/{run_id}/violations/{violation_index}/correct", include_in_schema=False
+)
+def correct_gate_violation(
+    run_id: UUID,
+    violation_index: int,
+    request: Request,
+    sentence_text: str = Form(...),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Hand-correct one flagged sentence on ``run_id``'s current failing
+    ``StoredGateResult`` and re-check only the Gate (Story 5.8) -- a
+    shell-only edit: only ``sentence_text`` changes, every other sentence
+    (including the corrected sentence's own citations) carries over
+    unchanged, and the recheck calls the exact same pure
+    ``core/gate/run.py::run_gate()`` Story 5.2/5.4/Story 5.7's accept route
+    already use -- never a model call, never new Gate logic.
+
+    404s on the exact same guards ``accept_gate_violation`` uses: no such
+    run, no current-cycle Gate failure (``_current_cycle_gate_failure``,
+    which also covers "already closed"), or ``violation_index`` out of range
+    of that result's ``violations``. Further, Story 5.8-specific 404s cover:
+    a violation whose own ``sentence_index`` is missing entirely (a
+    ``StoredGateResult`` row written before this story shipped, code-review
+    fix -- ``violation.get("sentence_index")`` returning ``None`` is never
+    silently defaulted to ``0``, which could otherwise rewrite an unrelated
+    sentence); a ``section`` that does not resolve on the deserialized draft
+    (also code-review fix, an impossible state from a real ``run_gate()``
+    violation but not from a corrupted/hand-built row); and a *stale* index
+    that is in range of the violations list but whose ``sentence_index`` no
+    longer resolves against the latest ``ReportDraft`` -- caught as
+    ``IndexError`` when indexing into the corrected Section's sentence tuple.
+
+    A blank or whitespace-only ``sentence_text`` is rejected before anything
+    is read or written (code-review fix): persisting it would produce a
+    ``Sentence`` with no closed-vocabulary token, which ``is_claim()`` would
+    then never flag, silently deleting that sentence's content from Gate
+    scrutiny -- and, if it was the run's last open violation, closing the
+    run as a genuine clean pass with content actually missing. Redirects to
+    the draft page with a "danger" flash instead, mirroring the
+    concurrent-mint "try again" redirect below.
+
+    Never touches or is bounded by ``run.regeneration_count`` (this story's
+    Boundaries, mirroring Story 5.7's accept route): the new ``ReportDraft``
+    is tagged via ``next_report_draft_attempt(session, run.id)`` -- a plain
+    count of existing rows, the same source ``shell/runner/driver.py``'s
+    ``_run_draft_ready`` now uses -- not ``run.regeneration_count``, and
+    ``store_gate_result`` below still records ``run.regeneration_count`` at
+    its current, un-incremented value purely for traceability (mirroring
+    every other ``store_gate_result`` call site), never advancing it.
+
+    A concurrent request minting the same next ``attempt`` (e.g. a
+    simultaneous Rigenera) loses at ``store_report_draft``'s own unique
+    ``(report_run_id, attempt)`` index: caught as ``IntegrityError``, rolled
+    back, and redirected back to the draft page with a "try again" flash --
+    never a raw 500 (this story's I/O & Edge-Case Matrix).
+
+    Once the corrected draft is persisted, ``run_gate()`` re-checks it
+    against the same stored Payload and a new ``StoredGateResult`` is
+    persisted (append-only, exactly like an automatic regeneration's pair --
+    never updating or replacing the prior attempt). Every
+    ``GateViolationReview`` already recorded against the *old* failing result
+    is then matched to the *new* result's violations by
+    ``(kind, section, sentence, entry_ids, detail)`` -- byte-for-byte content,
+    not list position (this story's Design Notes) -- and carried forward
+    automatically as a new review row against the new result, so Francesco is
+    never asked to re-accept a violation the edit did not touch. Matching
+    uses a ``collections.Counter`` over the old reviewed rows' own keys,
+    consumed one-for-one as each match carries forward (code-review fix):
+    two violations can share identical content, and a plain set membership
+    check would double-accept an unreviewed twin of an accepted one, rather
+    than carrying forward at most as many duplicate-content acceptances as
+    were actually reviewed.
+
+    The correction itself -- the new ``ReportDraft``, the new
+    ``StoredGateResult``, and any carried-forward reviews -- is committed
+    immediately after that carry-forward step, before branching on the
+    outcome (code-review fix): every branch below performs its own
+    subsequent write, and if that write hits a concurrent-writer
+    ``IntegrityError`` and rolls back (``_close_run_via_accepted_violations``'s
+    own closing-``Report`` attempt), that rollback must only ever undo its
+    own write, never discard the correction this request already made.
+
+    On a genuine pass (``result.passed``), a normal ``Report`` row is written
+    -- no ``accepted_violation_count``/``closing_gate_result_id`` -- exactly
+    like an automatic Gate pass, ``run.stage`` advances to ``gate_passed``,
+    and the response redirects to the poll page. Otherwise,
+    ``_close_run_via_accepted_violations`` (shared with the accept route
+    above, passed this route's own already-fetched ``stored_new_draft``/
+    ``stored_payload`` to avoid re-querying them) is tried against the new
+    result and its carried-forward reviews: if it closes the run (every
+    remaining violation was already accepted, and the new result is still
+    ``run``'s true current one -- see that function's own docstring for the
+    concurrent-correction guard), same poll-page redirect; if violations
+    remain open, ``run.updated_at`` is bumped and the response redirects back
+    to the draft page instead, where the remaining cards -- re-numbered
+    against the new result -- each still offer Accetta and Modifica e
+    ricontrolla.
+    """
+    run = session.get(ReportRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404)
+
+    stored_gate_result = _current_cycle_gate_failure(session, run)
+    if stored_gate_result is None:
+        raise HTTPException(status_code=404)
+
+    violations = stored_gate_result.violations
+    if violation_index < 0 or violation_index >= len(violations):
+        raise HTTPException(status_code=404)
+
+    if not sentence_text.strip():
+        # A blank/whitespace-only submission would persist as an empty
+        # Sentence -- since empty text contains no closed-vocabulary token,
+        # `is_claim()` would stop flagging it entirely, silently deleting
+        # this sentence's content from Gate scrutiny (code-review fix,
+        # 2026-09-02). Write nothing, redirect back to the draft page the
+        # same way a concurrent-mint conflict below does.
+        response = RedirectResponse(f"/report-runs/{run_id}/draft", status_code=303)
+        set_flash(
+            response,
+            "danger",
+            "Il testo non può essere vuoto.",
+            environment=request.app.state.settings.environment,
+        )
+        return response
+
+    violation = violations[violation_index]
+    section = violation["section"]
+    sentence_index = violation.get("sentence_index")
+    if sentence_index is None:
+        # A `StoredGateResult` row written before this story shipped has no
+        # `"sentence_index"` key at all -- defaulting to `0` would risk
+        # silently rewriting an unrelated sentence at that position instead
+        # of the real one (code-review fix, 2026-09-02). Treat it the same
+        # as any other "no longer resolvable" state: a 404, never a guess.
+        raise HTTPException(status_code=404)
+
     stored_draft = session.exec(
         select(ReportDraft)
         .where(ReportDraft.report_run_id == run.id)
@@ -570,36 +835,165 @@ def accept_gate_violation(
     if stored_payload is None:
         raise RuntimeError(f"ReportRun {run.id} has a Gate failure but no ReportPayload.")
 
+    draft = deserialize_generated_draft(stored_draft.draft)
+    sentences = getattr(draft, section, None)
+    if sentences is None:
+        # An unresolvable `section` (impossible from a `run_gate()`-produced
+        # violation, but not from a hand-built or corrupted stored row) --
+        # 404, never an unguarded `AttributeError` (code-review fix,
+        # 2026-09-02).
+        raise HTTPException(status_code=404)
     try:
-        store_report(
+        old_sentence = sentences[sentence_index]
+    except IndexError:
+        # The flagged violation's own `sentence_index` no longer resolves
+        # against the latest draft -- a stale index, the same class of "no
+        # longer applies" state `accept_gate_violation`'s range check
+        # guards against for `violation_index` itself.
+        raise HTTPException(status_code=404) from None
+
+    corrected_sentence = Sentence(text=sentence_text, entry_ids=old_sentence.entry_ids)
+    corrected_sentences = tuple(
+        corrected_sentence if index == sentence_index else existing
+        for index, existing in enumerate(sentences)
+    )
+    corrected_draft = dataclasses_replace(draft, **{section: corrected_sentences})
+
+    try:
+        stored_new_draft = store_report_draft(
             session,
             run=run,
             style_guide_version=stored_draft.style_guide_version,
-            payload_schema_version=stored_payload.schema_version,
-            gate_vocabulary_version=stored_gate_result.vocabulary_version,
-            gate_vocabulary_content_hash=stored_gate_result.vocabulary_content_hash,
-            accepted_violation_count=len(violations),
-            closing_gate_result_id=stored_gate_result.id,
+            sections_config_version=stored_draft.sections_config_version,
+            draft=corrected_draft,
+            attempt=next_report_draft_attempt(session, run.id),
         )
     except IntegrityError:
-        # A concurrent closing accept already wrote this run's Report row
-        # first (`Report.report_run_id` is unique) -- roll back and give
-        # this request the same outcome the winner got, rather than a raw
-        # 500.
+        # A concurrent request (another hand-correction, or a Rigenera)
+        # minted the same next `attempt` first -- roll back and let
+        # Francesco retry rather than surfacing a raw 500 (this story's I/O
+        # & Edge-Case Matrix, "Concurrent correct + regenerate").
         session.rollback()
-    else:
+        response = RedirectResponse(f"/report-runs/{run_id}/draft", status_code=303)
+        set_flash(
+            response,
+            "danger",
+            "Un'altra operazione ha già modificato questo Report: riprova.",
+            environment=request.app.state.settings.environment,
+        )
+        return response
+
+    result = run_gate(corrected_draft, stored_payload.payload, request.app.state.gate_vocabulary)
+    new_stored_gate_result = store_gate_result(
+        session,
+        run=run,
+        passed=result.passed,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=result.vocabulary_version,
+        vocabulary_content_hash=result.vocabulary_content_hash,
+        violations=result.violations,
+    )
+
+    # Counted, not a plain set (code-review fix, 2026-09-02): two violations
+    # can share identical (kind, section, sentence, entry_ids, detail)
+    # content -- a `Counter` over the old reviewed rows' own keys, consumed
+    # one-for-one as each match carries forward, means N old-accepted
+    # duplicates carry forward to at most N new duplicate-content
+    # violations, never silently double-accepting an unreviewed twin.
+    old_reviewed_keys = Counter(
+        (review.kind, review.section, review.sentence, tuple(review.entry_ids), review.detail)
+        for review in session.exec(
+            select(GateViolationReview).where(
+                GateViolationReview.gate_result_id == stored_gate_result.id
+            )
+        ).all()
+    )
+    for new_index, new_violation in enumerate(result.violations):
+        key = (
+            new_violation.kind,
+            new_violation.section,
+            new_violation.sentence,
+            new_violation.entry_ids,
+            new_violation.detail,
+        )
+        if old_reviewed_keys[key] > 0:
+            old_reviewed_keys[key] -= 1
+            store_gate_violation_review(
+                session,
+                run=run,
+                gate_result=new_stored_gate_result,
+                violation_index=new_index,
+                kind=new_violation.kind,
+                section=new_violation.section,
+                sentence=new_violation.sentence,
+                entry_ids=new_violation.entry_ids,
+                detail=new_violation.detail,
+            )
+
+    # Commit the correction itself -- the new ReportDraft, the new
+    # StoredGateResult, and any carried-forward GateViolationReview rows --
+    # before branching on the outcome (code-review fix, 2026-09-02). Every
+    # branch below performs its own subsequent write (a genuine pass's
+    # `store_report`, or `_close_run_via_accepted_violations`'s own
+    # closing-Report attempt); if either hits a concurrent-writer
+    # `IntegrityError` and rolls back, that rollback must only ever undo its
+    # own write, never discard the correction this request just made.
+    session.commit()
+
+    if result.passed:
+        store_report(
+            session,
+            run=run,
+            style_guide_version=stored_new_draft.style_guide_version,
+            payload_schema_version=stored_payload.schema_version,
+            gate_vocabulary_version=result.vocabulary_version,
+            gate_vocabulary_content_hash=result.vocabulary_content_hash,
+        )
         run.failed_at = None
         run.failure_reason = None
         run.stage = "gate_passed"
         run.updated_at = datetime.now(UTC)
         session.add(run)
         session.commit()
+        response = RedirectResponse(f"/report-runs/{run_id}", status_code=303)
+        set_flash(
+            response,
+            "success",
+            "Correzione applicata: verifica di fondatezza superata.",
+            environment=request.app.state.settings.environment,
+        )
+        return response
 
-    response = RedirectResponse(f"/report-runs/{run_id}", status_code=303)
+    if _close_run_via_accepted_violations(
+        session,
+        run,
+        new_stored_gate_result,
+        new_stored_gate_result.violations,
+        stored_draft=stored_new_draft,
+        stored_payload=stored_payload,
+    ):
+        response = RedirectResponse(f"/report-runs/{run_id}", status_code=303)
+        set_flash(
+            response,
+            "success",
+            "Correzione applicata: verifica completata con eccezioni.",
+            environment=request.app.state.settings.environment,
+        )
+        return response
+
+    # Still open: at least one violation on the new result remains
+    # unreviewed. This branch persists a real new ReportDraft/StoredGateResult
+    # pair for `run` without otherwise touching it -- bump `updated_at` here,
+    # the same way the other two outcome branches above already do
+    # (code-review fix, 2026-09-02).
+    run.updated_at = datetime.now(UTC)
+    session.add(run)
+    session.commit()
+    response = RedirectResponse(f"/report-runs/{run_id}/draft", status_code=303)
     set_flash(
         response,
         "success",
-        "Violazione accettata: verifica completata con eccezioni.",
+        "Correzione applicata.",
         environment=request.app.state.settings.environment,
     )
     return response

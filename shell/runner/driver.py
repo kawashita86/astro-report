@@ -89,7 +89,11 @@ from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, 
 from shell.adapters.postgres.client import Client
 from shell.adapters.postgres.gate_result import store_gate_result
 from shell.adapters.postgres.report import store_report
-from shell.adapters.postgres.report_draft import ReportDraft, store_report_draft
+from shell.adapters.postgres.report_draft import (
+    ReportDraft,
+    next_report_draft_attempt,
+    store_report_draft,
+)
 from shell.adapters.postgres.report_payload import ReportPayload, store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.postgres.report_theme import (
@@ -522,12 +526,16 @@ def _run_draft_ready(
     it -- the Groundedness Gate it feeds runs one stage later, at
     ``gate_passed``.
 
-    The persisted ``ReportDraft`` is tagged ``attempt=run.regeneration_count``
-    (Story 5.4): ``0`` the first time this stage runs for ``run``, and
-    whatever ``advance()``'s ``GateFailedError`` handling has already
-    incremented it to on a re-run after a Gate failure -- so a second (or
-    third) draft for the same run is a new, distinctly-tagged row, never a
-    conflict with the first.
+    The persisted ``ReportDraft`` is tagged
+    ``attempt=next_report_draft_attempt(session, run.id)`` (Story 5.4,
+    amended by Story 5.8): a count of existing ``ReportDraft`` rows for
+    ``run``, not ``run.regeneration_count`` directly -- the two still
+    coincide on this automatic path (``0`` the first time this stage runs,
+    incrementing by one each regeneration), but only the count stays correct
+    once Story 5.8's hand-correction route can also mint a row for this run
+    without ever touching ``regeneration_count``. So a second (or third)
+    draft for the same run is a new, distinctly-tagged row, never a conflict
+    with the first, regardless of which route minted the prior one.
     """
     stored_payload = session.exec(
         select(ReportPayload).where(ReportPayload.report_run_id == run.id)
@@ -556,7 +564,7 @@ def _run_draft_ready(
         style_guide_version=style_guide.version,
         sections_config_version=stored_payload.sections_config_version,
         draft=draft,
-        attempt=run.regeneration_count,
+        attempt=next_report_draft_attempt(session, run.id),
     )
 
 

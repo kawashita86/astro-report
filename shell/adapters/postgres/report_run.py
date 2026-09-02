@@ -108,10 +108,21 @@ class ReportRun(SQLModel, table=True):
     # Counts failures absorbed, not regenerations completed:
     # `regeneration_count == 1` means one Gate failure has just been caught
     # and one regeneration is about to run next, not that one has already
-    # finished. N here corresponds to N+1 total `ReportDraft.attempt` values
-    # persisted for this run once that Nth regeneration's own draft lands --
-    # attempt `0` is the original, never-regenerated draft, attempts `1..N`
-    # are the regenerations this counter tracked.
+    # finished.
+    #
+    # Story 5.8 amendment: this no longer uniquely determines the next
+    # `ReportDraft.attempt` value. Before Story 5.8, N here corresponded to
+    # N+1 total `ReportDraft.attempt` values persisted for this run once that
+    # Nth regeneration's own draft landed -- attempt `0` the original,
+    # never-regenerated draft, attempts `1..N` the regenerations this counter
+    # tracked. Once a hand-correction (Story 5.8) can also mint a new
+    # `ReportDraft` row for this run without ever incrementing this counter,
+    # that one-to-one correspondence no longer holds; the next attempt number
+    # is instead a plain count of existing `ReportDraft` rows for the run
+    # (`shell/adapters/postgres/report_draft.py::next_report_draft_attempt`),
+    # which both the automatic path (`shell/runner/driver.py::_run_draft_ready`)
+    # and the hand-correction route (`shell/http/routes/report_runs.py`) read
+    # instead of this field.
     regeneration_count: int = Field(default=0)
     # `NULL` until a run is marked terminally failed; a timestamp then marks
     # it permanently, mirroring `StoredNatalChart.superseded_at`'s own

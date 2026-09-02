@@ -182,6 +182,7 @@ def test_store_gate_result_persists_a_failing_check_with_its_violations(
             "section": "energia_generale",
             "sentence": "Marte in Ariete porta energia.",
             "entry_ids": [],
+            "sentence_index": 0,
             "detail": "no cited entry supports this Claim",
         }
     ]

@@ -61,6 +61,16 @@ class GateViolation:
     sentence up in the draft (Story 5.5 surfaces this directly to Francesco).
     ``detail`` is a human-readable explanation of what was claimed and what
     the cited entries (if any) actually say.
+
+    ``sentence_index`` (Story 5.8 amendment) is the within-``section`` tuple
+    position of the flagged ``Sentence`` -- needed to locate the exact
+    sentence to replace in a draft when two sentences in the same Section
+    share identical text. Defaults to ``0`` so every existing keyword-arg
+    construction (tests, and every ``StoredGateResult.violations`` row
+    written before this amendment) stays valid without a migration or a
+    backfill; only a violation from a ``run_gate()`` call made after this
+    shipped carries a meaningful index (see ``core/gate/run.py::run_gate()``'s
+    Design Notes).
     """
 
     kind: str
@@ -68,6 +78,7 @@ class GateViolation:
     sentence: str
     entry_ids: tuple[str, ...]
     detail: str
+    sentence_index: int = 0
 
 
 @dataclass(frozen=True)

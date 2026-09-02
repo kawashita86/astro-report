@@ -880,6 +880,78 @@ def test_a_mundane_casa_ordinal_sentence_citing_a_house_free_entry_is_an_invente
     assert _kinds(result) == ["invented_fact"]
 
 
+# --- Story 5.8 amendment: GateViolation.sentence_index --------------------------
+
+
+def test_sentence_index_is_the_zero_based_position_within_its_own_section() -> None:
+    draft = _draft(
+        energia_generale=(
+            Sentence(text="Testo neutro senza vocabolario.", entry_ids=()),
+            Sentence(text="Marte porta energia.", entry_ids=()),
+            Sentence(text="Altro testo neutro.", entry_ids=()),
+            Sentence(text="Venere porta amore.", entry_ids=()),
+        )
+    )
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert result.passed is False
+    assert [violation.sentence_index for violation in result.violations] == [1, 3]
+
+
+def test_sentence_index_resets_for_each_new_section() -> None:
+    """A section's own sentence index is purely a within-section position
+    (``run_gate()``'s own docstring) -- it never carries over as a running
+    count across Sections."""
+    draft = _draft(
+        energia_generale=(Sentence(text="Marte porta energia.", entry_ids=()),),
+        amore=(
+            Sentence(text="Testo neutro senza vocabolario.", entry_ids=()),
+            Sentence(text="Venere porta amore.", entry_ids=()),
+        ),
+    )
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert result.passed is False
+    energia_violations = [v for v in result.violations if v.section == "energia_generale"]
+    amore_violations = [v for v in result.violations if v.section == "amore"]
+    assert energia_violations[0].sentence_index == 0
+    assert amore_violations[0].sentence_index == 1
+
+
+def test_multiple_violations_from_one_sentence_all_share_its_own_sentence_index() -> None:
+    """A single sentence failing several unrelated categories (body/sign,
+    house, date, retrograde) produces one ``GateViolation`` per failing
+    category (as ``test_a_sentence_failing_all_four_categories_reports_them_in_the_fixed_order``
+    already exercises) -- every one of those violations must carry that same
+    sentence's own index, never a different index per category."""
+    lunation = Lunation(
+        kind="full_moon",
+        occurred_at=datetime(2026, 1, 10, tzinfo=UTC),
+        longitude=Decimal("100.0"),
+        natal_house=3,
+    )
+    frozen = _freeze(lunations=(lunation,))
+    lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
+
+    draft = _draft(
+        amore=(
+            Sentence(text="Testo neutro senza vocabolario.", entry_ids=()),
+            Sentence(
+                text="Marte è retrogrado nella tua settima casa il 25.",
+                entry_ids=(lunation_id,),
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert len(result.violations) == 4
+    assert all(violation.sentence_index == 1 for violation in result.violations)
+
+
 def test_a_bare_duration_number_citing_a_date_free_entry_is_an_invented_fact() -> None:
     """epic-5-retro-item-40: "per i prossimi 3 giorni" is classified as a
     day-of-month Claim (the trigger fires on any bare 1-31). Citing a

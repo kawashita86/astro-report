@@ -25,7 +25,11 @@ from shell.adapters.postgres.client import (
     create_client_with_chart,
     delete_client_and_derived,
 )
-from shell.adapters.postgres.report_draft import ReportDraft, store_report_draft
+from shell.adapters.postgres.report_draft import (
+    ReportDraft,
+    next_report_draft_attempt,
+    store_report_draft,
+)
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
 
@@ -264,6 +268,91 @@ def test_two_report_runs_for_one_client_each_get_their_own_report_draft_row(
         select(ReportDraft).where(ReportDraft.client_id == client.id)
     ).all()
     assert {stored.report_run_id for stored in stored_drafts} == {first_run.id, second_run.id}
+
+
+# --- Story 5.8: next_report_draft_attempt() -----------------------------------
+
+
+def test_next_report_draft_attempt_is_zero_for_a_run_with_no_drafts(session: Session) -> None:
+    client = _create_client(session)
+    run = _create_run(session, client)
+
+    assert next_report_draft_attempt(session, run.id) == 0
+
+
+def test_next_report_draft_attempt_is_n_after_n_drafts_stored(session: Session) -> None:
+    client = _create_client(session)
+    run = _create_run(session, client)
+
+    store_report_draft(
+        session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_a_draft(),
+        attempt=0,
+    )
+    assert next_report_draft_attempt(session, run.id) == 1
+
+    store_report_draft(
+        session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_a_draft(),
+        attempt=1,
+    )
+    assert next_report_draft_attempt(session, run.id) == 2
+
+
+def test_next_report_draft_attempt_counts_rows_regardless_of_which_code_path_wrote_them(
+    session: Session,
+) -> None:
+    """The count is a plain count of existing rows for the run -- it does not
+    care whether ``attempt`` values are contiguous or in what order they were
+    written, which is exactly what lets a hand-correction (Story 5.8) mint a
+    row without ever touching ``ReportRun.regeneration_count``."""
+    client = _create_client(session)
+    run = _create_run(session, client)
+
+    store_report_draft(
+        session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_a_draft(),
+        attempt=0,
+    )
+    store_report_draft(
+        session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_a_draft(),
+        attempt=1,
+    )
+
+    assert next_report_draft_attempt(session, run.id) == 2
+
+
+def test_next_report_draft_attempt_is_scoped_to_its_own_run(session: Session) -> None:
+    client = _create_client(session)
+    first_run = _create_run(session, client)
+    second_run = ReportRun(client_id=client.id, month="2026-02")
+    session.add(second_run)
+    session.commit()
+
+    store_report_draft(
+        session,
+        run=first_run,
+        style_guide_version=1,
+        sections_config_version=1,
+        draft=_a_draft(),
+        attempt=0,
+    )
+
+    assert next_report_draft_attempt(session, first_run.id) == 1
+    assert next_report_draft_attempt(session, second_run.id) == 0
 
 
 # --- FR-29 cascade ---------------------------------------------------------------

@@ -29,6 +29,13 @@
           <form method="post" action="/report-runs/{{ run.id }}/violations/{{ v.index }}/accept">
             <button type="submit" class="btn btn--secondary">Accetta</button>
           </form>
+          <details>
+            <summary>Modifica e ricontrolla</summary>
+            <form method="post" action="/report-runs/{{ run.id }}/violations/{{ v.index }}/correct">
+              <textarea name="sentence_text">{{ v.sentence }}</textarea>
+              <button type="submit" class="btn btn--primary">Ricontrolla</button>
+            </form>
+          </details>
           <a href="#sezione-{{ v.section }}">Vai a {{ section_titles[v.section] }}</a>
         </article>
         {% endfor %}

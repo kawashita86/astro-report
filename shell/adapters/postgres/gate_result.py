@@ -51,8 +51,18 @@ class StoredGateResult(SQLModel, table=True):
     ``Report`` row and a run reaches ``gate_passed`` only once.
     ``regeneration_count`` is the value in force when this check ran (the
     pre-increment value on a failure, so row N's ``regeneration_count``
-    always matches how many regenerations preceded it). ``violations`` is a
-    JSON list of every flagged Claim, empty when ``passed`` is ``True``.
+    matches how many automatic regenerations preceded it). ``violations`` is
+    a JSON list of every flagged Claim, empty when ``passed`` is ``True``.
+
+    Story 5.8 amendment: a hand-correction can also mint a new, failing
+    ``StoredGateResult`` row for a run without ever incrementing
+    ``regeneration_count`` (mirrors ``ReportRun.regeneration_count``'s own
+    updated comment, ``shell/adapters/postgres/report_run.py``) -- so two
+    failing rows for the same run can now share one ``regeneration_count``
+    value, and that column no longer uniquely orders a run's rows by
+    recency. ``created_at`` is the only reliable "most recent" ordering
+    across both minting paths (``shell/http/routes/report_runs.py``'s
+    ``_current_cycle_gate_failure``).
     """
 
     __tablename__ = "gate_result"
