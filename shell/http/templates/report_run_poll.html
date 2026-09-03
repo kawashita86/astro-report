@@ -24,20 +24,20 @@
           {% endif %}
           {% endfor %}
         </ol>
-        <p class="stage-caption" role="status" aria-live="polite">{{ stage_caption }}</p>
+        <p class="stage-caption{% if run.stage == "gate_passed" %} stage-caption--success{% endif %}" role="status" aria-live="polite">{% if run.stage == "payload_ready" and not run.failed_at %}<span class="spinner" aria-hidden="true"></span>{% endif %}{{ stage_caption }}</p>
         <p class="banner banner--danger" role="alert" data-poll-error hidden>
           Connessione persa — nuovo tentativo…
         </p>
         <button type="button" class="btn btn--secondary" data-poll-retry hidden>Riprova</button>
 
-        {% if run.stage == "payload_ready" or (run.stage == "draft_ready" and not gate_failed) %}
+        {% if run.stage == "draft_ready" and not gate_failed %}
         <p><a href="/report-runs/{{ run.id }}/payload">Vedi Payload</a></p>
         {% endif %}
         {% if gate_failed %}
         <p><a href="/report-runs/{{ run.id }}/draft">Vedi bozza</a></p>
         {% endif %}
         {% if run.stage == "gate_passed" or run.stage == "exported" %}
-        <p><a href="/report-runs/{{ run.id }}/report">Vedi report</a></p>
+        <p><a class="btn btn--primary" href="/report-runs/{{ run.id }}/report">Vedi report</a></p>
         {% endif %}
       </div>
 {% endblock %}

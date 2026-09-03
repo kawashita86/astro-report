@@ -613,11 +613,30 @@ def test_getting_the_payload_only_the_first_section_is_open_by_default(
     assert '<details class="payload-section">' in response.text
 
 
-def test_the_poll_view_links_to_the_payload_once_it_is_ready(
+def test_the_poll_view_withholds_the_payload_link_while_bozza_is_active(
     authenticated_client: TestClient, db_session: Session, fake_advance
 ) -> None:
+    """Fix (2026-09-03): "Vedi Payload" is withheld specifically while Bozza
+    (``draft_ready``) is the active, still-generating node, so Francesco is
+    never tempted to click away from the slowest step mid-generation."""
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert f'href="/report-runs/{run.id}/payload"' not in response.text
+
+
+def test_the_poll_view_links_to_the_payload_while_the_gate_check_runs(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    """"Vedi Payload" still shows once Bozza has completed and Verifica di
+    fondatezza is the active node, as long as the Gate has not yet failed."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
     db_session.add(run)
     db_session.commit()
 
@@ -722,8 +741,10 @@ def test_getting_the_draft_renders_prose_and_list_sections_localized_to_the_clie
     assert response.text.count("energia_generale") == 1
     assert 'id="sezione-energia_generale"' in response.text
     # ada's client.iana_zone is America/Chicago (UTC-6 in January):
-    # 2026-01-10 15:00 UTC (perfected_at) -> 09:00 local. Story 9.9: dd/MM/yyyy HH:mm.
-    assert "10/01/2026 09:00" in response.text
+    # 2026-01-10 15:00 UTC (perfected_at) -> 09:00 local; the day-list entry
+    # shows the date only, never a time-of-day (fix, 2026-09-03).
+    assert "10/01/2026" in response.text
+    assert "10/01/2026 09:00" not in response.text
 
 
 def test_getting_the_draft_shows_the_latest_attempt_when_more_than_one_exists(
@@ -1295,6 +1316,87 @@ def test_a_running_runs_poll_fragment_shows_all_six_nodes_and_the_active_caption
     assert "stage-track__node--active" in response.text
     assert "Generazione della bozza" in response.text  # payload_ready's own caption
     assert "hx-trigger" in response.text
+
+
+def test_the_bozza_stage_shows_an_inline_spinner_and_never_offers_vedi_payload(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    """Fix (2026-09-03): while Bozza (``draft_ready``) is the active,
+    still-running node, the caption carries an inline spinner (never an
+    overlay) so the slowest step never reads as stuck -- and the "Vedi
+    Payload" link is withheld so Francesco is not tempted to click away
+    mid-generation."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert "Generazione della bozza in corso, attendere" in response.text
+    assert '<span class="spinner" aria-hidden="true"></span>' in response.text
+    assert "Vedi Payload" not in response.text
+
+
+def test_a_terminally_failed_run_at_payload_ready_shows_no_spinner(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    """The spinner names genuine in-progress work -- a run that failed while
+    Bozza was active (a generic, non-Gate terminal failure) must never show
+    one, even though ``run.stage`` is still ``payload_ready``."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="payload_ready",
+        failed_at=datetime(2026, 1, 2, tzinfo=UTC),
+        failure_reason="boom",
+    )
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert '<span class="spinner"' not in response.text
+
+
+def test_the_payload_stage_shows_no_spinner(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    """The new spinner is scoped to Bozza alone: while Payload (not Bozza)
+    is the active node, no spinner is shown."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="transits_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert '<span class="spinner"' not in response.text
+
+
+def test_the_gate_passed_stage_shows_vedi_report_as_a_button_and_a_success_caption(
+    authenticated_client: TestClient, db_session: Session, fake_advance
+) -> None:
+    """Fix (2026-09-03): "Vedi report" reads as a primary button, never a
+    plain link; "Pronto per l'esportazione" reads as a success message
+    (background/border), not a plain status line."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert 'class="stage-caption stage-caption--success"' in response.text
+    assert (
+        f'<a class="btn btn--primary" href="/report-runs/{run.id}/report">Vedi report</a>'
+        in response.text
+    )
 
 
 def test_a_gate_passed_runs_poll_fragment_has_no_hx_trigger(

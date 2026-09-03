@@ -53,7 +53,7 @@ _STAGE_CAPTIONS: dict[str, str] = {
     "natal_ready": "Calcolo del tema natale",
     "transits_ready": "Ricerca dei transiti",
     "payload_ready": "Assemblaggio del Payload",
-    "draft_ready": "Generazione della bozza",
+    "draft_ready": "Generazione della bozza in corso, attendere",
     "gate_passed": "Verifica di fondatezza",
     "exported": "Pronto per l'esportazione",
 }

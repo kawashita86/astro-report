@@ -151,7 +151,7 @@ def test_node_keys_and_labels_match_stage_nodes_regardless_of_state() -> None:
         (None, "Calcolo del tema natale"),
         ("natal_ready", "Ricerca dei transiti"),
         ("transits_ready", "Assemblaggio del Payload"),
-        ("payload_ready", "Generazione della bozza"),
+        ("payload_ready", "Generazione della bozza in corso, attendere"),
         ("draft_ready", "Verifica di fondatezza"),
         ("gate_passed", "Pronto per l'esportazione"),
     ],

@@ -1380,6 +1380,21 @@ h3 {
   font-size: var(--font-body-size);
   line-height: var(--font-body-line);
   color: var(--ink-secondary);
+  text-align: center;
+}
+
+/* The run's final in-progress caption ("Pronto per l'esportazione") reads as
+   a success message, not a plain status line -- mirrors `.banner--success`'s
+   own background/border-left treatment. `text-align: left` overrides the
+   plain `.stage-caption`'s centering: no other banner in this app centers
+   its text. */
+.stage-caption--success {
+  padding: var(--space-md) var(--space-base);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--success);
+  background: var(--success-surface);
+  color: var(--ink-primary);
+  text-align: left;
 }
 
 .violation-card {

@@ -182,7 +182,13 @@ def _render_list(
     localized_entries = localize_payload({"entries": entries}, iana_zone=iana_zone)["entries"]
     return [
         {
-            "date": _entry_date(entry),
+            # `_localize_value` always formats a converted instant as
+            # "%d/%m/%Y %H:%M" -- the leading "%d/%m/%Y" token is the whole
+            # of what a day-list entry needs to show (it names "the day",
+            # never a time-of-day), so the time is dropped here rather than
+            # in `localize_payload` itself, which the Payload view still
+            # uses unchanged for its own exact-instant display.
+            "date": _entry_date(entry).split(" ", 1)[0],
             "text": _citing_text(entry["id"], sentences),
             "entry_ids": (entry["id"],),
         }
