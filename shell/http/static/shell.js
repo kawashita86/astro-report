@@ -48,8 +48,8 @@
  *      starts no timer of its own.
  *
  *      Story 9.8 adds backoff on top: each consecutive poll failure gates
- *      the *next automatic* tick behind a growing delay (5s after the 1st
- *      failure, 15s after the 2nd and every one after that) by vetoing
+ *      the *next automatic* tick behind a growing delay (1s after the 1st
+ *      failure, 2s after the 2nd and every one after that) by vetoing
  *      `htmx:beforeRequest` for ticks that land before that gate opens —
  *      the same `event.preventDefault()` shape the hidden-tab pause above
  *      already uses, never a change to the `every 2s` attribute itself
@@ -524,10 +524,10 @@
 
   /* ---- 6. Report-run stage view (Story 9.5, backoff added Story 9.8) ----- */
 
-  //: 5s after the 1st consecutive poll failure, 15s from the 2nd onward —
+  //: 1s after the 1st consecutive poll failure, 2s from the 2nd onward —
   //: this story's I/O & Edge-Case Matrix ("Poll fails once, then twice").
-  var POLL_BACKOFF_MS_FIRST = 5000;
-  var POLL_BACKOFF_MS_SUBSEQUENT = 15000;
+  var POLL_BACKOFF_MS_FIRST = 1000;
+  var POLL_BACKOFF_MS_SUBSEQUENT = 2000;
   //: How many consecutive failures before `[data-poll-retry]` (`Riprova`)
   //: is revealed.
   var POLL_RETRY_VISIBLE_AT_FAILURE = 2;
