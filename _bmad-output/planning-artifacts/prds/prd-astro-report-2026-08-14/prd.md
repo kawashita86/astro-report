@@ -712,6 +712,10 @@ Francesco can see all Reports previously generated for a Client, in order.
   session and 100–200 per month. `[ASSUMPTION: the 3-minute budget is derived from UJ-1's "within a
   couple of minutes" and from SM-1's 15-minute total; it has not been validated against real generation
   latency and may need loosening once the Gate's regeneration rate is known.]`
+  **Added 2026-09-14, correct-course:** when `REPORT_RUN_MODE=background` (AD-20, amended), a Report
+  may also continue advancing while Francesco is not actively watching it — the 3-minute p90 and the
+  forty-per-session ceiling are unchanged; only the requirement to keep the tab open while it runs is
+  relaxed.
 - **Time budget.** End-to-end Francesco involvement per Report — entering or selecting a Client,
   generating, reviewing, exporting — stays under 15 minutes.
 - **Cost.** Running cost stays at zero at 30–200 Reports per month.

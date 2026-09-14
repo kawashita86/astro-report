@@ -340,6 +340,28 @@ No arrow runs from `core` to `shell`. There is no exception.
   is closed pauses at its last checkpoint and resumes on the next poll of that run — there is no
   scheduled or self-issued request that advances a run, so forward progress is bounded by genuine
   operator polling.
+  **(Amended 2026-09-14, correct-course):** A single `.env`-configured `REPORT_RUN_MODE` setting
+  (`poll` | `background`, read once in `shell/config.py` into `Settings`, default `poll`) selects
+  between two ways forward progress happens for the whole deployment — never per-run. In `poll`
+  mode, AD-20's rule above holds verbatim: only the poll handler calls `advance()`; forward progress
+  is bounded by operator polling. In `background` mode, a single in-process scheduler task — started
+  once at application startup, stopped at shutdown, still just calling the same one-stage-per-call
+  `advance()` under the same advisory lock — periodically advances every `ReportRun` with
+  `failed_at IS NULL` and `stage != 'gate_passed'`; AD-10's stage machine, `advance()`'s idempotence,
+  and the advisory lock are unchanged. The poll handler still renders the stage-track view at the
+  same cadence in this mode, but becomes read-only: it renders `run` without calling `advance()`, so
+  the operator sees identical live progress whether or not they keep polling. `background` mode
+  requires a Render plan with no idle spin-down — on a plan that sleeps the dyno, `background` mode
+  silently stops advancing while the tab is closed, defeating its purpose; this is a documented
+  deployment prerequisite (`AGENTS.md`), not something the app enforces. A dyno restart or redeploy
+  loses only the scheduler's timer, never persisted stage data; resuming is left to the next poll or
+  the next post-restart scheduler tick — no boot-time reconciliation pass, by Francesco's explicit
+  acceptance of that gap. A run rewound to `payload_ready` pending human Gate review (Stories 5.7/5.8)
+  is ticked like any other incomplete run — the scheduler adds no pause or special case beyond
+  AD-10's existing `stage_failure_count` / `_MAX_STAGE_FAILURES` bound, which still terminally fails
+  it (`failed_at`) exactly as in `poll` mode. This amendment introduces no queue, no broker, no second deployable — the
+  Deferred section's "worker process and queue broker" stays out of scope, reserved for if the
+  200-reports-per-month ceiling moves.
 
 ## Consistency Conventions
 

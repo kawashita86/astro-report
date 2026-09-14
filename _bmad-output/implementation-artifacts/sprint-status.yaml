@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-14-2026 09:15
-last_updated: 2026-09-02
+last_updated: 2026-09-14
 project: astro-report
 project_key: NOKEY
 tracking_system: file-system
@@ -67,6 +67,7 @@ development_status:
   3-8-freeze-the-payload-so-any-report-can-be-reproduced-years-lat: done
   3-9-read-the-facts-behind-a-month-entry-by-entry: done
   3-10-advance-a-report-run-without-blocking-the-request: review
+  3-11-run-in-background-when-the-tab-closes: backlog
   epic-3-retrospective: done
 
   epic-4: in-progress

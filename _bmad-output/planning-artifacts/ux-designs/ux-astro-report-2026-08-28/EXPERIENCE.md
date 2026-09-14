@@ -416,13 +416,26 @@ load-bearing states): [`mockups/key-run-stage.html`](mockups/key-run-stage.html)
   start `POST` creates the run and returns immediately to the stage view without
   running a stage. From then on, each poll `GET` advances the run by **at most
   one** stage and returns — the operator's own polling is what moves the run
-  forward. No background worker, queue or cron. The operator may navigate away or
-  start another Client's run; a run whose tab is **closed** pauses at its last
-  checkpoint and resumes on the next time that run's view is opened and polled.
-- **One slow poll, by design.** The `draft_ready` advance makes the Gemini call
-  inside its poll `GET`, so that one request can take 10–40s (plus AD-9 backoff).
-  The stage track keeps showing the in-progress label until it returns. Every
-  other poll is fast. This is the accepted cost of carrying no run infrastructure.
+  forward. No background worker, queue or cron **in `poll` mode** (see the
+  2026-09-14 addendum below for `background` mode). The operator may navigate
+  away or start another Client's run; a run whose tab is **closed** pauses at
+  its last checkpoint and resumes on the next time that run's view is opened
+  and polled — in `poll` mode.
+- **Addendum (2026-09-14, correct-course):** the stage-track view above is
+  identical in both `REPORT_RUN_MODE` values — same nodes, same captions, same
+  poll cadence, same Gate-failure recovery affordances. In `background` mode
+  (ARCHITECTURE-SPINE.md AD-20, amended) an in-process scheduler — not the
+  poll — advances the run; the poll no longer *drives* it forward, only reads
+  and renders it. An operator who never reopens the tab still finds the run at
+  (or past) `gate_passed` when they return, exactly as if they had kept
+  polling.
+- **One slow poll, by design — in `poll` mode.** The `draft_ready` advance
+  makes the Gemini call inside its poll `GET`, so that one request can take
+  10–40s (plus AD-9 backoff). The stage track keeps showing the in-progress
+  label until it returns. Every other poll is fast. This is the accepted cost
+  of carrying no run infrastructure. **In `background` mode**, that same call
+  happens inside the scheduler's tick instead — the poll stays fast throughout,
+  since it never performs the advance.
 - **Resumable.** Re-opening a run view shows its true current stage; the next poll
   resumes at the first incomplete stage (AD-10, AD-20). The UI never implies lost
   work.
