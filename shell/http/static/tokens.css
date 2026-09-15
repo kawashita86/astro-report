@@ -1436,6 +1436,41 @@ h3 {
   color: var(--ink-secondary);
 }
 
+/* Story 9.5: the poll view's Gate-failed "Verifica non superata" button,
+ * centered under the stage track/caption. */
+.stage-cta {
+  text-align: center;
+  margin-top: var(--space-md);
+}
+
+/* Story 9.5: one small labeled card per cited Payload entry inside a
+ * `.violation-card`, additive alongside the existing id chip. */
+.cited-entry {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.cited-entry__kind {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-xs);
+  font-weight: var(--font-label-weight);
+  color: var(--ink-primary);
+}
+
+.cited-entry dl {
+  margin: 0;
+  font-size: var(--font-small-size);
+}
+
+.cited-entry dt {
+  color: var(--ink-secondary);
+}
+
 /* ---------------------------------------------------------------------------
  * PROVISIONAL — Story 9.6 (the Report reading sheet, the Payload view made
  * readable). Minimal component styling for the Report's export bar, its

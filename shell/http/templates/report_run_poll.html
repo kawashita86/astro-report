@@ -34,7 +34,7 @@
         <p><a href="/report-runs/{{ run.id }}/payload">Vedi Payload</a></p>
         {% endif %}
         {% if gate_failed %}
-        <p><a href="/report-runs/{{ run.id }}/draft">Vedi bozza</a></p>
+        <p class="stage-cta"><a class="btn btn--danger" href="/report-runs/{{ run.id }}/draft">Verifica non superata</a></p>
         {% endif %}
         {% if run.stage == "gate_passed" or run.stage == "exported" %}
         <p><a class="btn btn--primary" href="/report-runs/{{ run.id }}/report">Vedi report</a></p>

@@ -145,7 +145,7 @@ def test_a_claimed_planet_not_matching_the_cited_lunations_moon_fact_is_contradi
     assert result.violations[0].section == "energia_generale"
     assert result.violations[0].entry_ids == (lunation_id,)
     assert result.violations[0].detail == (
-        "claims body/sign saturn, but the cited entries assert moon."
+        "afferma Saturno, ma le voci citate confermano Luna."
     )
 
 
@@ -317,7 +317,7 @@ def test_a_second_unmatched_house_in_the_same_sentence_still_fails() -> None:
     assert _kinds(result) == ["contradicted_fact"]
     detail = result.violations[0].detail
     assert "7" in detail
-    assert detail == "claims house 7, but the cited entries assert 5."
+    assert detail == "afferma la casa 7, ma le voci citate confermano la casa 5."
 
 
 # --- Matrix row: invented body, sign variant --------------------------------------
@@ -351,7 +351,7 @@ def test_a_claimed_sign_is_contradicted_by_a_cited_lunations_moon_fact() -> None
 
     assert result.passed is False
     assert _kinds(result) == ["contradicted_fact"]
-    assert result.violations[0].detail == "claims body/sign leo, but the cited entries assert moon."
+    assert result.violations[0].detail == "afferma Leone, ma le voci citate confermano Luna."
 
 
 # --- Matrix row: false retrograde -------------------------------------------------
@@ -403,6 +403,58 @@ def test_a_claimed_retrograde_grounded_by_the_cited_stations_direction_has_no_vi
 
     assert result.passed is True
     assert result.violations == ()
+
+
+# --- Story 9.5 review-loop 2: exact Italian detail text for "date"/"retrograde" ---
+
+
+def test_an_invented_date_claim_has_the_exact_italian_detail_text() -> None:
+    """Every pre-existing exact-``detail`` test covers only the
+    ``"body/sign"``/``"house"`` categories -- this pins the ``"date"``
+    category's invented-fact phrasing (I/O Matrix row 'Invented date'), so a
+    phrasing bug in that branch would no longer go unnoticed."""
+    draft = _draft(
+        amore=(Sentence(text="Il 8 porta una svolta.", entry_ids=("does-not-exist",)),)
+    )
+
+    result = run_gate(draft, _freeze(), _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["invented_fact"]
+    assert result.violations[0].detail == (
+        "afferma il giorno 8, ma nessuna delle voci citate lo conferma."
+    )
+
+
+def test_a_contradicted_retrograde_claim_has_the_exact_italian_detail_text() -> None:
+    """Pins the ``"retrograde"`` category's contradicted-fact phrasing (I/O
+    Matrix row 'Retrograde contradiction'). The only real ``run_gate()``
+    path to a *contradicted* retrograde violation cites a Station whose own
+    ``direction`` is ``"direct"`` -- the asserted value is always ``True``,
+    so any cited ``True`` fact already grounds the Claim and produces no
+    violation at all (see the "grounded" test above)."""
+    station = Station(
+        body="mercury",
+        direction="direct",
+        station_at=datetime(2026, 1, 8, tzinfo=UTC),
+        longitude=Decimal("50.0"),
+    )
+    frozen = _freeze(stations=(station,))
+    station_id = _find_id(frozen["sections"]["energia_generale"]["stations"], kind="station")
+
+    draft = _draft(
+        lavoro=(
+            Sentence(text="Mercurio è retrogrado questa settimana.", entry_ids=(station_id,)),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["contradicted_fact"]
+    assert result.violations[0].detail == (
+        "afferma che il corpo è retrogrado, ma le voci citate indicano: diretto."
+    )
 
 
 # --- Matrix row: empty citation ---------------------------------------------------

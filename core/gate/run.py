@@ -31,7 +31,7 @@ from core.gate.classify import is_claim
 from core.types.gate import GateResult, GateViolation, GateVocabulary
 from core.types.generation import GeneratedDraft, Sentence
 
-__all__ = ["TRANSLATABLE_VOCABULARY", "run_gate"]
+__all__ = ["TRANSLATABLE_VOCABULARY", "body_sign_label", "run_gate"]
 
 #: The two Sections whose dates are code-projected upstream (Story 3.7) --
 #: mirrors ``shell/adapters/gemini/generator.py``'s ``_DATE_TOKEN_SECTIONS``.
@@ -145,6 +145,50 @@ _CASA_ORDINAL_TO_HOUSE: dict[str, int] = {
     "dodicesima": 12,
 }
 
+#: English body canonical key -> Italian display label (Gate-failure panel,
+#: Story 9.5 amendment) -- the exact reverse of ``_BODY_MAP``: capitalizing
+#: the original Italian word this key came from, since a translated body
+#: name is a proper noun in the rendered Italian sentence/card (Design
+#: Notes: "afferma Saturno" already reads as a claim about a body, no
+#: wrapping noun needed).
+_PLANET_LABELS_IT: dict[str, str] = {
+    english: italian.capitalize() for italian, english in _BODY_MAP.items()
+}
+
+#: English sign canonical key -> Italian display label -- the exact reverse
+#: of ``_SIGN_MAP``, same capitalization rule as ``_PLANET_LABELS_IT``.
+_SIGN_LABELS_IT: dict[str, str] = {
+    english: italian.capitalize() for italian, english in _SIGN_MAP.items()
+}
+
+#: The four non-planet natal targets ``core/transits/aspects.py::_natal_targets()``
+#: admits as a Payload Aspect's ``natal_point`` alongside the ten planets and
+#: two nodes already on ``chart.planets`` (review-loop 2): the natal
+#: Ascendant/Midheaven (separate ``NatalChart`` fields) and the two Lunar
+#: Nodes. Kept as a distinct map from ``_PLANET_LABELS_IT``/``_SIGN_LABELS_IT``
+#: rather than folded in, since these are neither in ``_BODY_MAP`` nor
+#: ``_SIGN_MAP`` and have no Italian-vocabulary-word counterpart to reverse.
+_ANGLE_NODE_LABELS_IT: dict[str, str] = {
+    "ascendant": "Ascendente",
+    "midheaven": "Mediocielo",
+    "true_node": "Nodo Nord",
+    "south_node": "Nodo Sud",
+}
+
+#: The Italian wrapping-noun phrase for a checkable category whose bare
+#: value(s) are not self-descriptive on their own (a house number, a
+#: day-of-month number) -- ``"body/sign"`` needs no entry here: a translated
+#: planet/sign name already reads as a claim about that thing and gets no
+#: wrapper (Design Notes); ``"retrograde"`` is handled by its own fixed
+#: phrasing in ``_invented_detail``/``_contradicted_detail`` and never
+#: reaches this map. ``.get(kind, kind)`` degrades to the raw kind token for
+#: an unrecognized kind rather than raising (mirrors
+#: ``violation_kind_label``'s own defensive-fallback convention).
+_CATEGORY_LABELS_IT: dict[str, str] = {
+    "house": "la casa",
+    "date": "il giorno",
+}
+
 #: Which cited-entry ``"kind"`` supplies a fact for each checkable category,
 #: and which field(s) of that kind carry it -- the Design Notes category
 #: table, reimplemented as data these extraction functions read.
@@ -170,6 +214,38 @@ TRANSLATABLE_VOCABULARY: dict[str, frozenset[str]] = {
     "signs": frozenset(_SIGN_MAP),
     "casa_ordinals": frozenset(_CASA_ORDINAL_TO_HOUSE),
 }
+
+
+def body_sign_label(value: str) -> str:
+    """The Italian display label for one Payload-internal English body/sign
+    canonical key (``_BODY_MAP``/``_SIGN_MAP`` *values*, e.g. ``"saturn"``,
+    ``"leo"``) or natal angle/node token (``_ANGLE_NODE_LABELS_IT``), checked
+    in that order; ``value`` unchanged for anything else (defensive
+    fallback, mirrors ``violation_kind_label``/``_CATEGORY_LABELS_IT.get``'s
+    convention elsewhere in this module).
+
+    The single place this translation lives (Design Notes) -- imported by
+    ``shell/http/stage_view.py`` too, so the ``detail`` sentence and a
+    cited-entry card's body-name fields never drift out of sync against two
+    hand-duplicated tables.
+    """
+    for mapping in (_PLANET_LABELS_IT, _SIGN_LABELS_IT, _ANGLE_NODE_LABELS_IT):
+        label = mapping.get(value)
+        if label is not None:
+            return label
+    return value
+
+
+def _values_phrase(kind: str, values: frozenset[Any]) -> str:
+    """The Italian phrase naming one category's value set inside a
+    ``detail`` sentence: a translated body/sign label needs no wrapping
+    noun (self-descriptive once translated, Design Notes); a bare house/day
+    number is not self-descriptive on its own and gets one via
+    ``_CATEGORY_LABELS_IT``."""
+    if kind == "body/sign":
+        return ", ".join(sorted(body_sign_label(str(value)) for value in values))
+    joined = ", ".join(sorted(str(value) for value in values))
+    return f"{_CATEGORY_LABELS_IT.get(kind, kind)} {joined}"
 
 
 def _contains_word(text: str, token: str) -> bool:
@@ -327,30 +403,27 @@ def _retrograde_facts(entries: list[dict[str, Any]]) -> frozenset[bool]:
 
 
 def _invented_detail(kind: str, asserted: frozenset[Any]) -> str:
-    """``GateViolation.detail`` for ``"invented_fact"`` -- worded, not a raw
-    Python repr (Story 5.5 surfaces this directly to Francesco). Retrograde
-    is boolean-valued internally but is always worded "the body is
-    retrograde", never a ``True``/``False`` repr (code-review finding #3)."""
+    """``GateViolation.detail`` for ``"invented_fact"`` -- Italian prose,
+    worded, not a raw Python repr (Story 5.5 surfaces this directly to
+    Francesco). Retrograde is boolean-valued internally but is always
+    worded "the body is retrograde", never a ``True``/``False`` repr
+    (code-review finding #3)."""
     if kind == "retrograde":
-        return (
-            "claims the body is retrograde, but none of the cited entries assert a "
-            "retrograde/direct fact."
-        )
-    values = ", ".join(sorted(str(item) for item in asserted))
-    return f"claims {kind} {values}, but none of the cited entries assert a {kind} fact."
+        return "afferma che il corpo è retrogrado, ma nessuna delle voci citate lo conferma."
+    return f"afferma {_values_phrase(kind, asserted)}, ma nessuna delle voci citate lo conferma."
 
 
 def _contradicted_detail(kind: str, unmatched: frozenset[Any], gathered: frozenset[Any]) -> str:
-    """``GateViolation.detail`` for ``"contradicted_fact"`` -- names only the
-    unmatched claimed value(s), not the Claim's full asserted set (see
-    ``_category_violation``'s docstring). Retrograde worded the same way
-    ``_invented_detail`` is."""
+    """``GateViolation.detail`` for ``"contradicted_fact"`` -- Italian
+    prose, naming only the unmatched claimed value(s), not the Claim's full
+    asserted set (see ``_category_violation``'s docstring). Retrograde
+    worded the same way ``_invented_detail`` is."""
     if kind == "retrograde":
-        cited = ", ".join(sorted("retrograde" if value else "not retrograde" for value in gathered))
-        return f"claims the body is retrograde, but the cited entries indicate: {cited}."
-    unmatched_values = ", ".join(sorted(str(item) for item in unmatched))
-    gathered_values = ", ".join(sorted(str(item) for item in gathered))
-    return f"claims {kind} {unmatched_values}, but the cited entries assert {gathered_values}."
+        cited = ", ".join(sorted("retrogrado" if value else "diretto" for value in gathered))
+        return f"afferma che il corpo è retrogrado, ma le voci citate indicano: {cited}."
+    unmatched_phrase = _values_phrase(kind, unmatched)
+    gathered_phrase = _values_phrase(kind, gathered)
+    return f"afferma {unmatched_phrase}, ma le voci citate confermano {gathered_phrase}."
 
 
 def _category_violation(
@@ -409,8 +482,8 @@ def _check_claim(
                 section=section,
                 sentence=sentence.text,
                 entry_ids=sentence.entry_ids,
-                detail="sentence is a Claim (contains a closed-vocabulary token) but cites no "
-                "Payload entry.",
+                detail="la frase contiene un termine del vocabolario chiuso (è una Claim) "
+                "ma non cita alcuna voce del Payload.",
                 sentence_index=sentence_index,
             )
         ]
@@ -486,8 +559,9 @@ def _check_date_token(
         sentence=sentence.text,
         entry_ids=sentence.entry_ids,
         detail=(
-            f"sentence contains a date-shaped token; dates in Section {section!r} are "
-            "code-projected upstream and must never be written by the model."
+            f"la frase contiene un token con forma di data; le date nella Sezione "
+            f"{section!r} sono generate a monte dal codice e non devono mai essere "
+            "scritte dal modello."
         ),
         sentence_index=sentence_index,
     )

@@ -26,6 +26,20 @@
           <p class="violation-card__chips">
             {% for eid in v.entry_ids %}<button type="button" class="badge-mono" data-copy-chip>{{ eid }}</button>{% else %}nessuna{% endfor %}
           </p>
+          {% for entry in v.cited_entries %}
+          <article class="cited-entry">
+            <p class="cited-entry__kind">
+              {{ entry.kind_label }}
+              <button type="button" class="badge-mono" data-copy-chip>{{ entry.id }}</button>
+            </p>
+            <dl>
+              {% for label, value in entry.fields %}
+              <dt>{{ label }}</dt>
+              <dd>{{ value }}</dd>
+              {% endfor %}
+            </dl>
+          </article>
+          {% endfor %}
           <form method="post" action="/report-runs/{{ run.id }}/violations/{{ v.index }}/accept">
             <button type="submit" class="btn btn--secondary">Accetta</button>
           </form>

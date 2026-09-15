@@ -892,7 +892,12 @@ def test_the_poll_view_links_to_the_draft_once_a_gate_failure_exists(
 
     assert response.status_code == 200
     assert f'href="/report-runs/{run.id}/draft"' in response.text
-    assert "Vedi bozza" in response.text
+    # Story 9.5: the plain "Vedi bozza" link is now a centered danger
+    # button reading "Verifica non superata" -- the link text itself is
+    # gone from this state.
+    assert "Vedi bozza" not in response.text
+    assert 'class="btn btn--danger"' in response.text
+    assert "Verifica non superata" in response.text
     # The two branches are mutually exclusive at draft_ready: once
     # gate_failed is true, Payload is no longer offered in its place.
     assert f'href="/report-runs/{run.id}/payload"' not in response.text
@@ -1105,10 +1110,82 @@ def test_getting_the_draft_for_a_bound_exhausted_run_shows_gate_violations_and_f
     assert "Citazione vuota" in response.text
     assert 'href="#sezione-energia_generale"' in response.text
     assert 'id="sezione-energia_generale"' in response.text
-    assert "sentence is a Claim" in response.text
+    assert "è una Claim" in response.text
     assert run.failure_reason in response.text
     assert "Verifica di fondatezza non superata" in response.text
     assert f'action="/report-runs/{run.id}/regenerate"' in response.text
+
+
+def test_getting_the_draft_for_a_gate_failure_renders_a_cited_entry_card_and_no_english(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 9.5: a violation's cited Payload entries render as small
+    labeled cards (Italian field labels, localized timestamps) alongside
+    the existing id chip -- and every visible string on the Gate-failure
+    panel (``kind_label``, ``detail``, a cited-entry card's field values)
+    is Italian, closing the one remaining English surface Story 9.9 fenced
+    ``core/`` off from."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_bound_exhausted_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    aspect_id = frozen["sections"]["amore"]["aspects"][0]["id"]
+    # A body/sign Claim naming a planet (Saturn) the cited Aspect does not
+    # itself assert -- a real `contradicted_fact` violation citing a real
+    # entry (the Aspect asserts Mars/Venus), so `cited_entries` resolves to
+    # an actual card, unlike an `empty_citation` violation (cites nothing).
+    contradicted_draft = GeneratedDraft(
+        energia_generale=(),
+        amore=(Sentence(text="Saturno sostiene i legami.", entry_ids=(aspect_id,)),),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=contradicted_draft,
+        attempt=run.regeneration_count,
+    )
+    vocabulary = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+    gate_result = run_gate(contradicted_draft, frozen, vocabulary)
+    assert [violation.kind for violation in gate_result.violations] == ["contradicted_fact"]
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=gate_result.passed,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=gate_result.vocabulary_version,
+        vocabulary_content_hash=gate_result.vocabulary_content_hash,
+        violations=gate_result.violations,
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "Fatto contraddetto" in response.text
+    assert "afferma Saturno, ma le voci citate confermano Marte, Venere." in response.text
+    # The cited-entry card: Italian kind heading, field labels, translated
+    # body names/aspect name, and the existing id chip -- additive, not a
+    # replacement.
+    assert "Aspetto" in response.text
+    assert "Corpo transitante" in response.text
+    assert "Punto natale" in response.text
+    assert "Trigono" in response.text
+    assert aspect_id in response.text
+    # No raw UTC ISO instant leaks, and no English word from the old
+    # `claims .../cited entries ...` phrasing remains anywhere on the page.
+    assert "2026-01-10" not in response.text
+    assert "claims" not in response.text
+    assert "cited entries" not in response.text
 
 
 def test_getting_the_draft_for_a_run_with_multiple_gate_results_shows_only_the_latest(
@@ -1743,7 +1820,10 @@ def test_a_gate_result_1_9s_before_failed_at_is_still_the_current_cycle(
     response = authenticated_client.get(f"/report-runs/{run.id}")
 
     assert response.status_code == 200
-    assert "Vedi bozza" in response.text
+    # Story 9.5: "Vedi bozza" is now the danger button "Verifica non
+    # superata" -- see the link by href/class instead of the old text.
+    assert f'href="/report-runs/{run.id}/draft"' in response.text
+    assert 'class="btn btn--danger"' in response.text
 
 
 def test_a_gate_result_2_1s_before_failed_at_is_treated_as_a_stale_prior_cycle(

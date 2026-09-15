@@ -3,6 +3,26 @@
 Findings surfaced by review that are real but not this story's problem. Each names
 the spec that surfaced it. Append only.
 
+- source_spec: `_bmad-output/implementation-artifacts/spec-gate-failure-detail-text-and-readable-citations.md`
+  summary: `_invented_detail`/`_contradicted_detail` (`core/gate/run.py`) sort a violation's `asserted`/`gathered`/`unmatched` value sets as strings, not numerically, for the `"house"`/`"date"` categories, so a multi-digit day/house number can sort before a single-digit one (e.g. "10" before "2") in the rendered `detail` text.
+  evidence: `sorted(str(item) for item in asserted)` (and the `unmatched`/`gathered` equivalents) predates this story -- only the wrapping English/Italian prose changed here, not the sort key. Cosmetic-only (both values still shown correctly, just possibly out of numeric order); pre-existing, not introduced by this change.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gate-failure-detail-text-and-readable-citations.md`
+  summary: The cited-entry card's `orb_entry_at`/`orb_exit_at` fields are labeled "Data di ingresso/uscita dall'orbita" ("orbita" = celestial orbit) when the field actually means the aspect-tolerance "orb" going into/out of range -- a domain-terminology precision question best judged by Francesco (an astrologer) rather than guessed at by an LLM.
+  evidence: Second blind-hunter review of spec-gate-failure-detail-text-and-readable-citations's diff. Low severity (the date itself is still correct and localized; only the label's precision is in question) -- worth a one-line copy fix once Francesco confirms the right Italian term, not worth blocking this story on.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gate-failure-detail-text-and-readable-citations.md`
+  summary: The new `.cited-entry dl`/`dt`/`dd` CSS defines a color for `dt` but no explicit `dd` rule or dt/dd layout relationship (width, wrapping), so a long Italian label (e.g. "Data di fine della retrogradazione") has undefined wrapping/alignment against its value.
+  evidence: Second blind-hunter review of spec-gate-failure-detail-text-and-readable-citations's diff. Matches the same bare-default `<dl>` styling `report_payload.html`'s own macro already ships with (not a regression introduced by this story) -- a visual-polish nit for a future CSS pass, not blocking.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gate-failure-detail-text-and-readable-citations.md`
+  summary: `run.failure_reason` (rendered on the same `/draft`/poll Gate-failure panels this story restyles) is still raw English, sourced from `core.errors.GateFailedError`'s message via `shell/runner/driver.py` (e.g. "regeneration bound exhausted after 4 attempts: Refusing to advance past the Groundedness Gate: ...").
+  evidence: Neither `driver.py` nor `core/errors.py` are in this spec's Code Map/Boundaries; translating that message would touch code exercised by unrelated Story 4.8/5.4 tests (`tests/test_runner_driver.py`, `tests/test_export_boundary.py`) with hardcoded English-string assertions. A real remaining English-UI surface, but a separately scoped follow-up, not this presentation-only copy fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gate-failure-detail-text-and-readable-citations.md`
+  summary: `GateViolation.detail` is persisted verbatim in `StoredGateResult.violations` at Gate-run time, so any run that already failed the Gate before this story's Italian-translation fix ships keeps its old English `detail` text in the database until that run is regenerated (the existing "Rigenera" action reruns the Gate and writes a fresh, Italian `StoredGateResult`).
+  evidence: No backfill/migration exists or was ever in scope for a presentation-only copy fix. Self-healing via the pre-existing Rigenera flow already on that same panel; only affects a run that failed the Gate and was never regenerated before deploy, on a single-operator app where such a run is expected to be rare or already resolved.
+
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-4-browse-everything-i-have-produced-for-a-client.md`
   summary: `ReportRun.natal_chart_id`'s traceability claim can silently diverge from the chart a stalled run's later stages actually computed against.
   evidence: `_drive_run` (`shell/http/routes/report_runs.py`) re-resolves `_current_chart()` fresh on every `drive()` call, including a poll that resumes a run stalled or regenerating after `natal_ready` already recorded a chart id. If the Client's chart is corrected between such polls, `transits_ready`/`payload_ready`/`draft_ready` compute against the newly-current chart while `run.natal_chart_id` still names the original one -- narrow (requires a correction landing mid-flight of the same Client's stalled run), pre-existing in `_drive_run`'s chart-sourcing design, not introduced by Story 6.4's new column.

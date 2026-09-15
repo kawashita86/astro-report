@@ -44,7 +44,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from core.gate.run import run_gate
+from core.gate.run import _index_entries, run_gate
 from core.types.generation import Sentence
 from shell.adapters.postgres.client import (
     Client,
@@ -82,7 +82,12 @@ from shell.http.draft_view import (
 from shell.http.flash import _flash_context_processor, set_flash
 from shell.http.payload_view import FIELD_TITLES, localize_payload
 from shell.http.report_markdown import render_report_markdown
-from shell.http.stage_view import build_stage_track, stage_caption, violation_kind_label
+from shell.http.stage_view import (
+    build_stage_track,
+    resolve_cited_entries,
+    stage_caption,
+    violation_kind_label,
+)
 from shell.ports.generator import Generator
 from shell.runner.driver import advance
 from shell.runner.scheduler import generator_for_settings
@@ -1143,12 +1148,23 @@ def view_report_draft(
                     )
                 ).all()
             )
+        # Story 9.5 amendment: built once per request, from the already
+        # -loaded `stored_payload.payload` -- never a new query, and never
+        # re-walked per violation below (review-loop 2's own Always
+        # bullet). Skipped entirely when there are no violations to resolve
+        # citations for (review-loop 3: a non-Gate failure or an unrelated
+        # `stored_gate_result is None` cycle has `violations == []`, so
+        # walking the whole Payload for zero callers was pure waste).
+        entry_index = _index_entries(stored_payload.payload) if violations else {}
         context["violations"] = [
             {
                 **violation,
                 "kind_label": violation_kind_label(violation["kind"]),
                 "index": index,
                 "accepted": index in accepted_indices,
+                "cited_entries": resolve_cited_entries(
+                    violation["entry_ids"], entry_index, client.iana_zone
+                ),
             }
             for index, violation in enumerate(violations)
         ]
