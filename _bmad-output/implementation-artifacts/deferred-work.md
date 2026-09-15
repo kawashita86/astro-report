@@ -874,3 +874,35 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-11-run-in-background-when-the-tab-closes.md`
   summary: The `background`-mode scheduler (`shell/runner/scheduler.py`) exposes no external health/readiness signal beyond a log line -- nothing lets an operator detect a dead or wedged scheduler task in production (no metric, no readiness check, no inspection endpoint for `application.state.scheduler_task`).
   evidence: Blind-hunter review-loop 2 on this story's diff. The module's own docstring calls the outer `try/except` "essential" specifically because "a dead task means background mode silently reverts to no progress at all," yet detecting that today means reading logs. A legitimate future observability enhancement; this project has no existing metrics/readiness pattern beyond the bare `/healthz` liveness route to extend, so building one is a larger decision than this story's scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
+  summary: The `sentence_text` textarea in `report_draft.html`'s "Modifica e ricontrolla" form has no associated `<label>`/`aria-label`, unlike DESIGN.md's Input/Select/Textarea spec and the sibling textareas in `corpus_new.html` and `style_guide_edit.html`.
+  evidence: The field relies only on the surrounding `<summary>Modifica e ricontrolla</summary>` text for context; pre-existing (the textarea had no label before this styling fix either), not introduced by it.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
+  summary: The `sentence_text` textarea has no `required` attribute, even though `correct_gate_violation` (`shell/http/routes/report_runs.py`) rejects blank/whitespace-only submissions server-side; the sibling textareas in `corpus_new.html` and `style_guide_edit.html` both declare `required`.
+  evidence: Without client-side `required`, an empty submission round-trips to the server before the user learns it's invalid. Pre-existing gap, not introduced by this styling fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
+  summary: On a blank-`sentence_text` validation error, `correct_gate_violation` redirects back to `/report-runs/{id}/draft`, which re-renders the `<details>` closed and refills the textarea from `v.sentence` (the original flagged text) rather than the user's attempted correction, so the flash error appears with the relevant field hidden and the edit silently lost.
+  evidence: `shell/http/routes/report_runs.py`'s `correct_gate_violation` route and `report_draft.html`'s `<details>` (no `open` attribute, textarea seeded from `v.sentence`). Pre-existing route/template behavior, not caused by this styling fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
+  summary: The `sentence_text` textarea has no invalid-state styling hook (equivalent to `.field--invalid`, which already exists in `tokens.css`), despite this exact field having server-side blank-text validation.
+  evidence: DESIGN.md's Input/Select/Textarea spec calls for a `danger`-border invalid state with `aria-describedby` error text; this field is a plausible candidate but pre-existing, not introduced by this styling fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
+  summary: The `<summary>Modifica e ricontrolla</summary>` disclosure in `report_draft.html` has no styling (no pointer cursor, no heading-weight treatment), unlike the app's other disclosure pattern (`.payload-section > summary` in `tokens.css`).
+  evidence: Renders as plain body text with the default cursor, inconsistent with the app's other expand/collapse control. Pre-existing, not introduced by this styling fix (only the textarea/button inside it were restyled).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
+  summary: The `sentence_text` textarea has no `maxlength` or client-side length guard, even though the corrected text feeds directly into Gate re-checking (`run_gate()`).
+  evidence: An accidental large paste is entirely unconstrained client-side. Pre-existing gap, not introduced by this styling fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
+  summary: No help/description text near the `sentence_text` textarea or the "Ricontrolla" button explains that submitting re-runs the fondatezza (Gate) check.
+  evidence: `tokens.css` already has a `.field__help` pattern used elsewhere for this purpose; this form has no equivalent. Pre-existing, not introduced by this styling fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
+  summary: Inside the same `<details>`, the read-only `<blockquote>{{ v.sentence }}</blockquote>` (original flagged sentence) and the editable textarea below it (pre-filled with that same text) are visually and semantically undistinguished -- neither is labeled "testo originale" vs. "la tua correzione."
+  evidence: Easy to misread mid-edit as duplicated/redundant content. Pre-existing, not introduced by this styling fix.

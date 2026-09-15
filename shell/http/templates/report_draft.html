@@ -45,8 +45,8 @@
           </form>
           <details>
             <summary>Modifica e ricontrolla</summary>
-            <form method="post" action="/report-runs/{{ run.id }}/violations/{{ v.index }}/correct">
-              <textarea name="sentence_text">{{ v.sentence }}</textarea>
+            <form method="post" action="/report-runs/{{ run.id }}/violations/{{ v.index }}/correct" class="violation-card__correct-form">
+              <textarea name="sentence_text" class="violation-card__textarea">{{ v.sentence }}</textarea>
               <button type="submit" class="btn btn--primary">Ricontrolla</button>
             </form>
           </details>
