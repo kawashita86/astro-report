@@ -53,6 +53,7 @@ from shell.http.auth import (
     verify_password,
 )
 from shell.http.flash import FlashClearMiddleware
+from shell.runner.scheduler import start_scheduler, stop_scheduler
 from shell.sections import load_sections_config
 
 __all__ = [
@@ -97,7 +98,8 @@ def get_session(request: Request) -> Iterator[Session]:
 
 @asynccontextmanager
 async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Dispose the app's engine on shutdown only.
+    """Start/stop the ``background``-mode scheduler around the request-serving
+    period, and dispose the app's engine on shutdown (Story 3.11).
 
     Reads ``application.state.engine`` off ``application`` rather than closing
     over a local variable. That attribute is assigned synchronously inside
@@ -105,8 +107,20 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
     already set by the time this lifespan is invoked at all -- both before
     ``yield`` (startup) and after it (shutdown), not merely by the time this
     generator resumes post-``yield``.
+
+    ``start_scheduler(application)`` (``shell/runner/scheduler.py``) runs
+    before ``yield`` -- mirroring where ``application.state.engine`` is
+    already set, in ``create_app``, not here -- so a ``REPORT_RUN_MODE=background``
+    deployment begins ticking ``advance()`` for every incomplete
+    ``ReportRun`` as soon as the app starts serving. ``await
+    stop_scheduler(application)`` runs after ``yield``, before
+    ``application.state.engine.dispose()``: the scheduler task must be fully
+    cancelled and awaited before the engine it uses is disposed, or a tick in
+    flight could touch a disposed engine.
     """
+    start_scheduler(application)
     yield
+    await stop_scheduler(application)
     application.state.engine.dispose()
 
 

@@ -1,23 +1,38 @@
 """``advance()``: moves one ``ReportRun`` forward by **at most one** of
 AD-10's six named stages per call, persisting that stage's output before it
-returns (Story 3.5, reshaped for AD-20 by Story 3.10).
+returns (Story 3.5, reshaped for AD-20 by Story 3.10, amended by Story 3.11
+for a second, ``background``-mode caller).
 
-**Why one stage per call, from the poll GET only, with no background task or
-queue.** AD-20 requires the start ``POST`` to return instantly and each
-status poll to move the run forward exactly one stage. So
-``POST /clients/{client_id}/report-runs`` only creates the row and
-redirects, and ``advance()`` is called *only* from
-``GET /report-runs/{run_id}``: the first stage runs on the first poll, and a
-poll may take as long as its one stage (one external Generator call plus
-bounded backoff, at ``draft_ready``) but never chains into a second -- so
-closing the tab can never abandon work mid-pipeline. BUILD-ORDER.md's E5
-still rules out an in-process background task ("run state lives only in
-memory, lost silently on restart") and a queue ("no queue infrastructure
-needed"): the browser's poll cadence remains the only drain. Concurrent
-polls for one run are single-flighted by a Postgres transaction-scoped
-advisory lock on the run id (``shell/runner/advisory_lock.py``) -- the poll
+**Why one stage per call, from the poll GET -- and, since Story 3.11, the
+``background``-mode scheduler tick.** AD-20 requires the start ``POST`` to
+return instantly and each caller to move the run forward exactly one stage.
+So ``POST /clients/{client_id}/report-runs`` only creates the row and
+redirects, and in ``poll`` mode (the default) ``advance()`` is called *only*
+from ``GET /report-runs/{run_id}``: the first stage runs on the first poll,
+and a poll may take as long as its one stage (one external Generator call
+plus bounded backoff, at ``draft_ready``) but never chains into a second --
+so closing the tab can never abandon work mid-pipeline. BUILD-ORDER.md's E5
+ruled out an in-process background task ("run state lives only in memory,
+lost silently on restart") and a queue ("no queue infrastructure needed") at
+the time; AD-20's Story 3.11 amendment revisits the first of those two for a
+deployment-wide opt-in ``background`` mode (``REPORT_RUN_MODE=background``,
+``shell/runner/scheduler.py``): an in-process ``asyncio.Task`` ticks this
+same ``advance()`` for every incomplete ``ReportRun`` on a fixed cadence, and
+the poll route becomes read-only in that mode instead. Within one running
+instance, only one caller ever advances a given run for a given transition --
+the poll route in ``poll`` mode, the scheduler tick in ``background`` mode
+(``shell/http/routes/report_runs.py::poll_report_run`` gates its own
+``advance()`` call on ``report_run_mode is ReportRunMode.POLL``). A brief
+window where instances on different modes or config values overlap (e.g. a
+rolling deploy, or a live ``REPORT_RUN_MODE`` change) is made safe by the
+same mechanism that already protects two concurrent pollers, below --
+review-loop 2 -- not by a structural guarantee that only one caller ever
+exists at all. Concurrent callers for one run are single-flighted by a
+Postgres transaction-scoped
+advisory lock on the run id (``shell/runner/advisory_lock.py``) -- the caller
 that takes the lock advances one stage; the other returns the current stage
-untouched. See ``shell/http/routes/report_runs.py``.
+untouched. See ``shell/http/routes/report_runs.py`` and
+``shell/runner/scheduler.py``.
 
 **Why only five of the six stages get real stage functions (so far).**
 BUILD-ORDER.md: "the runner introduced once two real stages exist."
@@ -671,19 +686,27 @@ def advance(
 ) -> ReportRun:
     """Advance ``run`` by **at most one** stage: run the single next stage
     after ``run.stage`` in ``_STAGE_SEQUENCE`` that has a registered function
-    in ``_STAGE_FUNCTIONS``, commit, and return (AD-20, Story 3.10).
+    in ``_STAGE_FUNCTIONS``, commit, and return (AD-20, Story 3.10, amended
+    by Story 3.11).
 
-    Called **only** from ``poll_report_run``
-    (``shell/http/routes/report_runs.py``) -- never from the start ``POST``,
-    a thread, an ``asyncio`` task, a queue consumer or a scheduled job. Each
-    status poll moves the run forward exactly one stage; the start route just
-    creates the row and redirects, so the first stage runs on the first
-    poll. A poll landing on ``draft_ready`` runs ``gate_passed`` (one
-    ``generator``-free Gate call) and returns -- it never also chains into a
-    later stage in the same call. If ``run.stage`` is ``None``, this runs
-    ``natal_ready`` only. If ``run.stage`` is ``gate_passed`` (or the next
-    stage name has no registered function yet, e.g. ``exported``), this
-    returns ``run`` unchanged with no commit.
+    Called from ``poll_report_run`` (``shell/http/routes/report_runs.py``) in
+    ``poll`` mode (the default), and, since Story 3.11's AD-20 amendment,
+    from ``shell/runner/scheduler.py``'s in-process ``background``-mode
+    scheduler tick -- never from the start ``POST``. Within one running
+    instance only one of the two callers is ever active (``poll_report_run``
+    gates its own call on ``report_run_mode is ReportRunMode.POLL``; the
+    scheduler only runs when ``report_run_mode is ReportRunMode.BACKGROUND``);
+    a transition window where both exist at once (a rolling deploy, a live
+    config change) is made safe by the advisory lock below, like any other
+    concurrent caller, not ruled out structurally (review-loop 2). Each call
+    moves the run forward exactly one stage; the start route just creates the
+    row and redirects, so the first stage runs on the first call from
+    whichever caller applies. A call landing on ``draft_ready`` runs
+    ``gate_passed`` (one ``generator``-free Gate call) and returns -- it
+    never also chains into a later stage in the same call. If ``run.stage``
+    is ``None``, this runs ``natal_ready`` only. If ``run.stage`` is
+    ``gate_passed`` (or the next stage name has no registered function yet,
+    e.g. ``exported``), this returns ``run`` unchanged with no commit.
 
     Concurrent polls for the same run are single-flighted by a Postgres
     transaction-scoped advisory lock on ``run.id``

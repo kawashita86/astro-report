@@ -12,6 +12,8 @@ allowlist: it must stay empty of data.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import time
 from decimal import Decimal
 
@@ -21,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from core.ephemeris.identity import EphemerisIdentity
 from core.types.computation import ComputationConfig
-from shell.config import Environment, Settings
+from shell.config import Environment, ReportRunMode, Settings
 from shell.http import app as shell_http_app
 from shell.http.app import app, computation_config, create_app, ephemeris_identity
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
@@ -138,6 +140,64 @@ def test_dispose_is_never_called_without_entering_the_lifespan(
     plain_client.get("/healthz")
 
     assert dispose_calls == []
+
+
+# --- The background scheduler task (Story 3.11) --------------------------------
+
+
+def test_scheduler_task_does_not_exist_before_the_lifespan_is_entered() -> None:
+    """`start_scheduler` runs inside `_lifespan`, before `yield` -- a bare
+    `create_app(...)` with no `with` must never set `scheduler_task` at all,
+    mirroring `test_dispose_is_never_called_without_entering_the_lifespan`."""
+    background_settings = dataclasses.replace(LOCAL, report_run_mode=ReportRunMode.BACKGROUND)
+    application = create_app(background_settings)
+
+    assert not hasattr(application.state, "scheduler_task")
+
+
+def test_scheduler_task_is_none_in_poll_mode_even_once_the_lifespan_is_entered() -> None:
+    """`REPORT_RUN_MODE` defaults to `poll` (`LOCAL`) -- entering the lifespan
+    must never start a scheduler task in that mode."""
+    application = create_app(LOCAL)
+
+    with TestClient(application):
+        assert application.state.scheduler_task is None
+
+
+def test_scheduler_task_is_created_only_once_the_lifespan_is_entered_in_background_mode() -> None:
+    background_settings = dataclasses.replace(LOCAL, report_run_mode=ReportRunMode.BACKGROUND)
+    application = create_app(background_settings)
+
+    with TestClient(application):
+        task = application.state.scheduler_task
+        assert isinstance(task, asyncio.Task)
+        assert not task.done()
+
+    # The `with` block's exit runs the lifespan's shutdown path
+    # (`await stop_scheduler(application)`) to completion before returning --
+    # by now the task has been cancelled and awaited.
+    assert task.cancelled()
+
+
+def test_scheduler_task_is_cancelled_before_the_engine_is_disposed_in_background_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`await stop_scheduler(application)` must run to completion -- task
+    cancelled *and* awaited -- before `application.state.engine.dispose()`."""
+    background_settings = dataclasses.replace(LOCAL, report_run_mode=ReportRunMode.BACKGROUND)
+    application = create_app(background_settings)
+    engine = application.state.engine
+    captured: dict[str, bool] = {}
+
+    def _spy_dispose() -> None:
+        captured["task_was_already_cancelled"] = application.state.scheduler_task.cancelled()
+
+    monkeypatch.setattr(engine, "dispose", _spy_dispose)
+
+    with TestClient(application):
+        pass
+
+    assert captured["task_was_already_cancelled"] is True
 
 
 # --- Ephemeris identity: asserted at import time, before anything is served --

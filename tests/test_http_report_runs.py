@@ -57,7 +57,7 @@ from shell.adapters.postgres.report_draft import ReportDraft, store_report_draft
 from shell.adapters.postgres.report_payload import ReportPayload, store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.computation import load_computation_config
-from shell.config import Environment, Settings
+from shell.config import Environment, ReportRunMode, Settings
 from shell.gate import DEFAULT_VOCABULARY_PATH, load_gate_vocabulary
 from shell.http.app import create_app, get_session
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
@@ -158,10 +158,12 @@ def fake_advance(app_instance: FastAPI, monkeypatch: pytest.MonkeyPatch):
     Like the real ``advance()`` (AD-20, Story 3.10) this moves the run
     forward by **at most one** stage per call -- here only through the first
     two stages, enough to exercise the poll view's stage rendering without a
-    real ``core/`` call. ``get_generator`` is also overridden with a fake,
-    never a real ``GeminiGenerator`` -- mirrors ``tests/test_http_clients.py``'s
-    own ``get_geocoder`` override: ``_fake_advance`` never actually calls the
-    ``generator`` it receives.
+    real ``core/`` call. ``poll_report_run`` still builds a real ``Generator``
+    via ``generator_for_settings`` before calling ``advance`` (review-loop 1
+    moved this off a ``Depends(get_generator)`` override, so there is nothing
+    left to fake here) -- harmless, since ``LOCAL`` settings make that a
+    ``RecordedResponseGenerator`` and ``_fake_advance`` never actually calls
+    the ``generator`` it receives anyway.
     """
     import shell.http.routes.report_runs as report_runs_module
 
@@ -194,7 +196,6 @@ def fake_advance(app_instance: FastAPI, monkeypatch: pytest.MonkeyPatch):
         return run
 
     monkeypatch.setattr(report_runs_module, "advance", _fake_advance)
-    app_instance.dependency_overrides[get_generator] = lambda: object()
     return _fake_advance
 
 
@@ -333,7 +334,6 @@ def test_starting_a_run_does_not_call_advance(
         calls.append(1)
 
     monkeypatch.setattr(report_runs_module, "advance", _spy_advance)
-    app_instance.dependency_overrides[get_generator] = lambda: object()
 
     response = authenticated_client.post(
         f"/clients/{ada.id}/report-runs", data={"month": "2026-01"}, follow_redirects=False
@@ -388,7 +388,6 @@ def test_the_poll_route_invokes_advance_exactly_once_per_request(
         return run
 
     monkeypatch.setattr(report_runs_module, "advance", _counting_advance)
-    app_instance.dependency_overrides[get_generator] = lambda: object()
 
     response = authenticated_client.get(f"/report-runs/{run.id}")
 
@@ -436,6 +435,44 @@ def test_an_htmx_poll_request_gets_a_fragment_without_the_full_page_shell(
     assert "<html" in full_page.text.lower()
     assert "<html" not in fragment.text.lower()
     assert "Assemblaggio del Payload" in fragment.text  # active once transits_ready
+
+
+def test_background_mode_poll_never_calls_advance_and_still_renders_current_stage(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AD-20, amended for Story 3.11: in ``background`` mode the poll route
+    is read-only -- it renders ``run``'s current state without ever calling
+    ``advance()`` itself, so a run is never advanced twice for the same
+    transition."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    background_settings = replace(LOCAL, report_run_mode=ReportRunMode.BACKGROUND)
+    app_instance = create_app(background_settings)
+    app_instance.dependency_overrides[get_session] = lambda: db_session
+    background_client = TestClient(app_instance)
+    expires_at = int(time.time()) + 3600
+    background_client.cookies.set(
+        SESSION_COOKIE_NAME, sign_session(expires_at, background_settings.session_secret_key)
+    )
+
+    calls: list[int] = []
+
+    def _spy_advance(*args, **kwargs):
+        calls.append(1)
+
+    monkeypatch.setattr(report_runs_module, "advance", _spy_advance)
+
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="transits_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = background_client.get(f"/report-runs/{run.id}")
+
+    assert response.status_code == 200
+    assert calls == [], "background mode must never call advance() from the poll route"
+    assert "Assemblaggio del Payload" in response.text  # active once transits_ready
 
 
 # --- Error paths -------------------------------------------------------------------
@@ -895,13 +932,14 @@ class _StubRequest:
 
 
 def test_get_generator_builds_a_real_gemini_generator_from_the_apps_configured_key() -> None:
-    """``fake_advance`` (used by every other test here) overrides ``get_generator``
-    with a fake, so nothing else in this module exercises the real dependency
-    itself -- this proves ``get_generator`` wires ``request.app.state.settings
-    .gemini_api_key`` into a real ``GeminiGenerator`` under ``Environment
-    .PRODUCTION``, mirroring how ``get_geocoder`` is exercised directly in
-    ``tests/test_http_clients.py`` (Story 4.9: ``LOCAL`` now returns
-    ``RecordedResponseGenerator`` instead, see the test below).
+    """``poll_report_run`` builds a real ``Generator`` on every ``poll``-mode
+    request (``fake_advance`` never touches it -- see that fixture's own
+    docstring), so this test proves ``get_generator`` wires
+    ``request.app.state.settings.gemini_api_key`` into a real
+    ``GeminiGenerator`` under ``Environment.PRODUCTION``, mirroring how
+    ``get_geocoder`` is exercised directly in ``tests/test_http_clients.py``
+    (Story 4.9: ``LOCAL`` now returns ``RecordedResponseGenerator`` instead,
+    see the test below).
     """
     generator = get_generator(_StubRequest(PRODUCTION))  # type: ignore[arg-type]
 
@@ -1562,7 +1600,6 @@ def test_regenerating_never_calls_advance_and_the_next_poll_runs_draft_ready(
         return run
 
     monkeypatch.setattr(report_runs_module, "advance", _counting_advance)
-    app_instance.dependency_overrides[get_generator] = lambda: object()
 
     regen_response = authenticated_client.post(
         f"/report-runs/{run.id}/regenerate", follow_redirects=False

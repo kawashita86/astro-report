@@ -4,15 +4,16 @@
 
 ## Goal
 
-Francesco picks a Client and a month and gets every transit event of that month located to the exact
-instant, then assembled into a versioned, immutable Report Payload he can read entry by entry. This
-epic builds the monthly transit engine (aspect perfections, retrograde stations, house-cusp
-crossings, lunations), the checkpointed run machinery that drives a month's computation to
-completion, the per-Section Payload assembly that is the sole fact channel for everything
-downstream, and the operator view that exposes those facts behind a Report. It delivers standalone
-value — with these dated facts Francesco could write reports by hand and still have removed almost
-all the transcription labor — and it supplies the astronomical ground truth that generation (Epic 4)
-and the Groundedness Gate (Epic 5) depend on.
+For a given Client and month, locate every astronomical fact — transit-to-natal Aspects and their
+exact perfection moments, retrograde Stations, house Ingresses, and Lunations — to the exact UTC
+instant, then assemble those facts into a single versioned, immutable Report Payload organized by
+what each of the eight report Sections needs. The Payload is the sole channel through which any
+astronomical fact can ever reach a generated Report (AD-3): nothing downstream may introduce a fact
+that isn't in it. This epic also owns the report-run lifecycle — a checkpointed, resumable job the
+operator can start, watch and (as of the pending Story 3.11) let finish unattended — and a read view
+so any Payload, including one behind a months-old Report, can be inspected entry by entry. Together
+this realizes UJ-3: a client can be told "why" a Report says what it says, in one sentence, at any
+time later.
 
 ## Stories
 
@@ -26,117 +27,106 @@ and the Groundedness Gate (Epic 5) depend on.
 - Story 3.8: Freeze the Payload so any Report can be reproduced years later
 - Story 3.9: Read the facts behind a month, entry by entry
 - Story 3.10: Advance a report run without blocking the request
+- Story 3.11: Run in background when the tab closes (backlog; full spec at
+  `_bmad-output/specs/spec-3-11-run-in-background-when-the-tab-closes/SPEC.md`)
 
 ## Requirements & Constraints
 
-- The month is scanned continuously and every event located to an exact date and UTC time by
-  bisection — never a sample-date approximation. The event set for a given natal chart, month and
-  config is identical on every run and deployment.
-- Aspect detection: fast bodies (Sun, Mercury, Venus, Mars) and slow bodies (Jupiter, Saturn,
-  Uranus, Neptune, Pluto) against the ten natal planets, the ascendant, the midheaven and both
-  Lunar Nodes; five major aspects only. The transiting Moon is excluded from aspect detection and
-  enters only via lunations. Each aspect records transiting body, natal point, aspect type, exact
-  perfection instant, and the in-orb window (entry/exit dates). Aspects in orb but never perfecting
-  in the month are kept and flagged, not dropped.
-- Retrograde condition from longitudinal velocity (dλ/dt < 0). Each station records body, direction
-  of turn, exact instant, zodiacal degree. A body retrograde all month with no station is recorded
-  as a standing condition with the month's retrograde span.
-- Every house-cusp crossing recorded with body, house departed, house entered, exact instant —
-  including retrograde re-crossings, each repeated crossing of the same cusp counted separately.
-- New and full moons located by bisection on Sun–Moon elongation; record kind, exact instant,
-  zodiacal degree, and the natal house they fall in. Zero or two lunations of one kind is normal,
-  never an error.
-- The Payload organizes the natal chart, the four Domain Profiles and the month's events into
-  exactly the material each of the eight Sections needs (Energia generale, Amore, Lavoro, Denaro,
-  Benessere, Giorni favorevoli, Giorni di attenzione, Consiglio finale). Assembly is a pure
-  function — identical inputs yield a byte-identical Payload.
-- Each Payload carries a schema version, is stored permanently in Postgres with its Report (exactly
-  one Payload per Report), and is immutable once its Report is generated. Older-schema Payloads stay
-  interpretable.
-- Francesco can open the computed facts for any month — including runs from months earlier — and
-  see, per Section, the exact events and natal placements supplied to it (body, natal point, aspect
-  type, exact date/time, orb). Reachable within one interaction from the run.
-- Success criteria: output matches Astro.com for every conformance fixture (natal + month); the
-  full-month scan for one Client completes well within budget (target under 10s); every delivered
-  Claim stays traceable to a stored Payload entry; loss of a Payload is unacceptable.
+- Every located event (Aspect perfection, Station, Ingress, Lunation) must carry an exact date and
+  UTC time, never a sampled approximation, and the set of events for a given Natal Chart + month
+  must be identical on every run (computational determinism).
+- Fast transiting bodies (Sun, Mercury, Venus, Mars) and slow ones (Jupiter, Saturn, Uranus, Neptune,
+  Pluto) are scanned for Aspects; the transiting Moon is excluded from Aspect detection and enters
+  only through Lunations. Natal targets: the ten planets, ascendant, midheaven, and both Lunar Nodes.
+  Only the five major aspect types apply.
+- The harmonic/disharmonic/neutral classification for the two day-list Sections is a fixed,
+  table-driven rule (trine/sextile → harmonic; square/opposition → disharmonic; conjunction by
+  Venus/Jupiter → harmonic; conjunction by Mars/Saturn/Pluto → disharmonic; conjunction by any other
+  body → neutral, dropped from both day lists but retained for other Sections). This is confirmed
+  domain fact, not an inferred convention, and must never become a judgement call in code.
+- Computed output must match the Astro.com reference fixtures for every conformance case before a
+  Report can reach a client.
+- Full-month scan for one Client must complete in under 10 seconds; the full run (scan through Gate)
+  targets under 3 minutes at the 90th percentile, sustaining forty Reports in a session.
+- All durable state (ReportRun, Report Payload) lives in Postgres, never the container filesystem,
+  and joins the Client deletion cascade.
+- Payload assembly and the day-list projection are pure functions: no clock, no network, no database,
+  no randomness — identical inputs always produce a byte-identical Payload.
 
 ## Technical Decisions
 
-- **Purity boundary.** Scanning, classification and Payload assembly live in `core/transits/` and
-  `core/payload/` as pure functions — no clock, network, DB, randomness, env reads, or import from
-  `shell/`. The ephemeris read in `core/ephemeris/` is the only sanctioned I/O. The shell loads
-  inputs, calls core, persists results.
-- **UTC in core; local time only at the edges.** Every computed/stored instant is timezone-aware
-  UTC, ISO-8601 with explicit `Z`. The analyzed month is one half-open UTC interval derived once
-  from the Client's local calendar-month boundaries, so an event at 23:30 local on the last day
-  belongs to exactly one Report. Conversion to local time happens only in `shell/http/`, using the
-  historical zone snapshot stored on the Client.
-- **ComputationConfig passed explicitly.** Orbs (natal ±7.0°, tunable 6.0–8.0; transit-to-natal
-  ±2.0°, tunable 1.5–2.5), house system, fast/slow body sets, Ruler tables and the
-  harmonic/disharmonic table come from one versioned data file, loaded into a frozen value and
-  passed as an argument to every core function that needs it — never read ambiently. Its version
-  and content hash are recorded on every Payload.
-- **Payload is the only fact channel.** Nothing downstream may introduce an astronomical fact;
-  everything a Section needs enters through the Payload.
-- **Content-derived entry IDs.** Each entry's ID is a stable hash of its canonical field tuple —
-  never sequential, time-derived or random. Entries emitted in a total order over those fields.
-  Serialization is canonical JSON (sorted keys, no insignificant whitespace, `Decimal` as
-  fixed-precision string); byte-identity asserted by test across two machines.
-- **Day-lists rendered by code, not the model.** Sections 6 and 7 dated entries are projected from
-  the Payload by a pure function applying the configured table: trine/sextile harmonic;
-  square/opposition disharmonic; conjunction by transiting Venus/Jupiter harmonic; by
-  Mars/Saturn/Pluto disharmonic; otherwise neutral (in neither list). A favorable lunation forms a
-  trine/sextile to a natal point within orb, or is conjunct natal Venus or Jupiter. Neutral events
-  are never dropped — they stay available to Sections 1–5 and 8. This projection is the only source
-  of dates for Sections 6 and 7.
-- **Section composition is data.** The Section-to-selector mapping lives in a versioned data file
-  loaded by core; adding a format adds a mapping, not a branch — no per-Section conditional in
-  assembly. The Payload schema, the section-composition file and the Gate vocabulary each carry an
-  independent integer version, all recorded on every Report.
-- **Checkpointed report run.** A `ReportRun` row advances forward-only through
-  `natal_ready → transits_ready → payload_ready → draft_ready → gate_passed → exported`. Each stage
-  persists its output to Postgres before the next begins; re-driving resumes at the first incomplete
-  stage; every stage function is idempotent. Stages past this epic's scope are declared but
-  unreachable. All durable state is in Postgres — nothing written to the container filesystem at
-  runtime is read back.
-- **Non-blocking advance (AD-20, Story 3.10).** The runner exposes a single `advance` function that
-  performs at most one stage transition and returns, invoked only from the poll handler
-  `GET /report-runs/{run_id}` — never from a thread, task, queue or scheduled job. `POST
-  /clients/{client_id}/report-runs` creates the row and returns immediately without advancing; the
-  first stage runs on the first poll. Concurrent polls are single-flighted by a Postgres
-  transaction-scoped advisory lock on the run id (released on commit/rollback/dropped connection). A
-  poll may take as long as its one stage (including one external call and bounded backoff) but
-  never chains into a second. Story 3.10 also fixes the now-stale `shell/runner/driver.py` and
-  `shell/http/routes/report_runs.py` docstrings.
-- **Conventions.** UUIDv7 primary keys (Payload entry hashes are not DB identities). Angles are
-  `Decimal`, never binary float; longitudes normalized to `[0, 360)`; orbs signed with an
-  applying/separating flag. Core raises typed errors from `core/errors.py`, never returns `None` for
-  failure, never imports an HTTP status code. `snake_case` modules named for their stage — no
-  `utils`/`helpers`/`common`. Structured logging carrying an identifier only — never birth data,
-  names or prose — with the `ReportRun` id on every run log line. Alembic migrations forward-only,
-  one per change. Every new Client-referencing table joins the FR-29 delete cascade (`REPORT_RUN`
-  and `REPORT_PAYLOAD` here). Core is covered by example tests and Astro.com conformance fixtures
-  that run on every change.
+- **Purity boundary (AD-1):** `core/` (including all of this epic's detection and assembly logic)
+  is pure — no I/O, clock, network or env reads. The one declared exception is the ephemeris read
+  inside `core/ephemeris/`.
+- **Payload as sole channel (AD-3):** the Generator receives only `(ReportPayload, StyleGuide,
+  ReportTheme_previous, ReportTheme_current)`. Any fact a Section needs must be added at Payload
+  assembly, never supplied another way.
+- **Content-derived entry IDs (AD-4):** each Payload entry's ID is a stable hash of its canonical
+  field tuple — never sequential, time-derived or random — so a citation means the same entry across
+  regenerations.
+- **Day-lists are code, not model output (AD-5):** Sections 6/7 dates come only from the pure
+  projection function; the Generator emits no date token in those Sections.
+- **Checkpointed run (AD-10):** `ReportRun` advances forward-only through `natal_ready →
+  transits_ready → payload_ready → draft_ready → gate_passed → exported`, each stage persisting
+  before the next begins; every stage function is idempotent; re-driving resumes at the first
+  incomplete stage.
+- **No filesystem durability (AD-11):** all state goes to Postgres; nothing written at runtime is
+  read back after a restart.
+- **UTC in the core (AD-12):** every computed/stored instant is UTC; conversion to Client local time
+  happens only in `shell/http/`. The analyzed month is a single half-open UTC interval derived once
+  from local calendar-month boundaries, so a boundary event belongs to exactly one month.
+- **Section composition is data (AD-13):** the Section-to-Payload mapping lives in `data/sections.toml`,
+  versioned; assembly contains no per-Section branch.
+- **One ComputationConfig (AD-18):** Orb values, house system, body sets, Ruler tables and the
+  harmonic/disharmonic table all live in one versioned, frozen `ComputationConfig` passed explicitly
+  into every core function; its version and content hash are recorded on every Payload.
+- **AD-20, amended 2026-09-14 (governs Story 3.11):** a single deployment-wide `REPORT_RUN_MODE`
+  setting (`poll` | `background`, read once into `shell/config.py` `Settings`, default `poll`)
+  selects how forward progress happens — never configurable per run.
+  - `poll` mode is AD-20's original rule verbatim: `advance()` performs at most one stage transition
+    and is invoked only from `GET /report-runs/{run_id}`, under a Postgres advisory lock on the run
+    id; Story 3.10's behavior and regression tests must remain byte-for-byte unchanged.
+  - `background` mode adds one in-process scheduler task (started at app startup, stopped at
+    shutdown) that ticks the same `advance()`, under the same advisory lock, for every `ReportRun`
+    with `failed_at IS NULL` and `stage != 'gate_passed'`. The poll handler becomes read-only in this
+    mode — it renders state without calling `advance()`, so a run is never advanced twice for the
+    same transition.
+  - No queue, broker or second deployable in either mode; the architecture's Deferred worker/queue
+    option stays reserved for a scale change that hasn't happened.
+  - `background` mode requires a Render plan with no idle spin-down — a documented deployment
+    prerequisite, not something the app enforces or detects.
+  - No boot-time reconciliation pass after a restart/redeploy: only the scheduler's in-memory timer
+    is lost, never persisted stage data; resuming is left to the next poll or next scheduler tick.
+  - A run rewound to `payload_ready` for human Gate review (Stories 5.7/5.8) is ticked by the
+    scheduler like any other incomplete run — no special-case pause; AD-10's existing
+    `stage_failure_count` / max bound still terminally fails it.
 
 ## UX & Interaction Patterns
 
-- Story 3.5 ships an HTMX polling view over run status showing the current stage and updating as it
-  advances; Epic 9 later re-flows it into a six-node stage-track component, so keep the endpoint
-  poll-friendly.
-- The Payload-behind-the-Report view (Story 3.9) must be reachable within one interaction from the
-  run, group facts by the eight Sections, and show instants in the Client's local time (converted
-  only in the shell). Epic 9 later replaces its markup with a typed per-Section disclosure and
-  click-to-copy entry-ID chips — keep the data contract stable.
+- The stage track (Story 9.5) is the loading pattern for a running report — never a generic spinner.
+  It shows nodes for each stage and, while active, polls at a fixed 2s cadence, pausing when the tab
+  is hidden and stopping on any terminal stage.
+- **Vedi Payload** is available as soon as `payload_ready` (and later stages) is reached, giving the
+  Payload-inspection view (Story 3.9 / FR-15) reachable within one interaction from the run.
+- The Payload view shows, per Section, the exact Transit Events and natal placements supplied to it;
+  each entry shows transiting body, natal point, aspect type, exact date/time (converted to Client
+  local time only at this display layer) and orb.
+- **Addendum (2026-09-14) for Story 3.11:** the stage-track view must render identically regardless
+  of `REPORT_RUN_MODE` — same nodes, captions, poll cadence and Gate-failure recovery affordances.
+  In `background` mode the poll only reads and renders; an operator who never reopens the tab still
+  finds the run at (or past) `gate_passed` on return, exactly as if they had kept polling throughout.
 
 ## Cross-Story Dependencies
 
-- Depends on Epic 2: the stored Natal Chart, the four Domain Profiles, and the per-Client immutable
-  zone snapshot (used for the UTC month interval and local-time display).
-- Within the epic: Stories 3.1–3.4 (the detectors) feed Story 3.6 (assembly), which feeds Story 3.7
-  (day-list projection). Story 3.5 introduces the run frame all stages slot into; Story 3.8 freezes
-  and versions the assembled Payload; Story 3.9 reads back a frozen Payload; Story 3.10 refactors
-  the Story 3.5 runner to the non-blocking one-stage-per-poll model (AD-20) and adds the
-  advisory-lock single-flight test.
-- Downstream: Epic 4 (generation) and Epic 5 (Gate) consume the Payload as their only fact source;
-  ReportTheme derivation (Epic 4) is a pure function of the Payload. Story 3.10 is a prerequisite
-  for Epic 9 and realizes CAP-30 ("watch a report run progress") together with Epic 9 Story 9.5.
+- Stories 3.1–3.4 (Aspects, Stations, Ingresses, Lunations) feed directly into Story 3.6's Payload
+  assembly and Story 3.7's day-list projection; 3.6/3.7 cannot be implemented meaningfully without
+  detection output shaped per their acceptance criteria.
+- Story 3.8 (freezing/versioning the Payload) depends on 3.6's assembled structure existing.
+- Story 3.9 (Payload inspection view) depends on 3.8's persisted, versioned Payload.
+- Story 3.5 (checkpointed run) and Story 3.10 (non-blocking poll-driven advance) together define the
+  `ReportRun` lifecycle that Story 3.11 extends — 3.11 must not alter AD-10 stage semantics,
+  `advance()`'s idempotence, or the advisory lock, and `poll` mode must remain exactly what 3.10
+  shipped.
+- Story 3.11 is a constraint on, but not new scope for, Epic 9's stage-track view: the view must be
+  mode-agnostic. Epic 5 (Gate) and Epic 6 (export/history) consume only `ReportRun.stage` and are
+  unaffected by which mode produced it.

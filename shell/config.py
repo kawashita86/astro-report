@@ -26,7 +26,14 @@ from urllib.parse import urlsplit
 import argon2
 from argon2.exceptions import InvalidHashError
 
-__all__ = ["ConfigError", "Environment", "Settings", "load_settings", "settings"]
+__all__ = [
+    "ConfigError",
+    "Environment",
+    "ReportRunMode",
+    "Settings",
+    "load_settings",
+    "settings",
+]
 
 
 class ConfigError(RuntimeError):
@@ -42,6 +49,21 @@ class Environment(StrEnum):
 
     LOCAL = "local"
     PRODUCTION = "production"
+
+
+class ReportRunMode(StrEnum):
+    """How forward progress happens for every ``ReportRun`` in this
+    deployment (AD-20, amended for Story 3.11) -- never configurable per run.
+
+    ``POLL`` is AD-20's original rule: ``advance()`` runs only from
+    ``GET /report-runs/{run_id}``, one stage per poll. ``BACKGROUND`` adds an
+    in-process scheduler task (``shell/runner/scheduler.py``) that ticks the
+    same ``advance()`` for every incomplete run on a fixed cadence, and the
+    poll handler becomes read-only.
+    """
+
+    POLL = "poll"
+    BACKGROUND = "background"
 
 
 #: URL schemes accepted for ``DATABASE_URL``. All durable state lives in Postgres
@@ -86,6 +108,11 @@ class Settings:
     session_secret_key: str
     gemini_api_key: str
     gemini_data_terms_verified_at: str
+    # A dataclass-level default (not just in `_read_report_run_mode`), unlike
+    # every other field here: 14 test files construct `Settings(...)`
+    # directly without this field and must keep working unmodified (Story
+    # 3.11's Boundaries).
+    report_run_mode: ReportRunMode = ReportRunMode.POLL
 
     def __repr__(self) -> str:
         return (
@@ -94,7 +121,8 @@ class Settings:
             f"auth_password_hash={self.redacted_auth_password_hash!r}, "
             f"session_secret_key={self.redacted_session_secret_key!r}, "
             f"gemini_api_key={self.redacted_gemini_api_key!r}, "
-            f"gemini_data_terms_verified_at={self.gemini_data_terms_verified_at!r})"
+            f"gemini_data_terms_verified_at={self.gemini_data_terms_verified_at!r}, "
+            f"report_run_mode={self.report_run_mode!r})"
         )
 
     @property
@@ -308,6 +336,26 @@ def _read_gemini_data_terms_verified_at(
     return raw, None
 
 
+def _read_report_run_mode(
+    environ: Mapping[str, str],
+) -> tuple[ReportRunMode | None, str | None]:
+    """Follow every other reader's ``(value, error)`` shape but, uniquely
+    among this file's readers, is optional (Story 3.11's Boundaries): unset
+    or blank means ``ReportRunMode.POLL``, never a missing-variable error.
+    """
+    permitted = ", ".join(member.value for member in ReportRunMode)
+    raw = environ.get("REPORT_RUN_MODE")
+    if raw is None or not raw.strip():
+        return ReportRunMode.POLL, None
+    try:
+        return ReportRunMode(raw.strip()), None
+    except ValueError:
+        return None, (
+            f"REPORT_RUN_MODE is invalid: {raw!r} is not a recognized mode. "
+            f"Permitted values: {permitted}."
+        )
+
+
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """Validate ``environ`` into a frozen :class:`Settings`.
 
@@ -328,6 +376,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     gemini_data_terms_verified_at, gemini_data_terms_verified_at_error = (
         _read_gemini_data_terms_verified_at(source)
     )
+    report_run_mode, report_run_mode_error = _read_report_run_mode(source)
 
     problems = [
         problem
@@ -339,6 +388,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             session_secret_key_error,
             gemini_api_key_error,
             gemini_data_terms_verified_at_error,
+            report_run_mode_error,
         )
         if problem is not None
     ]
@@ -356,6 +406,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         and session_secret_key is not None
         and gemini_api_key is not None
         and gemini_data_terms_verified_at is not None
+        and report_run_mode is not None
     )
     return Settings(
         environment=environment,
@@ -365,6 +416,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         session_secret_key=session_secret_key,
         gemini_api_key=gemini_api_key,
         gemini_data_terms_verified_at=gemini_data_terms_verified_at,
+        report_run_mode=report_run_mode,
     )
 
 

@@ -1,18 +1,25 @@
 """``POST /clients/{client_id}/report-runs`` (start) and
 ``GET /report-runs/{run_id}`` (HTMX poll) -- Francesco starts a month's
 computation and watches it advance one stage at a time (Story 3.5, reshaped
-for AD-20 by Story 3.10).
+for AD-20 by Story 3.10, amended by Story 3.11 for ``background`` mode).
 
 The start route only creates the ``ReportRun`` row, commits and redirects to
-the poll view -- it runs no stage, so it returns immediately. Every stage is
-driven from the poll route: each ``GET`` calls
-``shell/runner/driver.py::advance()`` once, which moves the run forward by
-at most one stage and returns, so the first stage runs on the first poll and
-a poll never blocks on more than its own single stage (one external
-Generator call plus bounded backoff, at ``draft_ready``). Concurrent polls
-for one run are single-flighted by a Postgres advisory lock inside
-``advance()``. No background task, no queue: see ``shell/runner/driver.py``'s
-Design Notes.
+the poll view -- it runs no stage, so it returns immediately. In ``poll``
+mode (``Settings.report_run_mode``, the default), every stage is driven from
+the poll route: each ``GET`` calls ``shell/runner/driver.py::advance()``
+once, which moves the run forward by at most one stage and returns, so the
+first stage runs on the first poll and a poll never blocks on more than its
+own single stage (one external Generator call plus bounded backoff, at
+``draft_ready``). Concurrent polls for one run are single-flighted by a
+Postgres advisory lock inside ``advance()``.
+
+In ``background`` mode, an in-process scheduler task
+(``shell/runner/scheduler.py``, started/stopped by ``shell/http/app.py``'s
+lifespan) ticks the same ``advance()`` for every incomplete ``ReportRun`` on
+a fixed cadence, and this poll route becomes read-only: it renders ``run``'s
+current state without ever calling ``advance()`` itself, so a run is never
+advanced twice for the same transition. See ``shell/runner/driver.py``'s and
+``shell/runner/scheduler.py``'s own Design Notes.
 
 Authenticated by default: nothing here is named in
 ``shell.http.auth.ALLOWLIST``, so ``AuthMiddleware`` guards both routes
@@ -39,8 +46,6 @@ from sqlmodel import Session, select
 
 from core.gate.run import run_gate
 from core.types.generation import Sentence
-from shell.adapters.gemini.generator import GeminiGenerator
-from shell.adapters.local.generator import RecordedResponseGenerator
 from shell.adapters.postgres.client import (
     Client,
     current_chart_for_client,
@@ -65,7 +70,7 @@ from shell.adapters.postgres.report_draft import (
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.weasyprint.render import html_to_pdf
-from shell.config import Environment
+from shell.config import ReportRunMode
 from shell.http.app import get_session
 from shell.http.draft_view import (
     LIST_SECTION_NAMES,
@@ -80,6 +85,7 @@ from shell.http.report_markdown import render_report_markdown
 from shell.http.stage_view import build_stage_track, stage_caption, violation_kind_label
 from shell.ports.generator import Generator
 from shell.runner.driver import advance
+from shell.runner.scheduler import generator_for_settings
 
 __all__ = ["get_generator", "router"]
 
@@ -279,23 +285,22 @@ def _load_passed_report_bundle(session: Session, run_id: UUID) -> _PassedReportB
 def get_generator(request: Request) -> Generator:
     """The ``Generator`` this route calls at the ``draft_ready`` stage.
 
-    A dependency of its own, not a bare call inline in the handler, so tests
-    can substitute a fake without a real network call or a real Gemini API
-    key -- mirrors ``get_geocoder()`` (``shell/http/routes/clients.py``).
-    Constructed per-request, never cached on ``app.state``: this avoids
-    constructing a real ``genai.Client`` for every one of the many HTTP
-    tests that build the app but never touch report runs (this story's
-    Design Notes).
+    A one-line delegate to ``shell/runner/scheduler.py::generator_for_settings``
+    (Story 3.11) -- the ``Environment.LOCAL`` -> ``RecordedResponseGenerator()``
+    branch moved there so both this route and the ``background``-mode
+    scheduler tick share one decision rather than risking the two call sites
+    drifting.
 
-    Under ``Environment.LOCAL`` this returns ``RecordedResponseGenerator``
-    instead of a real ``GeminiGenerator`` (Story 4.9) -- mirrors the
-    ``settings.environment is Environment.LOCAL`` idiom ``shell/http/app.py``
-    already uses twice, so ``docker compose up`` against a local Postgres
-    never spends real Gemini quota. Production behavior is unchanged.
+    No longer wired in as a FastAPI ``Depends(...)`` on ``poll_report_run``
+    (review-loop 1): that would construct a real ``Generator`` on *every*
+    poll, including a ``background``-mode poll that never calls ``advance()``
+    and so never uses it, for the deployment's whole lifetime. Kept as its
+    own function -- called directly, only inside ``poll_report_run``'s
+    ``poll``-mode branch -- purely so tests can still exercise this exact
+    ``Environment.LOCAL``/production branch in isolation (mirrors
+    ``get_geocoder()``, ``shell/http/routes/clients.py``).
     """
-    if request.app.state.settings.environment is Environment.LOCAL:
-        return RecordedResponseGenerator()
-    return GeminiGenerator(request.app.state.settings.gemini_api_key)
+    return generator_for_settings(request.app.state.settings)
 
 
 def _advance_run(
@@ -363,7 +368,6 @@ def poll_report_run(
     run_id: UUID,
     request: Request,
     session: Session = Depends(get_session),
-    generator: Generator = Depends(get_generator),
 ) -> Response:
     run = session.get(ReportRun, run_id)
     if run is None:
@@ -373,7 +377,17 @@ def poll_report_run(
     if client is None:
         raise RuntimeError(f"ReportRun {run.id} references a missing Client.")
 
-    _advance_run(request, session, run, client, generator)
+    # AD-20, amended for Story 3.11: in `background` mode the scheduler
+    # (`shell/runner/scheduler.py`) is the only caller of `advance()` -- this
+    # poll only reads and renders `run`'s current state, so a run is never
+    # advanced twice for the same transition. The `Generator` itself is only
+    # constructed inside this branch (review-loop 1), not via a
+    # `Depends(get_generator)` parameter on every call -- a background-mode
+    # poll never uses one, so building it unconditionally on every single
+    # request would be pure waste for the deployment's whole lifetime.
+    if request.app.state.settings.report_run_mode is ReportRunMode.POLL:
+        generator = generator_for_settings(request.app.state.settings)
+        _advance_run(request, session, run, client, generator)
 
     failed = run.failed_at is not None
     gate_failed = _current_cycle_gate_failure(session, run) is not None
