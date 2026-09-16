@@ -26,6 +26,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as time_of_day
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -45,7 +46,12 @@ from core.types.place import ResolvedPlace
 from core.types.transits import Station, TransitAspectEvent
 from shell.adapters.gemini.generator import GeminiGenerator
 from shell.adapters.local.generator import RecordedResponseGenerator
-from shell.adapters.postgres.client import Client, create_client_with_chart
+from shell.adapters.postgres.client import (
+    Client,
+    StoredNatalChart,
+    create_client_with_chart,
+    current_chart_for_client,
+)
 from shell.adapters.postgres.export_record import ExportRecord
 from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
 from shell.adapters.postgres.gate_violation_review import (
@@ -215,6 +221,18 @@ def _create_client_with_real_chart(db_session: Session, *, name: str = "Ada Love
     )
     db_session.commit()
     return client_row
+
+
+def _stored_chart_id(db_session: Session, client_id):
+    """The current ``StoredNatalChart`` id for ``client_id`` --
+    spec-pdf-export-redesign's ``download_report_pdf`` now resolves
+    ``ReportRun.natal_chart_id`` to build the wheel/placements, so every
+    ``gate_passed``/``exported`` ``ReportRun`` built directly in the tests
+    below (rather than via the real ``advance()`` pipeline, which sets this
+    field itself) must carry a real one."""
+    chart = current_chart_for_client(db_session, client_id)
+    assert chart is not None
+    return chart.id
 
 
 def _report_runs(db_session: Session) -> list[ReportRun]:
@@ -3731,7 +3749,12 @@ def test_the_first_export_returns_a_pdf_and_advances_the_run_to_exported(
     ``run.stage`` becomes ``"exported"``, and exactly one ``ExportRecord``
     row is written."""
     ada = _create_client_with_real_chart(db_session)
-    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
     db_session.add(run)
     db_session.commit()
     frozen = _a_frozen_payload_with_one_aspect()
@@ -3760,7 +3783,12 @@ def test_exporting_an_already_exported_report_again_leaves_the_stage_unchanged(
     """Matrix row: "Repeat export" -- ``run.stage`` stays ``"exported"``, but
     one more ``ExportRecord`` row is written per export."""
     ada = _create_client_with_real_chart(db_session)
-    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
     db_session.add(run)
     db_session.commit()
     frozen = _a_frozen_payload_with_one_aspect()
@@ -3787,7 +3815,12 @@ def test_exporting_a_run_that_is_already_exported_still_returns_a_pdf(
     process picking up an already-exported run) -- the stage stays put and
     one more ``ExportRecord`` row is written."""
     ada = _create_client_with_real_chart(db_session)
-    run = ReportRun(client_id=ada.id, month="2026-01", stage="exported")
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="exported",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
     db_session.add(run)
     db_session.commit()
     frozen = _a_frozen_payload_with_one_aspect()
@@ -3802,15 +3835,17 @@ def test_exporting_a_run_that_is_already_exported_still_returns_a_pdf(
     assert len(_export_records(db_session)) == 1
 
 
-def test_the_exported_html_contains_only_the_eight_sections_and_the_clients_name(
+def test_the_exported_html_contains_the_eight_sections_the_clients_name_and_the_wheel(
     authenticated_client: TestClient,
     db_session: Session,
     app_instance: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Boundaries: "The exported PDF contains only the eight Sections and
-    the Client's name -- no chart wheel, no Payload, no Gate result, no run
-    identifier, no internal metadata." ``html_to_pdf`` is monkeypatched to
+    """Boundaries (spec-pdf-export-redesign): the exported PDF now carries
+    the eight Sections, the Client's name/birth data, and the run's own
+    natal wheel + Sun/Moon/Ascendant placements -- but still never the
+    Payload, the Gate result, the run identifier, citations (``entry_ids``)
+    or any other internal metadata. ``html_to_pdf`` is monkeypatched to
     capture the exact HTML string the route hands to WeasyPrint, since a
     real PDF's content streams are not plain-text-searchable -- this proves
     what the route assembles, the one input WeasyPrint ever sees."""
@@ -3818,14 +3853,19 @@ def test_the_exported_html_contains_only_the_eight_sections_and_the_clients_name
 
     captured: dict[str, str] = {}
 
-    def _fake_html_to_pdf(html: str) -> bytes:
+    def _fake_html_to_pdf(html: str, *, base_url: str) -> bytes:
         captured["html"] = html
         return b"%PDF-fake"
 
     monkeypatch.setattr(report_runs_module, "html_to_pdf", _fake_html_to_pdf)
 
     ada = _create_client_with_real_chart(db_session, name="Ada Lovelace")
-    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
     db_session.add(run)
     db_session.commit()
     frozen = _a_frozen_payload_with_one_aspect()
@@ -3851,7 +3891,7 @@ def test_the_exported_html_contains_only_the_eight_sections_and_the_clients_name
         "Giorni di attenzione",
         "Consiglio finale",
     ):
-        assert f"<h2>{heading}</h2>" in html
+        assert f'<p class="label">{heading}</p>' in html
     # The raw snake_case keys must not leak as headings. Only the
     # underscore-bearing names are safe canaries -- `amore` / `lavoro` /
     # `denaro` / `benessere` are ordinary Italian words that legitimately
@@ -3866,13 +3906,165 @@ def test_the_exported_html_contains_only_the_eight_sections_and_the_clients_name
     assert "Un mese equilibrato." in html
     assert "Venere sostiene i legami." in html
     assert "Ottimo per gli incontri." in html
-    # No chart wheel, no Payload, no Gate result, no run identifier, no
-    # internal metadata (this story's Boundaries).
+    # The natal wheel + Sun/Moon/Ascendant placements are now included
+    # (this story's own change relative to Story 6.2's original boundary).
+    # `xmlns:kr` only appears in a Kerykeion-generated SVG, never in this
+    # template's own hand-written icons -- a reliable marker that the real
+    # wheel rendered, not just some inline SVG.
+    assert "xmlns:kr=" in html
+    assert "Il tuo tema natale" in html
+    assert "Le tue posizioni" in html
+    assert "Sole" in html
+    assert "Ascendente" in html
+    # Still excluded: Payload, Gate result, run identifier, citations,
+    # internal metadata (this story's Boundaries, carried over unchanged).
     assert str(run.id) not in html
     assert "Gate" not in html
     assert "Payload" not in html
     assert "gate_passed" not in html
     assert "regenerated" not in html
+
+
+# --- spec-pdf-export-redesign: I/O & Edge-Case Matrix ---------------------------
+
+
+def test_the_exported_html_omits_the_birthplace_row_when_birthplace_name_is_null(
+    authenticated_client: TestClient,
+    db_session: Session,
+    app_instance: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """I/O & Edge-Case Matrix row: "Birthplace NULL" -- ``client
+    .birthplace_name is None`` (a Client row written before that column
+    existed, per its own docstring) omits the *Luogo di nascita* row
+    entirely, rather than rendering it blank. ``html_to_pdf`` is
+    monkeypatched to capture the HTML, mirroring the wheel/sections test
+    above."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    captured: dict[str, str] = {}
+
+    def _fake_html_to_pdf(html: str, *, base_url: str) -> bytes:
+        captured["html"] = html
+        return b"%PDF-fake"
+
+    monkeypatch.setattr(report_runs_module, "html_to_pdf", _fake_html_to_pdf)
+
+    ada = _create_client_with_real_chart(db_session)
+    ada.birthplace_name = None
+    db_session.add(ada)
+    db_session.commit()
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 200
+    html = captured["html"]
+    assert "Luogo di nascita" not in html
+    # The card itself still renders, with its other two rows -- an omitted
+    # row is not a missing card.
+    assert "Dati di nascita" in html
+    assert "Data di nascita" in html
+    assert "Ora di nascita" in html
+
+
+def test_the_exported_html_shows_an_uncited_day_list_entry_as_date_only(
+    authenticated_client: TestClient,
+    db_session: Session,
+    app_instance: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """I/O & Edge-Case Matrix row: "Uncited day-list entry" -- an entry with
+    no citing Sentence still renders (dot + date), with no caption prose.
+    ``_a_generated_draft_for()`` cites ``giorni_favorevoli``'s one entry but
+    never ``giorni_di_attenzione``'s (``giorni_di_attenzione=()``), so the
+    same fixture pair already used above gives one cited and one uncited
+    entry for free -- this test checks both, to prove the citation, not the
+    Section, controls whether the caption renders. ``html_to_pdf`` is
+    monkeypatched to capture the HTML, mirroring the wheel/sections test
+    above."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    captured: dict[str, str] = {}
+
+    def _fake_html_to_pdf(html: str, *, base_url: str) -> bytes:
+        captured["html"] = html
+        return b"%PDF-fake"
+
+    monkeypatch.setattr(report_runs_module, "html_to_pdf", _fake_html_to_pdf)
+
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 200
+    html = captured["html"]
+    # ada's client.iana_zone is America/Chicago (UTC-6 in January):
+    # giorni_favorevoli's event (perfected_at 2026-01-10 15:00 UTC) -> 10
+    # local; it IS cited ("Ottimo per gli incontri."), so its card shows
+    # both the date and the caption prose.
+    favorevoli_block = html.split(">Giorni favorevoli<", 1)[1].split(">Giorni di attenzione<", 1)[
+        0
+    ]
+    assert '<span class="serif timeline-day">10</span>' in favorevoli_block
+    assert '<span class="timeline-month">Gen</span>' in favorevoli_block
+    assert '<p class="prose timeline-text">Ottimo per gli incontri.</p>' in favorevoli_block
+
+    # giorni_di_attenzione's station (station_at 2026-01-15 09:00 UTC) -> 15
+    # local; `_a_generated_draft_for()` never cites it (`giorni_di_attenzione
+    # =()`), so its card must show the dot + date alone, no caption prose.
+    attenzione_block = html.split(">Giorni di attenzione<", 1)[1].split(
+        '<div class="card final-advice-card">', 1
+    )[0]
+    assert '<span class="serif timeline-day">15</span>' in attenzione_block
+    assert '<span class="timeline-month">Gen</span>' in attenzione_block
+    assert '<p class="prose timeline-text">' not in attenzione_block
+
+
+def test_report_export_html_cards_never_split_across_a_page_break() -> None:
+    """I/O & Edge-Case Matrix row: "Long Section prose" -- a card whose
+    prose overflows the remaining space on a page must flow whole onto the
+    next page, never split mid-sentence. WeasyPrint's real pagination is not
+    exercised anywhere in this suite (no real renderer here) -- this asserts
+    the CSS rule that guarantees it instead, a structural check on the
+    template's static source mirroring tests/test_http_shell.py's own
+    assertions on this same template (e.g.
+    ``test_report_export_html_keeps_its_own_document_and_does_not_extend_base``).
+    """
+    template_path = (
+        Path(__file__).resolve().parent.parent
+        / "shell"
+        / "http"
+        / "templates"
+        / "report_export.html"
+    )
+    source = template_path.read_text(encoding="utf-8")
+
+    card_rule = source.split(".card {", 1)[1].split("}", 1)[0]
+    assert "break-inside: avoid;" in card_rule
 
 
 # --- download_report_pdf's data-integrity-bug guards ---------------------------
@@ -3970,6 +4162,61 @@ def test_downloading_the_export_pdf_for_a_report_with_a_deleted_client_raises(
     db_session.commit()
 
     with pytest.raises(RuntimeError, match="references a missing Client"):
+        authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+
+def test_downloading_the_export_pdf_for_a_run_with_no_natal_chart_id_raises(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """I/O & Edge-Case Matrix row: "``natal_chart_id`` missing on passed
+    run" -- impossible once ``gate_passed`` (``advance()``'s ``natal_ready``
+    stage always sets it), so its absence here is a data-integrity bug,
+    exactly like the sibling guards above -- ``_load_run_natal_chart`` raises
+    before ``download_report_pdf`` ever builds the wheel. Deliberately never
+    sets ``natal_chart_id`` (unlike every happy-path test above, which
+    passes ``_stored_chart_id(...)`` precisely to avoid tripping this
+    guard)."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    assert run.natal_chart_id is None
+
+    with pytest.raises(RuntimeError, match="ReportRun has no natal_chart_id"):
+        authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+
+def test_downloading_the_export_pdf_for_a_report_with_a_deleted_natal_chart_raises(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Same guard, the other half: ``natal_chart_id`` is set but the
+    ``StoredNatalChart`` row it points at is gone -- a since-deleted row,
+    not a not-ready state."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+
+    stored_chart = db_session.get(StoredNatalChart, run.natal_chart_id)
+    assert stored_chart is not None
+    db_session.delete(stored_chart)
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="references a missing StoredNatalChart"):
         authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
 
 
@@ -4161,6 +4408,7 @@ def test_the_first_export_records_elapsed_seconds_from_run_creation(
         stage="gate_passed",
         created_at=created_at,
         updated_at=created_at,
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
     )
     db_session.add(run)
     db_session.commit()
@@ -4189,7 +4437,12 @@ def _passed_report_run(db_session: Session) -> ReportRun:
     """Build a passed, exportable ``ReportRun`` -- shared setup for the
     disposition-route tests below."""
     ada = _create_client_with_real_chart(db_session)
-    run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
     db_session.add(run)
     db_session.commit()
     frozen = _a_frozen_payload_with_one_aspect()

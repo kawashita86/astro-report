@@ -906,3 +906,11 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-sentence-text-textarea-styling.md`
   summary: Inside the same `<details>`, the read-only `<blockquote>{{ v.sentence }}</blockquote>` (original flagged sentence) and the editable textarea below it (pre-filled with that same text) are visually and semantically undistinguished -- neither is labeled "testo originale" vs. "la tua correzione."
   evidence: Easy to misread mid-edit as duplicated/redundant content. Pre-existing, not introduced by this styling fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-pdf-export-redesign.md`
+  summary: `report_export.html`'s section headings ("Le tue posizioni", "Amore", "Lavoro", etc.) render as `<p class="label">`, not semantic `<h2>`/`<h3>` elements, so the exported PDF carries no document/heading outline for accessibility or tagged-PDF tooling.
+  evidence: This matches the approved mockup (`mockups/key-pdf-export.html`) exactly, which itself uses non-semantic markup -- a pre-existing choice baked into the approved design, not introduced by this implementation. Worth revisiting if a client-facing accessibility requirement is ever raised for this specific document.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-pdf-export-redesign.md`
+  summary: Colors in `report_export.html`'s `<style>` block are hardcoded hex literals repeated throughout rather than defined once as CSS custom properties on `:root`.
+  evidence: Distinct from the wheel SVG's own CSS-var limitation (WeasyPrint 69 can't resolve `var()` referenced from inside an *inlined SVG's* presentation attributes) -- that limitation doesn't apply to the surrounding host HTML/CSS, so a `:root`-variable refactor is possible but was out of scope for this pass; a maintainability nice-to-have, not a correctness gap.

@@ -29,10 +29,12 @@ before a request ever reaches this module, mirroring
 
 from __future__ import annotations
 
+import copy
 import re
 from collections import Counter
 from dataclasses import replace as dataclasses_replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, NamedTuple
 from uuid import UUID
@@ -40,6 +42,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from kerykeion.chart_data_factory import ChartDataFactory
+from kerykeion.charts.chart_drawer import ChartDrawer
+from kerykeion.settings.chart_defaults import (
+    DEFAULT_CELESTIAL_POINTS_SETTINGS,
+    DEFAULT_CHART_ASPECTS_SETTINGS,
+    DEFAULT_CHART_COLORS,
+)
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -48,6 +57,7 @@ from core.gate.run import _index_entries, run_gate
 from core.types.generation import Sentence
 from shell.adapters.postgres.client import (
     Client,
+    StoredNatalChart,
     current_chart_for_client,
     deserialize_natal_chart,
 )
@@ -71,6 +81,7 @@ from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.weasyprint.render import html_to_pdf
 from shell.config import ReportRunMode
+from shell.http import chart_wheel
 from shell.http.app import get_session
 from shell.http.draft_view import (
     LIST_SECTION_NAMES,
@@ -81,6 +92,7 @@ from shell.http.draft_view import (
 )
 from shell.http.flash import _flash_context_processor, set_flash
 from shell.http.payload_view import FIELD_TITLES, localize_payload
+from shell.http.report_export_view import build_export_context
 from shell.http.report_markdown import render_report_markdown
 from shell.http.stage_view import (
     build_stage_track,
@@ -100,6 +112,117 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 _templates = Jinja2Templates(
     directory=_TEMPLATES_DIR, context_processors=[_flash_context_processor]
 )
+
+#: ``html_to_pdf``'s required ``base_url`` (spec-pdf-export-redesign): the
+#: templates directory itself, trailing slash required so WeasyPrint's
+#: relative-URL resolution treats it as a directory rather than a filename
+#: (``urljoin("file:///a/templates", "fonts/x.woff2")`` would otherwise
+#: resolve to ``file:///a/fonts/x.woff2`` -- verified empirically against
+#: WeasyPrint 69).
+_TEMPLATES_BASE_URL = f"{_TEMPLATES_DIR}/"
+
+# --- report_export.html's natal wheel: copper/ink literal-color palette ----
+#
+# WeasyPrint 69 does not resolve `var(--kerykeion-*)` CSS custom properties
+# referenced from inside an *inlined* SVG's own presentation attributes --
+# verified empirically (the CSS-var-driven default renders the whole wheel
+# as a solid black disc under WeasyPrint, never the copper/ink tones the
+# design calls for). Literal hex colors sidestep CSS custom property
+# resolution entirely, so this module builds its own copy of Kerykeion's
+# three settings structures (``kerykeion.settings.chart_defaults``) with
+# every ``var(...)`` replaced by a literal color from this design's palette
+# -- this is the "literal-color override" the story's Ask-First risk names;
+# it renders correctly (verified against a rasterized PDF page), so the
+# PNG-rasterization fallback that risk also names is never reached.
+_WHEEL_INK = "#2B2724"
+_WHEEL_COPPER = "#A77B57"
+_WHEEL_CARD = "#FFFDFA"
+_WHEEL_GROUND = "#F7F4EF"
+_WHEEL_BORDER = "#E6DED4"
+_WHEEL_MUTED_RULE = "#D9CBBB"
+
+
+def _literal_wheel_colors_settings() -> dict[str, str]:
+    settings = copy.deepcopy(DEFAULT_CHART_COLORS)
+    for key in settings:
+        if key.startswith("paper"):
+            settings[key] = _WHEEL_CARD
+        elif key.startswith("zodiac_bg"):
+            index = int(key.rsplit("_", 1)[1])
+            settings[key] = _WHEEL_CARD if index % 2 == 0 else _WHEEL_GROUND
+        elif key.startswith("zodiac_icon"):
+            settings[key] = _WHEEL_COPPER
+        elif key.startswith("zodiac_radix_ring") or key.startswith("zodiac_transit_ring"):
+            settings[key] = _WHEEL_BORDER
+        elif key in ("houses_radix_line", "houses_transit_line"):
+            settings[key] = _WHEEL_MUTED_RULE
+        elif key.startswith("lunar_phase"):
+            settings[key] = _WHEEL_INK
+    unresolved = {key: value for key, value in settings.items() if "var(" in value}
+    if unresolved:
+        raise RuntimeError(
+            "_literal_wheel_colors_settings() left unresolved var(...) values for "
+            f"{sorted(unresolved)} -- a Kerykeion upgrade added a settings key this "
+            "function's if/elif chain doesn't recognize yet; add a branch for it "
+            "(the whole point of this function is that WeasyPrint 69 cannot resolve "
+            "var(--kerykeion-*) itself, so a value silently left as var(...) here "
+            "reintroduces the black-disc wheel bug)."
+        )
+    return settings
+
+
+def _literal_wheel_celestial_points_settings() -> list[dict[str, Any]]:
+    settings = copy.deepcopy(DEFAULT_CELESTIAL_POINTS_SETTINGS)
+    for point in settings:
+        point["color"] = _WHEEL_INK
+    return settings
+
+
+def _literal_wheel_aspects_settings() -> list[dict[str, Any]]:
+    settings = copy.deepcopy(DEFAULT_CHART_ASPECTS_SETTINGS)
+    for aspect in settings:
+        aspect["color"] = _WHEEL_COPPER
+    return settings
+
+
+#: Built once at import time -- read-only configuration for every
+#: ``ChartDrawer`` call this module makes, mirroring how Kerykeion's own
+#: ``DEFAULT_*`` settings are themselves module-level constants shared
+#: across every chart Kerykeion draws.
+_WHEEL_COLORS_SETTINGS = _literal_wheel_colors_settings()
+_WHEEL_CELESTIAL_POINTS_SETTINGS = _literal_wheel_celestial_points_settings()
+_WHEEL_ASPECTS_SETTINGS = _literal_wheel_aspects_settings()
+
+
+def _build_wheel_svg(client: Client, chart: StoredNatalChart, orb: Decimal) -> str:
+    """The run's own natal chart (``chart``, resolved from
+    ``ReportRun.natal_chart_id`` -- never the Client's current chart),
+    rendered as a copper/ink SVG wheel -- mirrors ``shell/http/routes/chart.py``'s
+    own wheel-build pattern (``chart_wheel.build_subject()`` -> ``ChartDataFactory
+    .create_natal_chart_data()`` -> ``ChartDrawer(...)``), reusing
+    ``chart_wheel.build_subject``/``active_aspects`` unchanged.
+
+    ``generate_wheel_only_svg_string()`` -- not ``generate_svg_string()`` --
+    on purpose: Kerykeion's full chart SVG also draws a position table, an
+    aspect grid and an elements/qualities panel beside the wheel, none of
+    which this design's "Il tuo tema natale" card wants (those values are
+    shown in the "Le tue posizioni" card instead, built by
+    ``report_export_view.build_export_context``); the wheel-only renderer
+    both omits them and fits its own ``viewBox`` to the wheel circle alone
+    (matching the design mockup's own reference SVG, which was produced the
+    same way -- verified byte-identical ``viewBox`` value)."""
+    subject = chart_wheel.build_subject(client, chart)
+    chart_data = ChartDataFactory.create_natal_chart_data(
+        subject, active_aspects=chart_wheel.active_aspects(orb)
+    )
+    return ChartDrawer(
+        chart_data,
+        transparent_background=True,
+        colors_settings=_WHEEL_COLORS_SETTINGS,
+        celestial_points_settings=_WHEEL_CELESTIAL_POINTS_SETTINGS,
+        aspects_settings=_WHEEL_ASPECTS_SETTINGS,
+    ).generate_wheel_only_svg_string()
+
 
 #: "YYYY-MM", zero-padded -- the one shape ``shell/runner/month.py``'s
 #: ``client_month_interval_utc`` is contracted to accept. Checked here so a
@@ -285,6 +408,22 @@ def _load_passed_report_bundle(session: Session, run_id: UUID) -> _PassedReportB
         client=client,
         rendered=_render_stored_draft(stored_draft, stored_payload, client),
     )
+
+
+def _load_run_natal_chart(session: Session, bundle: _PassedReportBundle) -> StoredNatalChart:
+    """``bundle.run.natal_chart_id`` resolved to its ``StoredNatalChart`` row
+    -- ``download_report_pdf``'s own addition to the ``RuntimeError``-guarded
+    reads ``_load_passed_report_bundle`` already performs (I/O matrix:
+    "``natal_chart_id`` missing on passed run" is impossible once
+    ``gate_passed``, since ``advance()``'s ``natal_ready`` stage always sets
+    it -- its absence here, or a since-deleted row, is a data-integrity bug,
+    not a not-ready state, mirroring every other guard in this block)."""
+    if bundle.run.natal_chart_id is None:
+        raise RuntimeError(f"Report {bundle.report.id}'s ReportRun has no natal_chart_id.")
+    chart = session.get(StoredNatalChart, bundle.run.natal_chart_id)
+    if chart is None:
+        raise RuntimeError(f"Report {bundle.report.id} references a missing StoredNatalChart.")
+    return chart
 
 
 def get_generator(request: Request) -> Generator:
@@ -1273,16 +1412,21 @@ def download_report_pdf(
     (``shell/export.py::export_report()``'s structural gate).
 
     Once a ``Report`` row exists, the same ``ReportDraft``/``ReportPayload``/
-    ``Client`` rows it implies are read back with ``RuntimeError`` guards,
-    never a 404 -- their absence at that point would be a data-integrity
-    bug, mirroring ``view_report``'s own shape exactly (this route does not
-    call ``view_report`` itself -- Boundaries: that route/its template stay
-    untouched beyond one added link).
+    ``Client``/``StoredNatalChart`` rows it implies are read back with
+    ``RuntimeError`` guards, never a 404 -- their absence at that point would
+    be a data-integrity bug, mirroring ``view_report``'s own shape exactly
+    (this route does not call ``view_report`` itself -- Boundaries: that
+    route/its template stay untouched beyond one added link). The
+    ``StoredNatalChart`` is always the run's own
+    (``ReportRun.natal_chart_id``, ``_load_run_natal_chart``), never the
+    Client's current chart -- the two can disagree after a correction.
 
-    The PDF itself carries only the eight Sections and the Client's name
-    (``shell/http/templates/report_export.html``) -- no chart wheel, no
-    Payload, no Gate result, no run identifier, no internal metadata
-    (this story's Boundaries).
+    The PDF itself (``shell/http/templates/report_export.html``,
+    spec-pdf-export-redesign) carries the eight Sections, the Client's name
+    and birth data, and the run's own natal wheel + Sun/Moon/Ascendant
+    placements -- still never the Payload, the Gate result, the run
+    identifier, citations or any other internal metadata (this story's
+    Boundaries).
 
     The first successful export advances ``run.stage`` to ``"exported"``
     once, mirroring how ``run.stage`` only ever advances forward; every
@@ -1306,17 +1450,19 @@ def download_report_pdf(
     below carries the same deviation. Recorded in ``docs/decisions/`` as RGD-4.
     """
     bundle = _load_passed_report_bundle(session, run_id)
-
-    export_html = _templates.get_template("report_export.html").render(
-        {
-            "client_name": bundle.client.name,
-            "draft": bundle.rendered,
-            "section_order": SECTION_ORDER,
-            "list_section_names": LIST_SECTION_NAMES,
-            "section_titles": SECTION_TITLES,
-        }
+    stored_chart = _load_run_natal_chart(session, bundle)
+    wheel_svg = _build_wheel_svg(
+        bundle.client, stored_chart, request.app.state.computation_config.orbs.natal
     )
-    pdf_bytes = html_to_pdf(export_html)
+    export_context = build_export_context(
+        client=bundle.client,
+        run=bundle.run,
+        rendered=bundle.rendered,
+        chart=stored_chart,
+        wheel_svg=wheel_svg,
+    )
+    export_html = _templates.get_template("report_export.html").render(export_context)
+    pdf_bytes = html_to_pdf(export_html, base_url=_TEMPLATES_BASE_URL)
 
     if bundle.run.stage != "exported":
         bundle.run.stage = "exported"
