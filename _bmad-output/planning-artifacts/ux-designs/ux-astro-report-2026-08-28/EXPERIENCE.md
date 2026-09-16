@@ -3,7 +3,7 @@ name: astro-report
 status: final
 sources:
   - ../../architecture/architecture-astro-report-2026-08-14/ARCHITECTURE-SPINE.md
-updated: 2026-09-02
+updated: 2026-09-16
 ---
 
 # astro-report — Experience Spine
@@ -606,10 +606,95 @@ clears across the app. **Climax:** the one durability action the system depends 
 - **< 768px** — best-effort. Layout stays single-column and usable; not a design
   target (the operator is at a desk).
 - **Print / PDF export** — the WeasyPrint export template is a **separate
-  document**, not the app in print CSS: Georgia serif, 12pt, 2cm page margin,
-  `page-break-inside: avoid` per Section (as it is today). It deliberately does
-  **not** inherit `DESIGN.md` — it is a client deliverable, not operator chrome.
-  Keep it as-is; the rebuild does not touch it.
+  document**, not the app in print CSS. It deliberately does **not** inherit
+  `DESIGN.md`: it is a client deliverable, not operator chrome. Its design is
+  specified in [PDF export document](#pdf-export-document) below (approved
+  2026-09-16, superseding the earlier "Georgia 12pt, keep it as-is" note).
+
+---
+
+## PDF export document *(approved 2026-09-16)*
+
+Visual reference: [`mockups/key-pdf-export.html`](mockups/key-pdf-export.html)
+(three A4 sheets; source canvas `https://claude.ai/artifact/U3NiPyGRnNVqSfAQZVFi9S`).
+Starting point: `dev-docs/report_astrology_base_Template.png`, adopted for its
+**style only**. Every block on the page is backed by data the Report already
+holds; nothing in the PDF is invented or decorative copy. In the mockup the
+client name, birth data and all Section prose are **sample content** for
+layout. The wheel and placements are real Kerykeion output for that sample
+birth data.
+
+### Style
+
+| Element | Value |
+|---|---|
+| Page | A4, 794×1123 css px at 96 px/in; ground `#F7F4EF` edge to edge; content inset 48px left/right, 40–48px top |
+| Card | `#FFFDFA` fill, 1px `#E6DED4` border, 12px radius, 22–28px padding, 16–20px gap between cards; no shadows |
+| Display face | Cormorant Garamond 500 (italic 500 for the client line), fallback Georgia, "Times New Roman", serif |
+| Text face | Jost 400/500, fallback "Century Gothic", Futura, sans-serif |
+| Card label | Jost 500, 12px, uppercase, letter-spacing 0.16em, `#3A3430` |
+| Body prose | Jost 16px (12pt floor), line-height 1.55, `#4A433D`, `text-wrap: pretty`, hyphenation on |
+| Ink | headings `#221E1B`, primary `#2B2724`, secondary `#6E665F`, caption `#857C74` |
+| Accent | copper `#A77B57`, used for icons, the client line, timeline dots and month abbreviations; timeline rule `#D9CBBB` |
+| Icons | inline SVG line icons, stroke `#A77B57`, 1–1.3px stroke width, no fills, no emoji |
+| Running footer | 1px `#E6DED4` rule; left *«Nome cliente · Mese AAAA»*, right *«N / M»*; Jost 12px `#857C74` |
+
+### Pages and data
+
+**Page 1 · Apertura**
+
+| Block | Content | Source |
+|---|---|---|
+| Header, left | kicker *Report astrologico mensile*; title = report month (*Ottobre 2026*, 60px display); *per {nome}* (26px italic, copper); one fixed line *«Una lettura del mese costruita sul tuo tema natale e sui transiti del periodo.»* | `ReportRun.month`, `Client.name` |
+| Header, right: *Dati di nascita* card (248px) | Data di nascita (*21 marzo 1990*), Ora di nascita (*10:30*), Luogo di nascita | `Client.birth_date`, `birth_time`, `birthplace_name` (row omitted when `NULL`) |
+| *Le tue posizioni* card (210px column) | Sole and Luna: sign + degree/minute + house (*0° 30′ · Casa 10*); Ascendente: sign + degree/minute | the run's natal chart (`ReportRun.natal_chart_id`), not the Client's current chart |
+| *Il tuo tema natale* card | Kerykeion wheel, ~350px | same chart, rendered as in the Tema tab |
+| *Energia generale* card (full width, icon at left) | Section 1 prose | `render_draft()["energia_generale"]` |
+
+**Page 2 · Aree del mese.** *Amore*, *Lavoro*, *Denaro* and *Benessere* each get
+one **full-width** card, stacked one per row (not a 2×2 grid). Each card has an
+icon and label header over continuous prose. Source: Sections 2–5. A small kicker
+*Report astrologico · {Mese AAAA}* heads each continuation page.
+
+**Page 3 · Giorni e consiglio**
+
+| Block | Content | Source |
+|---|---|---|
+| *Giorni favorevoli* / *Giorni di attenzione* cards (two columns) | vertical timeline: dot + day number (26px display) + month abbreviation (*OTT*, copper) + caption prose; a date with no citing sentence shows the date alone | Sections 6–7 list items (`date`, `text`) |
+| *Consiglio finale* card (full width) | large star icon; label; prose in the display face at 20px | Section 8 |
+
+### Mapping from the reference template
+
+- *Chart summary* → *Energia generale*
+- *Next 3 years outlook* timeline → the two day lists
+- *Final guidance* → *Consiglio finale*
+
+**Dropped because there is no data behind them:** tagline, personality analysis,
+career/money sub-items, health sub-items, best fields, key planets, lucky
+factors, challenges, affirmation, and the closing slogan pill.
+
+### Rules
+
+- **Pagination flows.** The three sheets show intent, not fixed breaks. Prose
+  length varies per client, so cards never split (`break-inside: avoid`) and
+  content flows onto the next page. The running footer and page count repeat on
+  every page (WeasyPrint `@page` margin boxes).
+- **Section order stays AD-6's order** (1 → 8), even though the cards are grouped
+  across pages.
+- **Italian dates.** Header dates use the spelled-out month (*21 marzo 1990*),
+  day-list dates use the split day + abbreviation, and times use `HH:mm`.
+- **Still excluded:** Payload, Gate result, run identifier, citations
+  (`entry_ids`) and any internal metadata.
+- **Changes an implementation must carry**, relative to Story 6.2's original
+  boundary:
+  1. The PDF now includes the natal wheel and the Sun/Moon/Ascendant
+     placements.
+  2. The day-list date presentation changes from `dd/mm/yyyy`.
+  3. The fonts must be bundled locally for WeasyPrint (both faces are OFL;
+     WeasyPrint makes no network fetch).
+  4. The Kerykeion SVG styles itself with CSS custom properties, so it must be
+     verified in WeasyPrint. If the variables don't resolve, inline the
+     resolved colours or rasterize the wheel.
 
 ---
 

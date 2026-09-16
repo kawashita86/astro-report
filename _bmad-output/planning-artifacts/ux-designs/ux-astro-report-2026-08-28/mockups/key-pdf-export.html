@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>astro-report — PDF export (approved 2026-09-16)</title>
+<!--
+ Approved design for the client-facing PDF export (shell/http/templates/report_export.html).
+ Spine: EXPERIENCE.md → "PDF export document". Three A4 pages at 96px/in (794×1123).
+ Client name, birth data and all section prose are SAMPLE content for layout only;
+ the natal wheel/placements are real Kerykeion output for the sample birth data
+ (Roma, 21/03/1990 10:30). Source canvas: https://claude.ai/artifact/U3NiPyGRnNVqSfAQZVFi9S
+-->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&amp;family=Jost:wght@400;500&amp;display=swap">
+  <style>
+    body { margin: 0; background: #F7F4EF; color: #2B2724; font-family: "Jost", "Century Gothic", Futura, sans-serif; }
+    a { color: #9A6F4C; } a:hover { color: #7A5436; }
+    .label { font-size: 12px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #3A3430; margin: 0; }
+    .prose { font-size: 16px; line-height: 1.55; color: #4A433D; margin: 0; text-wrap: pretty; hyphens: auto; }
+    .serif { font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif; }
+  </style>
+<style>
+  html { background: #3a3632; }
+  body { background: #3a3632 !important; padding: 32px 0; }
+  .sheet { width: 794px; margin: 0 auto 32px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+</style>
+</head>
+<body>
+<div class="sheet">
+<div style="width: 794px; height: 1123px; box-sizing: border-box; padding: 48px 48px 0; background: #F7F4EF; position: relative; display: flex; flex-direction: column; gap: 20px;">
+
+  <!-- Intestazione -->
+  <div style="display: flex; gap: 32px; align-items: flex-start; justify-content: space-between;">
+    <div style="display: flex; flex-direction: column; gap: 10px; padding-top: 6px; flex: 1;">
+      <p class="label" style="color: #6E665F;">Report astrologico mensile</p>
+      <h1 class="serif" style="font-size: 60px; line-height: 1.02; font-weight: 500; margin: 6px 0 0; color: #221E1B; letter-spacing: -0.01em;">Ottobre 2026</h1>
+      <p class="serif" style="font-size: 26px; font-style: italic; font-weight: 500; color: #A77B57; margin: 0;">per Giulia Rossi</p>
+      <p class="prose" style="max-width: 340px; margin-top: 8px; color: #6E665F;">Una lettura del mese costruita sul tuo tema natale e sui transiti del periodo.</p>
+    </div>
+
+    <div style="width: 248px; flex: none; box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 24px; display: flex; flex-direction: column; gap: 16px;">
+      <p class="label">Dati di nascita</p>
+      <div style="display: flex; gap: 14px; align-items: flex-start;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px;"><rect x="3.5" y="5" width="17" height="15" rx="2"></rect><path d="M3.5 9.5h17M8 3v4M16 3v4"></path><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"></path></svg>
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: 12px; color: #857C74;">Data di nascita</span>
+          <span style="font-size: 16px; color: #2B2724;">21 marzo 1990</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 14px; align-items: flex-start;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px;"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: 12px; color: #857C74;">Ora di nascita</span>
+          <span style="font-size: 16px; color: #2B2724;">10:30</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 14px; align-items: flex-start;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px;"><path d="M12 21s-6.5-6.2-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 14.8 12 21 12 21z"></path><circle cx="12" cy="9.8" r="2.3"></circle></svg>
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: 12px; color: #857C74;">Luogo di nascita</span>
+          <span style="font-size: 16px; color: #2B2724;">Roma, Lazio, Italia</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Posizioni principali + ruota -->
+  <div style="display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px;">
+    <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 22px; display: flex; flex-direction: column; gap: 26px;">
+      <p class="label">Le tue posizioni</p>
+      <div style="display: flex; gap: 16px; align-items: center;">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.2" stroke-linecap="round" style="flex: none;"><circle cx="20" cy="20" r="7.5"></circle><path d="M20 4v5M20 31v5M4 20h5M31 20h5M8.7 8.7l3.5 3.5M27.8 27.8l3.5 3.5M8.7 31.3l3.5-3.5M27.8 12.2l3.5-3.5"></path></svg>
+        <div style="display: flex; flex-direction: column; gap: 1px;">
+          <span style="font-size: 12px; color: #857C74;">Sole</span>
+          <span class="serif" style="font-size: 24px; font-weight: 500; line-height: 1.1; color: #221E1B;">Ariete</span>
+          <span style="font-size: 13px; color: #6E665F;">0° 30′ · Casa 10</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 16px; align-items: center;">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><path d="M25.5 6.5a14 14 0 1 0 8 19.5A12 12 0 0 1 25.5 6.5z"></path></svg>
+        <div style="display: flex; flex-direction: column; gap: 1px;">
+          <span style="font-size: 12px; color: #857C74;">Luna</span>
+          <span class="serif" style="font-size: 24px; font-weight: 500; line-height: 1.1; color: #221E1B;">Capricorno</span>
+          <span style="font-size: 13px; color: #6E665F;">20° 55′ · Casa 8</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 16px; align-items: center;">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><path d="M5 27h30"></path><path d="M11 27a9 9 0 0 1 18 0"></path><path d="M20 6v11M16 10l4-4 4 4"></path></svg>
+        <div style="display: flex; flex-direction: column; gap: 1px;">
+          <span style="font-size: 12px; color: #857C74;">Ascendente</span>
+          <span class="serif" style="font-size: 24px; font-weight: 500; line-height: 1.1; color: #221E1B;">Gemelli</span>
+          <span style="font-size: 13px; color: #6E665F;">26° 47′</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 24px 18px; display: flex; flex-direction: column; gap: 10px;">
+      <p class="label">Il tuo tema natale</p>
+      <div style="display: flex; justify-content: center;">
+        <img src="key-pdf-export-wheel.svg" alt="Ruota del tema natale" style="width: 350px; height: 350px; display: block;">
+      </div>
+    </div>
+  </div>
+
+  <!-- 1 · Energia generale -->
+  <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 24px 28px 26px; display: flex; gap: 22px; align-items: flex-start;">
+    <svg width="34" height="34" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.2" stroke-linejoin="round" style="flex: none; margin-top: 2px;"><path d="M20 3c1.2 8.6 4.4 11.8 13 13-8.6 1.2-11.8 4.4-13 13-1.2-8.6-4.4-11.8-13-13 8.6-1.2 11.8-4.4 13-13z"></path><path d="M32 27c.4 2.8 1.4 3.8 4.2 4.2-2.8.4-3.8 1.4-4.2 4.2-.4-2.8-1.4-3.8-4.2-4.2 2.8-.4 3.8-1.4 4.2-4.2z"></path></svg>
+    <div style="display: flex; flex-direction: column; gap: 10px; flex: 1;">
+      <p class="label">Energia generale</p>
+      <p class="prose">Ottobre si apre con un clima che chiede ordine prima dello slancio. Dal 6 ottobre Marte attraversa la tua decima casa e porta l’attenzione sugli obiettivi che hai lasciato in sospeso. La Luna Nuova del 10 ottobre cade nella tua quinta casa e rimette al centro ciò che ti dà piacere. Nella seconda metà del mese il ritmo rallenta: è un tempo buono per verificare, più che per iniziare. Porta con te questa domanda nelle pagine che seguono: che cosa merita davvero la tua energia?</p>
+    </div>
+  </div>
+
+  <!-- Piè di pagina -->
+  <div style="position: absolute; left: 48px; right: 48px; bottom: 26px; display: flex; justify-content: space-between; border-top: 1px solid #E6DED4; padding-top: 10px; font-size: 12px; color: #857C74; letter-spacing: 0.04em;">
+    <span>Giulia Rossi · Ottobre 2026</span>
+    <span>1 / 3</span>
+  </div>
+</div>
+</div>
+<div class="sheet">
+<div style="width: 794px; height: 1123px; box-sizing: border-box; padding: 40px 48px 0; background: #F7F4EF; position: relative; display: flex; flex-direction: column; gap: 18px;">
+  <p class="label" style="color: #857C74; font-size: 11px;">Report astrologico · Ottobre 2026</p>
+  <div style="display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 16px;">
+    <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 24px 24px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <svg width="28" height="28" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><path d="M20 33S6 24.5 6 15a7.5 7.5 0 0 1 14-3.7A7.5 7.5 0 0 1 34 15c0 9.5-14 18-14 18z"></path></svg>
+        <p class="label">Amore</p>
+      </div>
+      <p class="prose">Venere entra nel tuo quinto campo il 4 ottobre e rende più semplice esprimere ciò che desideri. È un momento adatto per un incontro sincero o per un chiarimento atteso da tempo. Il 17 ottobre Marte forma una quadratura con la tua Venere natale: il desiderio cresce, ma anche l’impazienza. Dai spazio all’ascolto prima di chiedere una risposta.</p>
+    </div>
+    <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 24px 24px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <svg width="28" height="28" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><rect x="5" y="12" width="30" height="21" rx="2.5"></rect><path d="M15 12V9a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v3M5 20h30M18 20v3h4v-3"></path></svg>
+        <p class="label">Lavoro</p>
+      </div>
+      <p class="prose">Con Marte nella tua decima casa dal 6 ottobre, la direzione professionale torna al centro. La concentrazione è alta nella prima metà del mese. Il 14 ottobre Mercurio in trigono al tuo Saturno natale favorisce accordi chiari e scadenze realistiche. Dopo il 20 ottobre conviene rivedere i dettagli di un contratto prima di firmarlo.</p>
+    </div>
+    <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 24px 24px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <svg width="28" height="28" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><circle cx="20" cy="20" r="14"></circle><path d="M24.5 14.5c-1-1.3-2.6-2-4.5-2-2.6 0-4.5 1.4-4.5 3.4 0 4.6 9 2.6 9 7.2 0 2-1.9 3.4-4.5 3.4-1.9 0-3.6-.7-4.6-2M20 10v3M20 27v3"></path></svg>
+        <p class="label">Denaro</p>
+      </div>
+      <p class="prose">Il mese chiede equilibrio tra opportunità e prudenza. Il 9 ottobre Giove forma un sestile con il tuo Saturno natale e sostiene una spesa pianificata con cura. La Luna Piena del 26 ottobre illumina la tua seconda casa: è il momento di fare il punto sulle entrate e sulle uscite del mese. Rimanda gli acquisti d’impulso.</p>
+    </div>
+    <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 24px 24px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <svg width="28" height="28" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><path d="M20 33c-7-3-11-9-11-17 6 0 9.5 2.5 11 6 1.5-3.5 5-6 11-6 0 8-4 14-11 17z"></path><path d="M20 33V22"></path></svg>
+        <p class="label">Benessere</p>
+      </div>
+      <p class="prose">Il tuo ritmo chiede pause regolari, soprattutto nella seconda metà del mese. Il 12 ottobre la Luna attraversa la tua sesta casa e invita a sistemare le abitudini quotidiane. Il 22 ottobre Saturno riprende il moto diretto: la tensione accumulata trova una via d’uscita più lenta e stabile. Proteggi il sonno e le ore di recupero.</p>
+    </div>
+  </div>
+  <div style="position: absolute; left: 48px; right: 48px; bottom: 26px; display: flex; justify-content: space-between; border-top: 1px solid #E6DED4; padding-top: 10px; font-size: 12px; color: #857C74; letter-spacing: 0.04em;">
+    <span>Giulia Rossi · Ottobre 2026</span>
+    <span>2 / 3</span>
+  </div>
+</div>
+</div>
+<div class="sheet">
+<div style="width: 794px; height: 1123px; box-sizing: border-box; padding: 40px 48px 0; background: #F7F4EF; position: relative; display: flex; flex-direction: column; gap: 18px;">
+  <p class="label" style="color: #857C74; font-size: 11px;">Report astrologico · Ottobre 2026</p>
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start;">
+    <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 22px 12px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <svg width="28" height="28" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><circle cx="20" cy="20" r="6.5"></circle><path d="M20 5v5M20 30v5M5 20h5M30 20h5M9.4 9.4l3.5 3.5M27.1 27.1l3.5 3.5M9.4 30.6l3.5-3.5M27.1 12.9l3.5-3.5"></path></svg>
+        <p class="label">Giorni favorevoli</p>
+      </div>
+      <div style="display: flex; flex-direction: column;">
+        <div style="position: relative; display: flex; gap: 16px; padding-bottom: 14px;">
+          <div style="position: absolute; left: 5px; top: 14px; bottom: -5px; width: 1px; background: #D9CBBB;"></div>
+          <div style="width: 11px; height: 11px; border: 1.3px solid #A77B57; border-radius: 50%; background: #FFFDFA; flex: none; margin-top: 5px; position: relative;"></div>
+          <div style="width: 44px; flex: none; display: flex; flex-direction: column; align-items: flex-start;">
+            <span class="serif" style="font-size: 26px; font-weight: 600; line-height: 1; color: #221E1B;">4</span>
+            <span style="font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #A77B57; margin-top: 2px;">Ott</span>
+          </div>
+          <p class="prose" style="flex: 1;">Venere nel quinto campo apre la porta a una proposta o a un incontro.</p>
+        </div>
+        <div style="position: relative; display: flex; gap: 16px; padding-bottom: 14px;">
+          <div style="position: absolute; left: 5px; top: 14px; bottom: -5px; width: 1px; background: #D9CBBB;"></div>
+          <div style="width: 11px; height: 11px; border: 1.3px solid #A77B57; border-radius: 50%; background: #FFFDFA; flex: none; margin-top: 5px; position: relative;"></div>
+          <div style="width: 44px; flex: none; display: flex; flex-direction: column; align-items: flex-start;">
+            <span class="serif" style="font-size: 26px; font-weight: 600; line-height: 1; color: #221E1B;">9</span>
+            <span style="font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #A77B57; margin-top: 2px;">Ott</span>
+          </div>
+          <p class="prose" style="flex: 1;">Giove sostiene le decisioni economiche prese con metodo.</p>
+        </div>
+        <div style="position: relative; display: flex; gap: 16px; padding-bottom: 14px;">
+          <div style="position: absolute; left: 5px; top: 14px; bottom: -5px; width: 1px; background: #D9CBBB;"></div>
+          <div style="width: 11px; height: 11px; border: 1.3px solid #A77B57; border-radius: 50%; background: #FFFDFA; flex: none; margin-top: 5px; position: relative;"></div>
+          <div style="width: 44px; flex: none; display: flex; flex-direction: column; align-items: flex-start;">
+            <span class="serif" style="font-size: 26px; font-weight: 600; line-height: 1; color: #221E1B;">14</span>
+            <span style="font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #A77B57; margin-top: 2px;">Ott</span>
+          </div>
+          <p class="prose" style="flex: 1;">Buona giornata per un colloquio o per definire un accordo di lavoro.</p>
+        </div>
+        <div style="position: relative; display: flex; gap: 16px; padding-bottom: 14px;">
+          
+          <div style="width: 11px; height: 11px; border: 1.3px solid #A77B57; border-radius: 50%; background: #FFFDFA; flex: none; margin-top: 5px; position: relative;"></div>
+          <div style="width: 44px; flex: none; display: flex; flex-direction: column; align-items: flex-start;">
+            <span class="serif" style="font-size: 26px; font-weight: 600; line-height: 1; color: #221E1B;">26</span>
+            <span style="font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #A77B57; margin-top: 2px;">Ott</span>
+          </div>
+          <p class="prose" style="flex: 1;">La Luna Piena aiuta a chiudere un conto in sospeso con chiarezza.</p>
+        </div>
+      </div>
+    </div>
+    <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 22px 22px 12px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <svg width="28" height="28" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><path d="M20 6L35 32H5z"></path><path d="M20 15v8M20 27.5v.5"></path></svg>
+        <p class="label">Giorni di attenzione</p>
+      </div>
+      <div style="display: flex; flex-direction: column;">
+        <div style="position: relative; display: flex; gap: 16px; padding-bottom: 14px;">
+          <div style="position: absolute; left: 5px; top: 14px; bottom: -5px; width: 1px; background: #D9CBBB;"></div>
+          <div style="width: 11px; height: 11px; border: 1.3px solid #A77B57; border-radius: 50%; background: #FFFDFA; flex: none; margin-top: 5px; position: relative;"></div>
+          <div style="width: 44px; flex: none; display: flex; flex-direction: column; align-items: flex-start;">
+            <span class="serif" style="font-size: 26px; font-weight: 600; line-height: 1; color: #221E1B;">6</span>
+            <span style="font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #A77B57; margin-top: 2px;">Ott</span>
+          </div>
+          <p class="prose" style="flex: 1;">Marte cambia casa: evita di rispondere d’impulso a una richiesta.</p>
+        </div>
+        <div style="position: relative; display: flex; gap: 16px; padding-bottom: 14px;">
+          <div style="position: absolute; left: 5px; top: 14px; bottom: -5px; width: 1px; background: #D9CBBB;"></div>
+          <div style="width: 11px; height: 11px; border: 1.3px solid #A77B57; border-radius: 50%; background: #FFFDFA; flex: none; margin-top: 5px; position: relative;"></div>
+          <div style="width: 44px; flex: none; display: flex; flex-direction: column; align-items: flex-start;">
+            <span class="serif" style="font-size: 26px; font-weight: 600; line-height: 1; color: #221E1B;">17</span>
+            <span style="font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #A77B57; margin-top: 2px;">Ott</span>
+          </div>
+          <p class="prose" style="flex: 1;">Una tensione tra Marte e Venere chiede parole scelte con cura.</p>
+        </div>
+        <div style="position: relative; display: flex; gap: 16px; padding-bottom: 14px;">
+          
+          <div style="width: 11px; height: 11px; border: 1.3px solid #A77B57; border-radius: 50%; background: #FFFDFA; flex: none; margin-top: 5px; position: relative;"></div>
+          <div style="width: 44px; flex: none; display: flex; flex-direction: column; align-items: flex-start;">
+            <span class="serif" style="font-size: 26px; font-weight: 600; line-height: 1; color: #221E1B;">20</span>
+            <span style="font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #A77B57; margin-top: 2px;">Ott</span>
+          </div>
+          <p class="prose" style="flex: 1;">Rileggi i dettagli prima di firmare o di inviare un messaggio importante.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="box-sizing: border-box; background: #FFFDFA; border: 1px solid #E6DED4; border-radius: 12px; padding: 28px 32px 30px; display: flex; gap: 26px; align-items: flex-start;">
+    <svg width="54" height="54" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1" stroke-linejoin="round" style="flex: none;"><path d="M20 2c1.1 10.4 5.6 16.3 16 18-10.4 1.7-14.9 7.6-16 18-1.1-10.4-5.6-16.3-16-18 10.4-1.7 14.9-7.6 16-18z"></path></svg>
+    <div style="display: flex; flex-direction: column; gap: 12px; flex: 1;">
+      <p class="label">Consiglio finale</p>
+      <p class="serif" style="font-size: 20px; line-height: 1.5; color: #3A3430; margin: 0; text-wrap: pretty;">Questo mese ti chiede di scegliere dove mettere la tua energia. Usa la spinta di Marte del 6 ottobre per un obiettivo preciso, non per dieci. Lascia che la Luna Piena del 26 ottobre ti aiuti a chiudere ciò che è rimasto aperto. Procedi con calma: la direzione conta più della velocità.</p>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 48px; right: 48px; bottom: 26px; display: flex; justify-content: space-between; border-top: 1px solid #E6DED4; padding-top: 10px; font-size: 12px; color: #857C74; letter-spacing: 0.04em;">
+    <span>Giulia Rossi · Ottobre 2026</span>
+    <span>3 / 3</span>
+  </div>
+</div>
+</div>
+</body>
+</html>
