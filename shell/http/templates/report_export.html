@@ -55,7 +55,17 @@
 
       @page {
         size: A4;
-        margin: 48px 48px 90px 48px;
+        margin: 48px 48px 64px 48px;
+        /* `body`'s own background never reaches the page's margin area (only
+           its content box) -- CSS Paged Media paints the margin area from
+           the page box's own background, which defaults to plain white, so
+           without this the 48px/64px margins around every page render as a
+           visible white border around the cream page instead of an
+           edge-to-edge wash of it (verified empirically against a
+           rasterized PDF page: `html { background }` alone doesn't reach
+           the margin area either under WeasyPrint 69 -- only `@page
+           { background }` does). */
+        background: #f7f4ef;
         /* The footer rule is drawn as each margin box's own `border-top`,
            not a separate rule element: giving @bottom-left/@bottom-right an
            explicit 50% width each (rather than leaving them auto-width,
@@ -318,13 +328,13 @@
         gap: 16px;
         align-items: start;
         margin-bottom: 16px;
-        break-inside: avoid;
       }
       .day-list-card {
         padding: 22px 22px 12px;
         display: flex;
         flex-direction: column;
         gap: 16px;
+        break-inside: auto;
       }
       .day-list-card-header {
         display: flex;
@@ -336,6 +346,7 @@
         display: flex;
         gap: 16px;
         padding-bottom: 14px;
+        break-inside: avoid;
       }
       .timeline-item::before {
         content: "";

@@ -193,6 +193,71 @@ _WHEEL_COLORS_SETTINGS = _literal_wheel_colors_settings()
 _WHEEL_CELESTIAL_POINTS_SETTINGS = _literal_wheel_celestial_points_settings()
 _WHEEL_ASPECTS_SETTINGS = _literal_wheel_aspects_settings()
 
+#: ``colors_settings``/``celestial_points_settings``/``aspects_settings``
+#: (above) only reach the *dynamically generated* fragments of Kerykeion's
+#: SVG (the wheel ring, the placed planet glyphs, the drawn aspect lines --
+#: each built by Python string-formatting one of those dicts' values in
+#: directly). ``kerykeion/charts/templates/wheel_only.xml`` -- the *static*
+#: template Kerykeion fills in around those fragments -- separately
+#: hardcodes `style="...var(--kerykeion-chart-color-<name>)..."` on ~80
+#: fixed-star/asteroid/house-angle/aspect-type elements regardless of any
+#: settings passed to ``ChartDrawer``; those variables are only ever
+#: *defined* by an opt-in CSS theme file (``theme=`` -- this module never
+#: sets one), and even when defined, WeasyPrint 69 does not resolve
+#: `var()` inside an inlined SVG at all (verified empirically: every such
+#: declaration logs `WARNING:weasyprint: Ignored ... unknown property`
+#: and the property is dropped, not substituted) -- verified harmless to
+#: the visible wheel today (``generate_wheel_only_svg_string()``'s tight
+#: viewBox crops every one of these elements out of frame), but still
+#: worth resolving to a literal color: it silences the several-hundred-line
+#: warning spam this otherwise produces per PDF (reported against the
+#: Docker deployment), and it means a future viewBox or template change
+#: can never silently reintroduce invisible-by-luck unstyled elements.
+_WHEEL_CSS_VAR_RE = re.compile(r"var\(--kerykeion-chart-color-([a-z0-9_-]+)\)")
+
+#: Every aspect name Kerykeion's static template hardcodes a color variable
+#: for (``kerykeion.settings.chart_defaults.DEFAULT_CHART_ASPECTS_SETTINGS``'s
+#: full set, not just this project's five active ones -- the template's
+#: markup for every aspect *type* is unconditional, only which aspects
+#: actually get drawn is conditional).
+_WHEEL_ASPECT_VAR_NAMES = frozenset(
+    {
+        "conjunction",
+        "semi-sextile",
+        "semi-square",
+        "sextile",
+        "quintile",
+        "square",
+        "trine",
+        "sesquiquadrate",
+        "biquintile",
+        "quincunx",
+        "opposition",
+    }
+)
+
+
+def _resolve_wheel_svg_css_vars(svg: str) -> str:
+    """Every remaining ``var(--kerykeion-chart-color-<name>)`` in ``svg``,
+    replaced by a literal color from this design's copper/ink/card palette
+    -- see ``_WHEEL_CSS_VAR_RE``'s comment for why any remain after the
+    settings-dict overrides above. Aspect-type names go copper (matching
+    ``_literal_wheel_aspects_settings()``'s own choice for the aspects this
+    project actually draws); every other name (planets, fixed stars,
+    asteroids, house angles, paper/background) goes ink or card, mirroring
+    ``_literal_wheel_colors_settings()``/``_literal_wheel_celestial_points_settings()``'s
+    own choices for their nearest counterpart."""
+
+    def _replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name in _WHEEL_ASPECT_VAR_NAMES:
+            return _WHEEL_COPPER
+        if name.startswith("paper"):
+            return _WHEEL_CARD
+        return _WHEEL_INK
+
+    return _WHEEL_CSS_VAR_RE.sub(_replace, svg)
+
 
 def _build_wheel_svg(client: Client, chart: StoredNatalChart, orb: Decimal) -> str:
     """The run's own natal chart (``chart``, resolved from
@@ -215,13 +280,14 @@ def _build_wheel_svg(client: Client, chart: StoredNatalChart, orb: Decimal) -> s
     chart_data = ChartDataFactory.create_natal_chart_data(
         subject, active_aspects=chart_wheel.active_aspects(orb)
     )
-    return ChartDrawer(
+    svg = ChartDrawer(
         chart_data,
         transparent_background=True,
         colors_settings=_WHEEL_COLORS_SETTINGS,
         celestial_points_settings=_WHEEL_CELESTIAL_POINTS_SETTINGS,
         aspects_settings=_WHEEL_ASPECTS_SETTINGS,
     ).generate_wheel_only_svg_string()
+    return _resolve_wheel_svg_css_vars(svg)
 
 
 #: "YYYY-MM", zero-padded -- the one shape ``shell/runner/month.py``'s
