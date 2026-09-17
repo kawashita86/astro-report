@@ -317,7 +317,7 @@ def test_natal_chart_id_is_unaffected_by_a_later_regeneration_rewind_to_payload_
     session.add(run)
     session.commit()
 
-    generator = _FakeGenerator(_a_violating_generated_draft())
+    generator = _FakeGenerator(_a_two_violation_generated_draft())
     # One poll per stage up to draft_ready (natal, transits, payload, draft).
     for _ in range(4):
         _advance(session, run, natal_chart, generator=generator, natal_chart_id=_NATAL_CHART_ID)
@@ -943,6 +943,28 @@ def _a_violating_generated_draft() -> GeneratedDraft:
     )
 
 
+def _a_two_violation_generated_draft() -> GeneratedDraft:
+    """A draft containing exactly two Claims that cite nothing -- ``"Marte"``
+    in ``energia_generale`` and ``"Venere"`` in ``amore`` (both
+    closed-vocabulary planet tokens, ``core/gate/vocabulary.it.json``) --
+    exactly at ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` (correct-course,
+    2026-09-17): ``run_gate()`` flags two ``"empty_citation"`` violations, so
+    today's rewind-and-regenerate behavior still applies (the boundary
+    case). Used wherever a test needs a violating draft that keeps
+    exercising the pre-existing regeneration mechanics rather than the new
+    low-violation short-circuit."""
+    return GeneratedDraft(
+        energia_generale=(Sentence(text="Marte è forte questo mese.", entry_ids=()),),
+        amore=(Sentence(text="Venere porta armonia.", entry_ids=()),),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+
+
 def test_gate_passed_advances_on_a_clean_draft_and_persists_a_report_row(
     session: Session,
 ) -> None:
@@ -1005,7 +1027,7 @@ def test_gate_passed_rewinds_to_payload_ready_and_regenerates_on_the_next_poll(
     session.add(run)
     session.commit()
 
-    generator = _FakeGenerator(_a_violating_generated_draft())
+    generator = _FakeGenerator(_a_two_violation_generated_draft())
     # natal, transits, payload, draft -- one poll each.
     for _ in range(4):
         _advance(session, run, natal_chart, generator=generator)
@@ -1144,7 +1166,7 @@ def test_a_failing_gate_passed_stage_runs_exactly_once_per_poll(
 
     monkeypatch.setitem(_STAGE_FUNCTIONS, "gate_passed", _counting_gate_passed)
 
-    generator = _FakeGenerator(_a_violating_generated_draft())
+    generator = _FakeGenerator(_a_two_violation_generated_draft())
     # natal, transits, payload, draft -- one poll each.
     for _ in range(4):
         _advance(session, run, natal_chart, generator=generator)
@@ -1181,7 +1203,7 @@ def test_gate_passed_regenerates_and_advances_once_a_later_attempt_passes(
 
         def generate(self, payload, style_guide, theme_previous, theme_current):
             self.calls += 1
-            return _a_violating_generated_draft() if self.calls == 1 else _a_generated_draft()
+            return _a_two_violation_generated_draft() if self.calls == 1 else _a_generated_draft()
 
     generator = _ViolatesOnceThenCleanGenerator()
 
@@ -1242,7 +1264,7 @@ def test_gate_passed_exhausting_the_regeneration_bound_marks_the_run_terminally_
     session.add(run)
     session.commit()
 
-    generator = _FakeGenerator(_a_violating_generated_draft())
+    generator = _FakeGenerator(_a_two_violation_generated_draft())
 
     # natal, transits, payload, draft -- one poll each.
     for _ in range(4):
@@ -1287,6 +1309,162 @@ def test_gate_passed_exhausting_the_regeneration_bound_marks_the_run_terminally_
         range(driver_module._MAX_REGENERATIONS + 1)
     )
     assert all(row.passed is False for row in stored_gate_results)
+
+
+# --- sprint-change-proposal-2026-09-17 (correct-course): a low-violation ------------
+# --- GateFailedError skips automatic regeneration, failing the run immediately -----
+
+
+def test_gate_passed_below_the_min_violations_threshold_fails_immediately_without_regenerating(
+    session: Session,
+) -> None:
+    """I/O & Edge-Case Matrix "Below threshold" row: a ``GateFailedError``
+    naming fewer than ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` violations
+    (here, 1 -- ``_a_violating_generated_draft()``'s single
+    ``"Marte"``/``empty_citation`` Claim) is not worth a paid regeneration --
+    ``run.failed_at`` is set on that same check, ``run.stage`` is left
+    un-rewound (still ``draft_ready``), and ``run.regeneration_count`` stays
+    0, so Francesco reaches the existing Gate-failure review surface
+    (Stories 5.7/5.8) immediately instead of after burning a Generator
+    call."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+    # natal, transits, payload, draft -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+
+    # This poll runs gate_passed, which fails with only 1 violation --
+    # below the threshold, so it fails terminally instead of rewinding.
+    result = _advance(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready", "must not rewind to payload_ready"
+    assert result.regeneration_count == 0
+    assert result.failed_at is not None
+    assert result.failure_reason is not None
+    assert "too few violations" in result.failure_reason
+
+    # Story 5.6: the failing check still gets its own gate_result row, at
+    # the pre-increment (unchanged) regeneration_count.
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 1
+    assert stored_gate_results[0].passed is False
+    assert stored_gate_results[0].regeneration_count == 0
+    assert len(stored_gate_results[0].violations) == 1
+
+    stored_reports = session.exec(select(Report).where(Report.report_run_id == run.id)).all()
+    assert stored_reports == []
+
+
+def test_gate_passed_at_the_min_violations_threshold_still_rewinds_and_regenerates(
+    session: Session,
+) -> None:
+    """I/O & Edge-Case Matrix "At threshold (boundary)" row: a
+    ``GateFailedError`` naming exactly ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION``
+    violations (here, 2 -- ``_a_two_violation_generated_draft()``) is NOT
+    skipped -- today's rewind-to-``payload_ready``/increment behavior
+    applies exactly as it did before this change."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator(_a_two_violation_generated_draft())
+    # natal, transits, payload, draft -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+
+    # This poll runs gate_passed, which fails with exactly 2 violations --
+    # at the threshold, so today's rewind behavior is unchanged.
+    result = _advance(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "payload_ready"
+    assert result.regeneration_count == 1
+    assert result.failed_at is None
+
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 1
+    assert stored_gate_results[0].passed is False
+    assert stored_gate_results[0].regeneration_count == 0
+    assert len(stored_gate_results[0].violations) == 2
+
+
+def test_gate_passed_low_violation_short_circuit_applies_after_a_prior_regeneration(
+    session: Session,
+) -> None:
+    """Architecture (AD-10, amended 2026-09-17, correct-course): the
+    low-violation short-circuit "applies on every failing check in the run's
+    current cycle, not only the first" -- explicitly singled out as
+    non-obvious. Drives a run through one full rewind-and-regenerate cycle
+    first (a 2-violation failure, at the threshold, so ``regeneration_count``
+    reaches 1 the ordinary way), then a *second* ``GateFailedError`` on that
+    same run comes back with only 1 violation. That second failure must
+    still short-circuit correctly: ``failed_at`` set, ``run.stage`` not
+    rewound a second time, and -- the detail this test exists to prove --
+    ``regeneration_count`` stays at its already-incremented value (1),
+    unchanged by this second failure rather than bumped to 2."""
+
+    class _TwoViolationsThenOneViolationGenerator:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, payload, style_guide, theme_previous, theme_current):
+            self.calls += 1
+            if self.calls == 1:
+                return _a_two_violation_generated_draft()
+            return _a_violating_generated_draft()
+
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _TwoViolationsThenOneViolationGenerator()
+
+    # natal, transits, payload, draft (2-violation) -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+
+    # This poll runs gate_passed: fails with 2 violations -- at the
+    # threshold, so today's rewind-and-increment behavior fires the
+    # ordinary way, exactly like the boundary test above.
+    first = _advance(session, run, natal_chart, generator=generator)
+    assert first.stage == "payload_ready", "fixture did not regenerate -- test is vacuous"
+    assert first.regeneration_count == 1
+    assert first.failed_at is None
+
+    # Poll: re-run draft_ready (attempt 1, now only 1 violation).
+    _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+
+    # This poll runs gate_passed again: fails with only 1 violation -- below
+    # the threshold, so it must short-circuit even though this run already
+    # regenerated once. `regeneration_count` must stay at 1, not bump to 2.
+    result = _advance(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "draft_ready", "must not rewind a second time"
+    assert result.regeneration_count == 1, "must not increment on the low-violation check"
+    assert result.failed_at is not None
+    assert result.failure_reason is not None
+    assert "too few violations" in result.failure_reason
+
+    stored_gate_results = session.exec(
+        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
+    ).all()
+    assert len(stored_gate_results) == 2
+    by_regeneration_count = {row.regeneration_count: row for row in stored_gate_results}
+    assert len(by_regeneration_count[0].violations) == 2, "the first, at-threshold failure"
+    assert len(by_regeneration_count[1].violations) == 1, "the second, below-threshold failure"
 
 
 # --- epic-5-retro-item-39: a partial flush inside gate_passed's two-write ------------
@@ -1371,7 +1549,7 @@ def test_gate_failed_error_path_survives_a_gate_result_flush_failure(
         # exception is caught.
         session.execute(text("SELECT * FROM this_table_does_not_exist"))
 
-    generator = _FakeGenerator(_a_violating_generated_draft())
+    generator = _FakeGenerator(_a_two_violation_generated_draft())
 
     # natal, transits, payload, draft -- one poll each.
     for _ in range(4):

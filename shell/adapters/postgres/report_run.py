@@ -99,9 +99,13 @@ class ReportRun(SQLModel, table=True):
     # rather than retried forever.
     stage_failure_count: int = Field(default=0)
     # Gate failures absorbed across the run's current regeneration cycle
-    # (Story 5.4) -- incremented on every `GateFailedError`, compared
-    # against `_MAX_REGENERATIONS` (`shell/runner/driver.py`) to decide
-    # when a run is terminally failed rather than regenerated forever.
+    # (Story 5.4) -- incremented on every `GateFailedError` that actually
+    # regenerates, compared against `_MAX_REGENERATIONS`
+    # (`shell/runner/driver.py`) to decide when a run is terminally failed
+    # rather than regenerated forever. Amended 2026-09-17, correct-course:
+    # NOT incremented when a `GateFailedError` names fewer than
+    # `_MIN_VIOLATIONS_FOR_AUTO_REGENERATION` violations -- that check fails
+    # the run immediately instead, spending no regeneration at all.
     # Never reset by a successful stage advance, unlike
     # `stage_failure_count` -- see that field's own comment above.
     #

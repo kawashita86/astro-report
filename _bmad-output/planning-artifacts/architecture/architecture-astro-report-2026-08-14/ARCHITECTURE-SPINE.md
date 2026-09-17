@@ -205,6 +205,12 @@ No arrow runs from `core` to `shell`. There is no exception.
   and a `REPORT` row produced by the third route records how many violations were accepted so it is
   never indistinguishable from a clean pass. Reaching `exported` happens once; each subsequent export
   writes an `EXPORT_RECORD` row rather than moving the stage.
+  **(Amended 2026-09-17, correct-course):** a `GateFailedError` whose violation count is below a
+  configured ceiling (`_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`, `shell/runner/driver.py`) never rewinds
+  to `payload_ready` at all — `run.failed_at` is set on that same failing check, and `regeneration_count`
+  is left untouched, exactly as the review-closed routes above leave it. This applies on every failing
+  check for the run's current cycle, not only the first — a regeneration in progress that happens to
+  converge to a single remaining violation is surfaced rather than spending its next attempt too.
 
 ### AD-11 — No durable state on the compute host's filesystem
 

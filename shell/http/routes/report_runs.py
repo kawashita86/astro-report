@@ -314,11 +314,13 @@ _DISPOSITION_VALUES = {value for value, _label in DISPOSITION_CHOICES}
 #: ``/regenerate``-superseded cycle. A real Gate check and the terminal
 #: ``failed_at`` it produces are written inside the same ``advance()`` call
 #: (``shell/runner/driver.py``'s ``except GateFailedError`` block writes the
-#: ``StoredGateResult`` row first, then sets ``failed_at`` once
-#: ``regeneration_count`` exceeds the bound) -- a sub-second gap, well inside
-#: this window; the absolute value admits that same sub-second gap when a
-#: caller instead constructs ``failed_at`` before the row (as this module's
-#: own tests do). A stale row is always separated from a *later* terminal
+#: ``StoredGateResult`` row first, then sets ``failed_at`` -- either once
+#: ``regeneration_count`` exceeds the bound, or, amended 2026-09-17
+#: correct-course, immediately when the failing check names fewer than
+#: ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` violations) -- a sub-second gap,
+#: well inside this window; the absolute value admits that same sub-second gap
+#: when a caller instead constructs ``failed_at`` before the row (as this
+#: module's own tests do). A stale row is always separated from a *later* terminal
 #: ``failed_at`` by well over this window: ``regenerate_report_run``'s ``303``
 #: redirects to ``/report-runs/{run_id}`` (``poll_report_run``), so the first
 #: ``advance()`` after a rewind fires immediately on that redirect's own page

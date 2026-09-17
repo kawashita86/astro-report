@@ -187,6 +187,15 @@ _MAX_STAGE_FAILURES = 5
 #: `max_attempts=3`.
 _MAX_REGENERATIONS = 3
 
+#: A `GateFailedError` naming fewer than this many violations is not worth
+#: spending a paid regeneration on (sprint-change-proposal-2026-09-17,
+#: correct-course, amending FR-21/AD-10): a single flagged sentence is
+#: routed straight to Francesco's existing review surface (Stories 5.7/5.8)
+#: instead of silently burning a `generator.generate()` call first. Plain,
+#: non-runtime-configurable module constant, mirroring `_MAX_REGENERATIONS`
+#: just above.
+_MIN_VIOLATIONS_FOR_AUTO_REGENERATION = 2
+
 #: A stage function's uniform signature: every registered stage receives the
 #: same context, whether or not it needs all of it, so the registry stays a
 #: plain ``{name: function}`` mapping rather than growing per-stage plumbing
@@ -791,18 +800,25 @@ def advance(
     separately from every other stage exception (Story 5.4): it persists a
     failing ``StoredGateResult`` row (Story 5.6, ``regeneration_count`` at
     its pre-increment value, ``error.violations``, ``vocabulary.version``)
-    before incrementing ``run.regeneration_count`` (never ``stage_failure_count``,
-    left untouched) and, while that count is at or below
-    :data:`_MAX_REGENERATIONS`, rewinds ``run.stage`` to ``payload_ready`` so
-    the *next* poll re-runs ``draft_ready`` -- a genuinely new
-    ``GeneratedDraft`` from the same stored Payload -- and then ``gate_passed``
-    again on the poll after that. Once ``run.regeneration_count`` exceeds
-    :data:`_MAX_REGENERATIONS`, ``run`` is marked terminally failed the same
-    way a :data:`_MAX_STAGE_FAILURES` exhaustion is, except ``run.stage`` is
-    left at ``draft_ready`` (never rewound) so the last, still-failing draft
-    stays reachable rather than discarded. Either branch commits and returns
-    immediately -- regeneration itself always happens on a subsequent poll,
-    never within the same call that caught the failure.
+    first. (Amended 2026-09-17, correct-course:) if ``error.violations``
+    names fewer than :data:`_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`, ``run``
+    is marked terminally failed immediately on that same check --
+    ``run.regeneration_count`` is left unchanged and ``run.stage`` is not
+    rewound -- routing straight to the existing review surface (Stories
+    5.7/5.8) instead of spending a paid regeneration on a single flagged
+    sentence. Otherwise, before incrementing ``run.regeneration_count``
+    (never ``stage_failure_count``, left untouched) and, while that count is
+    at or below :data:`_MAX_REGENERATIONS`, rewinds ``run.stage`` to
+    ``payload_ready`` so the *next* poll re-runs ``draft_ready`` -- a
+    genuinely new ``GeneratedDraft`` from the same stored Payload -- and then
+    ``gate_passed`` again on the poll after that. Once
+    ``run.regeneration_count`` exceeds :data:`_MAX_REGENERATIONS`, ``run`` is
+    marked terminally failed the same way a :data:`_MAX_STAGE_FAILURES`
+    exhaustion is, except ``run.stage`` is left at ``draft_ready`` (never
+    rewound) so the last, still-failing draft stays reachable rather than
+    discarded. Every branch commits and returns immediately -- regeneration
+    itself always happens on a subsequent poll, never within the same call
+    that caught the failure.
     """
     if run.failed_at is not None:
         return run
@@ -940,6 +956,21 @@ def advance(
                 "regeneration bookkeeping without it: %s",
                 run.id,
             )
+        if len(error.violations) < _MIN_VIOLATIONS_FOR_AUTO_REGENERATION:
+            run.updated_at = datetime.now(UTC)
+            run.failed_at = run.updated_at
+            run.failure_reason = (
+                f"too few violations ({len(error.violations)}) to warrant "
+                f"automatic regeneration: {error}"
+            )
+            _logger.error(
+                "report run marked terminally failed: too few violations to "
+                "warrant automatic regeneration: %s",
+                run.id,
+            )
+            session.add(run)
+            session.commit()
+            return run
         run.regeneration_count += 1
         run.updated_at = datetime.now(UTC)
         if run.regeneration_count <= _MAX_REGENERATIONS:

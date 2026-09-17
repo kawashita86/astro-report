@@ -162,7 +162,13 @@ class GateFailedError(RuntimeError):
     unverifiable. Raised from :mod:`shell.runner.driver`'s ``gate_passed``
     stage function, where ``drive()`` catches it in a dedicated
     ``except GateFailedError`` branch, separate from every other stage's
-    generic failure handling (Story 5.4): it increments
+    generic failure handling (Story 5.4). (Amended 2026-09-17,
+    correct-course:) if ``violations`` names fewer than
+    ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION``, the run is marked terminally
+    failed immediately on that same check -- ``run.regeneration_count`` is
+    left unchanged and ``run.stage`` is not rewound -- routing straight to
+    the existing review surface (Stories 5.7/5.8) instead of spending a paid
+    regeneration on a single flagged sentence. Otherwise it increments
     ``run.regeneration_count`` (never ``run.stage_failure_count``, which is
     left untouched) and, while that count is at or below
     ``_MAX_REGENERATIONS``, rewinds ``run.stage`` to ``payload_ready`` so the

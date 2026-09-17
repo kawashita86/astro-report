@@ -593,6 +593,8 @@ surfaced.
 
 **Consequences (testable):**
 - Regeneration is automatic and bounded.
+- A failing check naming too few violations to warrant spending a regeneration on (a configured
+  ceiling) skips automatic regeneration entirely and is surfaced immediately instead.
 - On persistent failure Francesco is shown the Report, the failing Claims, and the Payload entries they
   contradict — never a silent discard.
 - On persistent failure Francesco may also, per violation and only after reviewing it: **accept** it
@@ -604,6 +606,9 @@ surfaced.
 
 *(Amended 2026-09-02, correct-course: adds the accept and hand-correct recovery paths alongside
 automatic regeneration.)*
+*(Amended 2026-09-17, correct-course: a low-violation failure is surfaced immediately rather than
+always spending an automatic regeneration on it first — the accept/hand-correct paths above are now
+reachable from either trigger, not only from bound exhaustion.)*
 
 #### FR-22: Retain the Gate result
 

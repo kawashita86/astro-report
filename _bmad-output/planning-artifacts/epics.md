@@ -166,7 +166,7 @@ Postgres project (Europe/Frankfurt), and Alembic wired forward-only. **This is E
 - **AD-7 — The Gate is pure, and is the only path to export.** `run_gate(draft, payload) -> GateResult` lives in `core/gate/`, calls no model and performs no I/O. **Exactly one export function exists**; it takes a stored Report ID and reads only Reports whose persisted `GateResult` is `passed`. No function anywhere accepts a draft and produces an exportable artifact.
 - **AD-8 — Claim classification is a versioned closed vocabulary.** A sentence is a **Claim** if and only if it contains a token from the closed Italian astronomical vocabulary — the ten planets, the twelve signs, `casa` with an ordinal, a day-of-month numeral, `retrogrado`, `stazionario`. The vocabulary is a data file versioned alongside the Gate. **Stated limit:** a sentence that leans on a fact without naming it is not policed. *(This is the architecture's answer to PRD Open Question 1.)*
 - **AD-9 — One Generator adapter; no runtime failover.** Exactly one `Generator` adapter is configured. Changing provider is a deliberate configuration change gated on a recorded data-terms verification, never an automatic fallback. Rate limits and transient failures are absorbed by bounded backoff and run checkpointing.
-- **AD-10 — A report run is a checkpointed row advancing through persisted stages.** A `ReportRun` row advances forward only: `natal_ready → transits_ready → payload_ready → draft_ready → gate_passed → exported`. Each stage persists its output before the next begins, including the cited draft structure. Re-driving a run resumes at the first incomplete stage; every stage function is idempotent on its input. **Automatic regeneration under FR-21 replaces the whole Report, never a single failing Section.** *(Amended 2026-09-02: `gate_passed` can also be reached by an accepted-violation closure or a hand-corrected sentence re-check — Stories 5.7/5.8 — neither of which is a "regeneration" or touches `regeneration_count`.)* Reaching `exported` happens once; each subsequent export writes an `EXPORT_RECORD` row.
+- **AD-10 — A report run is a checkpointed row advancing through persisted stages.** A `ReportRun` row advances forward only: `natal_ready → transits_ready → payload_ready → draft_ready → gate_passed → exported`. Each stage persists its output before the next begins, including the cited draft structure. Re-driving a run resumes at the first incomplete stage; every stage function is idempotent on its input. **Automatic regeneration under FR-21 replaces the whole Report, never a single failing Section.** *(Amended 2026-09-02: `gate_passed` can also be reached by an accepted-violation closure or a hand-corrected sentence re-check — Stories 5.7/5.8 — neither of which is a "regeneration" or touches `regeneration_count`.)* *(Amended 2026-09-17: a `GateFailedError` naming too few violations to warrant regeneration is surfaced immediately instead of rewound to `payload_ready` — `regeneration_count` left untouched, same as the two routes above.)* Reaching `exported` happens once; each subsequent export writes an `EXPORT_RECORD` row.
 - **AD-11 — No durable state on the compute host's filesystem.** All durable state lives in Postgres. The container filesystem carries only the vendored ephemeris, templates and application code. Nothing written at runtime is ever read back after a restart.
 - **AD-12 — UTC in the core; local time exists only at the edges.** Every instant computed or stored is UTC. Core functions take explicit timezone-aware inputs and never consult a system clock or default timezone. Conversion to the Client's local time happens only in `shell/http/`. **The analyzed month is a half-open UTC interval** derived once from the Client's local calendar-month boundaries, so an event at 23:30 local on the last day belongs to exactly one Report.
 - **AD-13 — Section composition is data, not code.** The mapping from each of the eight Sections to its Payload selectors is a versioned data file (`data/sections.toml`), loaded by the core as data. Adding a report format adds a mapping, not a branch.
@@ -1537,6 +1537,14 @@ So that the occasional bad generation costs nothing and the Sections never come 
 **When** the last attempt still fails
 **Then** the run stops and the Report is surfaced rather than discarded
 
+**Given** a Report failing the Gate whose violation count is below a configured low-violation ceiling
+**When** the failure is evaluated
+**Then** automatic regeneration is skipped for that failure — the run is surfaced for review
+immediately (Story 5.5/5.7/5.8) — and the regeneration count is left unchanged, since none was spent
+**And** this applies to any failing check in the run's current cycle, not only the first
+
+*(Amended 2026-09-17, correct-course.)*
+
 ### Story 5.5: See exactly what failed and what it contradicts
 
 As Francesco,
@@ -1545,7 +1553,8 @@ So that I can tell a Style Guide problem from a Gate problem instead of guessing
 
 **Acceptance Criteria:**
 
-**Given** a Report that has exhausted its regeneration bound
+**Given** a Report that has exhausted its regeneration bound, or whose current failing check was
+surfaced immediately for having too few violations to warrant regeneration (Story 5.4 amendment)
 **When** Francesco opens it
 **Then** he sees the Report text, each failing Claim, and the Payload entries each Claim contradicts or is missing from
 
@@ -1557,12 +1566,14 @@ So that I can tell a Style Guide problem from a Gate problem instead of guessing
 **When** export is attempted
 **Then** it is refused, and the reason is stated
 
-**Given** a Report that has exhausted its regeneration bound and is shown with its failing Claims
+**Given** a Report shown this way — by bound exhaustion or immediate low-violation surfacing — with
+its failing Claims
 **When** Francesco reviews each one
 **Then** he can, per violation, accept it after review (Story 5.7) or correct its sentence and
 re-check the Gate alone (Story 5.8) — both additional to, never a replacement for, Rigenera
 
 *(Amended 2026-09-02, correct-course.)*
+*(Amended 2026-09-17, correct-course.)*
 
 ### Story 5.6: Keep the Gate's record so a regression is visible early
 

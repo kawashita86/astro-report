@@ -1134,6 +1134,101 @@ def test_getting_the_draft_for_a_bound_exhausted_run_shows_gate_violations_and_f
     assert f'action="/report-runs/{run.id}/regenerate"' in response.text
 
 
+# --- sprint-change-proposal-2026-09-17 (correct-course): the low-violation ---------
+# --- short-circuit reuses this exact review surface, untouched -----------------
+
+
+def _a_low_violation_failed_run(client_id, *, failed_at: datetime | None = None) -> ReportRun:
+    """A ``ReportRun`` in the new low-violation short-circuit's terminal
+    state (sprint-change-proposal-2026-09-17, correct-course): ``stage``
+    stays ``"draft_ready"`` (never rewound, exactly like
+    ``_a_bound_exhausted_run``) but ``regeneration_count`` stays 0 -- the run
+    never spent a single paid regeneration, because the very first
+    ``GateFailedError`` already named fewer than
+    ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` violations -- mirrors
+    ``shell/runner/driver.py``'s new branch inside ``except GateFailedError``.
+
+    ``failed_at`` defaults to "now" for the same reason as
+    ``_a_bound_exhausted_run``'s own docstring: it must land inside
+    ``_current_cycle_gate_failure``'s correlation window relative to the
+    ``StoredGateResult`` a caller persists alongside it."""
+    return ReportRun(
+        client_id=client_id,
+        month="2026-01",
+        stage="draft_ready",
+        regeneration_count=0,
+        failed_at=failed_at if failed_at is not None else datetime.now(UTC),
+        failure_reason="too few violations (1) to warrant automatic "
+        "regeneration: Refusing to advance past the Groundedness Gate: "
+        "1 violation(s) against the Payload.",
+    )
+
+
+def test_getting_the_draft_for_a_low_violation_failed_run_matches_a_bound_exhausted_run(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Regression (sprint-change-proposal-2026-09-17, correct-course, I/O &
+    Edge-Case Matrix "Regression: review surface via new trigger" row): a
+    run whose ``failed_at`` was set via the new low-violation short-circuit
+    (``regeneration_count=0``, ``stage="draft_ready"``) reaches the exact
+    same draft-view Gate-failure panel, Accetta, Modifica e ricontrolla, and
+    Rigenera markup as a regeneration-bound-exhausted run -- the review
+    surface never distinguishes which path set ``run.failed_at``, only that
+    it is set (Stories 5.7/5.8's code, untouched by this change)."""
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_low_violation_failed_run(ada.id)
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    ungrounded_draft = GeneratedDraft(
+        energia_generale=(Sentence(text="Marte è retrogrado.", entry_ids=()),),
+        amore=(),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=ungrounded_draft,
+        attempt=0,
+    )
+    vocabulary = load_gate_vocabulary(DEFAULT_VOCABULARY_PATH)
+    gate_result = run_gate(ungrounded_draft, frozen, vocabulary)
+    assert len(gate_result.violations) == 1
+    store_gate_result(
+        db_session,
+        run=run,
+        passed=gate_result.passed,
+        regeneration_count=run.regeneration_count,
+        vocabulary_version=gate_result.vocabulary_version,
+        vocabulary_content_hash=gate_result.vocabulary_content_hash,
+        violations=gate_result.violations,
+    )
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/draft")
+
+    assert response.status_code == 200
+    assert "Marte è retrogrado." in response.text
+    assert "Citazione vuota" in response.text
+    assert 'href="#sezione-energia_generale"' in response.text
+    assert 'id="sezione-energia_generale"' in response.text
+    assert "è una Claim" in response.text
+    assert run.failure_reason in response.text
+    assert "Verifica di fondatezza non superata" in response.text
+    assert f'action="/report-runs/{run.id}/violations/0/accept"' in response.text
+    assert f'action="/report-runs/{run.id}/violations/0/correct"' in response.text
+    assert "Modifica e ricontrolla" in response.text
+    assert f'action="/report-runs/{run.id}/regenerate"' in response.text
+
+
 def test_getting_the_draft_for_a_gate_failure_renders_a_cited_entry_card_and_no_english(
     authenticated_client: TestClient, db_session: Session
 ) -> None:
