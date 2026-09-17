@@ -67,4 +67,4 @@ EXPOSE 8000
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 # `exec` inside sh -c replaces the shell, so the container's only process is uvicorn.
-CMD ["sh", "-c", "exec uvicorn shell.http.app:app --host 0.0.0.0 --port ${PORT} --workers 1"]
+CMD ["sh", "-c", "exec uvicorn shell.http.app:app --no-access-log --host 0.0.0.0 --port ${PORT} --workers 1"]
