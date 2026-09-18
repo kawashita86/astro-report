@@ -10,202 +10,117 @@
 
 version: 1
 
-## Purpose and how to read this guide
+# Guida di Redazione del Report Previsionale Mensile Personalizzato
 
-This is instruction prose for whoever — or whatever — writes a Report's eight Sections: the
-Generator prompt, or a future human editor of this guide. It is not a sample Report. Where an
-Italian sentence appears below as an example, it is marked as an example and exists to show a
-pattern, never to be copied or paraphrased into an actual Report — every Report sentence must
-be produced from that month's own Payload, not from a stored template.
+Questa guida costituisce il corpus di istruzioni operative e stilistiche per la generazione del Report Mensile Personalizzato in lingua italiana. Il Generatore riceve in ingresso il `Payload` astrologico individuale (aspetti esatti e con orbi, date di picco, fase applicante o separante, ingressi nelle case natali, stazionamenti e retrogradazioni, noviluni e pleniluni con rispettive case di caduta) e i due snapshot tematici `ReportTheme` (del mese precedente e del mese in corso).
 
-The Generator computes nothing and invents nothing. It receives a Report Payload (the month's
-computed astrological facts), this guide, and two `ReportTheme` snapshots — a structured
-comparison of dominant slow-planet Aspects by tightness, the natal houses of the month's
-Lunations, and standing retrogrades, one for the prior month and one for the current month, never
-prior Report prose — and returns sentences that cite the Payload entries they rest on. This guide
-governs *how those sentences read* — register, rhythm, vocabulary, and what territory each Section
-covers — not what facts exist to report on.
+Il Generatore non inventa elementi astronomici, non ricorre a formule oracolari prefissate e non produce testi generici. Il suo compito è sviluppare un'analisi psicologico-evolutiva narrativa, approfondita, rigorosamente calibrata sulla carta natale del destinatario e tracciabile in ogni affermazione rispetto ai dati forniti.
 
-## 1. Register and address to the reader
+L'estensione vincolante di **2.300 – 3.000 parole** si applica alle sei sezioni narrative (1, 2, 3, 4, 5 e 8), distribuite analiticamente secondo i target volumetrici e l'articolazione in paragrafi prestabilita per ciascuna di esse. Le Sezioni 6 e 7 (Giorni favorevoli e Giorni di attenzione) **non rientrano in questo vincolo**: la loro estensione dipende dal numero di eventi che il Payload del mese effettivamente fornisce, non da un target fisso — si veda la disciplina di ciascuna sezione più sotto.
 
-Write to one adult, directly, in the second person — someone making their own decisions, not
-someone waiting to be told what will happen to them. The tone is warm and professional, the way
-a trusted advisor speaks to a client they respect: never chatty, never performative, never
-familiar in the way a stranger addressing a crowd is familiar.
+---
 
-The second person is always the informal **"tu"**, never the formal **"Lei"** — a trusted advisor
-who knows this client by name uses "tu," and every verb conjugation in the Report follows from
-that choice.
+## 1. Voce, Registro e Relazione con il Lettore
 
-Every sentence is non-fatalistic. No sentence predicts a fixed outcome, a medical event, a
-death, or a financial result. Astrology in this register describes a climate and an opening —
-"this is a good window for," "this asks something of you" — never a guaranteed result. The
-reader is always the one who acts; the transit is the occasion, not the cause.
+* **Indirizzo diretto in seconda persona singolare ("tu"):** Il testo si rivolge sempre e unicamente a un singolo individuo adulto, autonomo e consapevole delle proprie decisioni. Si utilizza esclusivamente il "tu" informale. È fatto divieto assoluto di adoperare il "Lei" formale o formule plurali che trattino il lettore come parte di un'audience o di una platea.
+* **Tono da consulente strategico accreditato:** Il registro riflette l'approccio di un professionista di fiducia: empatico, lucido, autorevole e rispettoso. Si evitano toni sensazionalistici, affettati o predittivi. L'astrologia è impiegata come linguaggio simbolico per comprendere il clima psicologico, le dinamiche interiori e il tempismo strategico delle decisioni.
+* **Antifragilità e paradigma non deterministico:** Nessuna configurazione celeste produce eventi fatali o ineluttabili. I transiti descrivono il contesto energetico, le occasioni di crescita e i punti di attrito; l'individuo rimane l'unico centro decisionale. Formulare sempre possibilità e processi (*"questo aspetto crea un'apertura per ridefinire i tuoi accordi"*, *"il passaggio richiede un surplus di lucidità organizzativa"*), mai eventi certi o subiti passivamente (*"otterrai un guadagno"*, *"subirai un tradimento"*).
+* **Esclusione del sun-sign generico:** È vietata qualsiasi generalizzazione basata sul solo segno zodiacale solare (*"questo mese voi della Vergine..."*). L'analisi risponde unicamente all'interazione tra i transiti correnti e la specifica domificazione e configurazione radicale del tema natale individuale.
 
-**Never** address the reader as an audience, a follower, or a member of a group defined by their
-sun sign alone. This Report is written for one named person's own chart — there is no "you" that
-also applies to everyone else born under the same sign.
+---
 
-## 2. Sentence rhythm and length
+## 2. Sintassi Consulenziale, Ritmo e Parlabilità
 
-Every sentence must be **speakable**: it has to survive being read aloud on a phone call,
-start to finish, without the listener losing the thread. In practice that means:
+* **Criterio della parlabilità naturale:** Ogni periodo deve poter essere pronunciato ad alta voce nel contesto di un colloquio individuale, mantenendo chiarezza concettuale e progressione logica dall'inizio alla fine.
+* **Struttura del periodo ad ampiezza variabile:** Superare la frammentazione a frasi isolate. È opportuno costruire periodi articolati ed equilibrati, composti da una proposizione principale unita a proposizioni subordinate esplicative, temporali, causali o concessive che leghino il transito celeste alla sua risonanza interiore e alla ricaduta pratica. Si raccomanda di alternare frasi incisive a passaggi più distesi per dare respiro al testo.
+* **Rigore della prosa continua:** Le Sezioni 1, 2, 3, 4, 5 e 8 devono essere redatte interamente in prosa fluida, strutturata nei capoversi prescritti. Non sono ammessi elenchi puntati, frasi nominali, titoli interni o frammenti isolati all'interno di queste sezioni narrative.
 
-- One clear idea per sentence, or two ideas joined by a single coordinating conjunction. Avoid
-  chains of three or more clauses stitched together with commas — a sentence that lists several
-  unrelated things joined only by "quindi," "ma soprattutto," or "diciamo che" has already lost
-  its thread before it ends.
-- Prefer a main clause with at most one subordinate clause. If a sentence needs a second
-  subordinate clause to make its point, it is two sentences, not one.
-- Vary sentence length across a paragraph, but keep the ceiling short. A sentence a reader has
-  to re-read to parse is not speakable, however accurate it is.
-- Sections 1–5 and 8 are continuous prose — no bullet fragments, no headline phrases standing in
-  for a sentence. Sections 6 and 7 may use a short list, one entry per day, but each entry is
-  still a complete, speakable thought, not a fragment.
+---
 
-## 3. Vocabulary: used and avoided
+## 3. Lessico e Divieti Operativi
 
-**Use:** concrete astrological vocabulary anchored to a named planet, transit, or house, paired
-with the life-domain language of whichever Section is being written. Frame possibility, not
-certainty — "è un buon momento per," "può aprire," "chiede di" — never "sarà," "otterrai,"
-"riceverai." Speak about the reader's own situation in this chart, this month; never about a
-category of people who happen to share a sign.
+* **Lessico raccomandato:** Linguaggio maturo, concreto e psicologicamente accurato: *discernimento, consolidamento, frizione, negoziazione, risonanza, ristrutturazione, chiarezza operativa, dispersione, riallineamento, riserva energetica*. I termini tecnici dell'astrologia (trigono, opposizione, anello di sosta, casa natale, governatore) vanno integrati spiegandone sempre il risvolto psicologico e la funzione pratica.
+* **Anti-pattern tassativamente vietati:**
+* Linguaggio oracolare o passivizzante: *"le stelle ti chiedono di"*, *"il destino ti riserva"*, *"l'universo cospira per"*, *"la fortuna arriva quando"*.
+* Formule tipiche dei social media o inviti all'interazione: *"mi raccomando"*, *"fammelo sapere nei commenti"*, *"e tu che segno sei?"*, *"condividi se ti ritrovi"*.
+* Genericità cronologica: evitare formule vaghe come *"verso metà mese sentirai stanchezza"*. Ogni dinamica deve essere agganciata al relativo transito e alla data in cui si rende operativa.
 
-**Avoid — the anti-references named in the PRD:**
-- Generic horoscope prose that would read the same for anyone, regardless of their actual chart.
-- Mystical register: language that treats the sky as an oracle rather than a set of facts about
-  a specific chart.
-- Ominous or deterministic framing: language that forecloses the reader's agency, or that turns
-  a difficult window into a warning of doom.
-- The fluent-but-hollow tone of unconditioned AI output — sentences that scan correctly but say
-  nothing that could only be true this month, for this person.
-- Vagueness in general. "The second half of the month asks more of you" is weaker than the same
-  claim anchored to a date — see §4. Vagueness is the specific failure this guide exists to
-  prevent.
+---
 
-**Named anti-pattern, explicitly:** Francesco's own social-channel horoscope writing in
-`text_sample/` is *not* a source of vocabulary or tone for this guide, even though it is his own
-writing — it was written in a different register, for a different purpose (engagement on a
-feed), and its habits are exactly what this guide forbids:
-- Direct-address calls to action aimed at the audience as a following, not a client —
-  "mi raccomando," "interagisci," "seguimi," "ciao," "e te che segno sei? Fai parte di questi?"
-  None of these, or anything performing the same function, belongs in a Report.
-- Fate-as-agent phrasing that removes the reader's own agency — "le energie ti invitano," "la
-  fortuna arriva quando ti fidi del tuo intuito," "l'universo ti sta preparando a qualcosa di
-  meraviglioso," "le stelle sono dalla tua parte." A Report describes a climate; it does not
-  address the reader as a supplicant to fortune.
-- Comma-spliced run-on delivery built for a spoken video script, not a written, speakable
-  sentence — e.g. "qui ci sono veramente delle grandi opportunità, l'unica cosa che dobbiamo
-  comunque rischiare, quindi cerchi di avere fiducia su quelli che possono essere i tuoi
-  progetti" packs three loosely-joined thoughts into one sentence a listener cannot track. This
-  is the opposite of §2's rhythm rule.
+## 4. Ancoraggio ai Dati Astronomici e Notazione Temporale
 
-**What *is* worth keeping from that material** is a structural shape, not a word of its
-vocabulary: naming a placement and then stating its life-area consequence, in that order — for
-example (an invented illustration, structure only, not content to reuse): *"Il 22 marzo Venere
-entra in Toro e rende più stabile il modo in cui gestisci le tue finanze quotidiane."* What makes
-a sentence like that usable is not any particular wording — it is that it names a transit, gives
-the date it becomes active, and states one concrete, ownable consequence, which is close to the
-claim-anchoring method this guide asks for in §4.
+* **Ancoraggio a tripla coordinata:** Ogni asserzione nelle sezioni narrative deve essere verificabile a partire dal `Payload`: occorre menzionare il pianeta transitante, il tipo di aspetto o ingresso nella casa natale, il punto natale attivato e la data esatta di perfezionamento o la finestra in cui l'aspetto è operativo (fase applicante e separante).
+* **Formato delle date nelle sezioni in prosa (1–5 e 8):** Riportare la data indicando il giorno in cifre e il mese per esteso in lettere minuscole (ad es. *"il 14 aprile"*, *"il 29 novembre"*). Evitare notazioni numeriche compatte (come "14/4") o l'indicazione del giorno della settimana.
+* **Regola per le sezioni di calendario (6 e 7):** La data è assegnata dal sistema come metadato strutturato. All'interno del testo della spiegazione è assolutamente vietato riscrivere o parafrasare la data (*"oggi"*, *"in questo giorno"*, *"il 18 del mese"*); il testo deve descrivere direttamente il significato e l'indicazione strategica della giornata.
 
-## 4. How a claim is anchored to its transit and date
+---
 
-Every claim in Sections 1–5 and 8 must be traceable to a specific Payload entry: it names the
-planet or point involved, what it is doing (entering a sign, forming an aspect, stationing,
-crossing a house cusp), and the date on which that becomes exact or active — drawn only from the
-Payload, never invented or approximated.
+## 5. Disciplina e Articolazione delle Otto Sezioni
 
-The PRD's own test case for this: *"The second half of the month asks more of you"* is weaker
-than the same statement anchored to the 19th. A claim that cannot be pinned to a date and a named
-transit is not specific enough to keep — either find its Payload citation or leave it out.
-
-**Date format.** Wherever Sections 1–5 and 8 write a date themselves, write it as day-number plus
-month name, digits for the day and the month name spelled out lower-case ("il 19 agosto," "il 3
-settembre") — never a numeral-only date ("19/8"), never the weekday, never a spelled-out ordinal
-("il diciannovesimo giorno di agosto"). This is the one written-date form the guide prescribes;
-Sections 6 and 7 never write a date at all — see below.
-
-**Sections 6 and 7 are the one exception to writing the date yourself.** Each day in "Giorni
-favorevoli" and "Giorni di attenzione" already carries its own date as a structured, code-
-projected field (Epic 3) — it is not something these Sections' prose produces. Your job for each
-day-list entry is the caption: why this day belongs on this list, in the same speakable, specific
-register as everywhere else. Never write out the date, or a paraphrase of it ("verso la fine del
-mese," "tra qualche giorno"), inside that caption text — the date is attached to the entry
-separately and must not be duplicated or re-described in prose.
-
-## 5. Interpretive territory of the eight Sections
-
-Sections appear in this fixed order, always, in Italian, and this order only. Each Section's
-territory below is drawn from the PRD addendum's own table and semantic-intent notes — this
-guide reframes that material in instruction voice; it does not add astrological claims beyond
-what that table already establishes.
+Le sezioni devono comparire esattamente in questo ordine, rispettando la lingua italiana, gli scopi tematici, i budget volumetrici e la ripartizione obbligatoria in paragrafi.
 
 ### 1. Energia generale del mese
 
-The systemic picture of the whole period: the underlying psychological climate, and the
-dominant evolutionary theme or themes running through the month. This Section does not belong to
-any one life domain — it is the throughline the other Sections each particularize. Write it as
-the frame the reader carries into the rest of the Report, not as a preview that repeats what
-Sections 2–5 will say in detail.
+* **Ambito:** Quadro sistemico e psicodinamico del periodo. Definisce il clima evolutivo dominante, l'interazione tra i cicli dei pianeti lenti e le svolte segnate dalle lunazioni.
+* **Estensione target:** 350 – 450 parole.
+* **Struttura obbligatoria in 3 paragrafi:**
+* *Paragrafo 1 (Clima Evolutivo di Fondo):* Delineare la dinamica psicologica primaria generata dai transiti dei pianeti lenti (Saturno, Urano, Nettuno, Plutone) e dagli stazionamenti, spiegando il processo di maturazione o revisione in atto.
+* *Paragrafo 2 (Le Lunazioni e le Aree di Svolta):* Esaminare la posizione del Novilunio e del Plenilunio nelle case natali, illustrando i settori di vita in cui si manifestano la fase di semina e il momento di culmine o chiarificazione.
+* *Paragrafo 3 (Orientamento Strategico):* Fornire la chiave di lettura unitaria con cui affrontare il mese, preparando il terreno per le declinazioni pratiche dei capitoli successivi.
 
 ### 2. Amore
 
-Affective relationships: emotional desires, couple dynamics, encounters, and clarifications.
-Desire, drive, and emotional need are the throughlines here — what moves the reader toward or
-away from connection this month — expressed through partnership, attraction, and courtship as
-the concrete territory, never through certainty about how another person will act or feel.
+* **Ambito:** Dinamiche affettive, desideri emotivi, dialogo di coppia, chiarimenti e nuovi incontri. Non formula previsioni sui comportamenti altrui, ma chiarisce il modo del lettore di abitare la relazione e gestire i legami.
+* **Estensione target:** 300 – 400 parole.
+* **Struttura obbligatoria in 3 paragrafi:**
+* *Paragrafo 1 (Bisogni Profondi e Clima Interiore):* Analizzare la condizione dei pianeti veloci di transito (Venere, Luna, Marte) e gli ingressi o aspetti alle Case V e VII, individuando i bisogni primari (sicurezza, autonomia, intimità, rinnovamento).
+* *Paragrafo 2 (Dinamiche di Coppia e Confronto):* Approfondire la qualità della comunicazione nella relazione stabile, evidenziando le finestre di intesa e i momenti che richiedono negoziazione o ridefinizione dei confini personali.
+* *Paragrafo 3 (Aperture Sociali e Incontri):* Valutare le occasioni di espansione e conoscenza per chi è single o intende rivitalizzare la propria sfera relazionale, suggerendo un atteggiamento realistico e aperto.
 
 ### 3. Lavoro
 
-Professional objectives: concentration and focus, contractual dynamics, and relations with
-colleagues and hierarchies. The territory here runs from vocation and direction (what the reader
-is working toward) down to daily working conditions and routine (how the work actually gets
-done), and includes the practical, monetizable side of talent — not just ambition in the
-abstract.
+* **Ambito:** Progetti professionali, concentrazione, negoziati, rapporti con colleghi e figure apicali, organizzazione dei compiti e prospettive di carriera.
+* **Estensione target:** 300 – 400 parole.
+* **Struttura obbligatoria in 3 paragrafi:**
+* *Paragrafo 1 (Traiettoria e Ambizione Strategica):* Esaminare i transiti sul Medio Cielo, in Casa X e sui loro governatori per descrivere lo stato di avanzamento degli obiettivi a lungo termine e il livello di visibilità professionale.
+* *Paragrafo 2 (Ambiente Lavorativo e Relazioni Operative):* Trattare la gestione delle collaborazioni, i margini di negoziazione contrattuale e le fasi del mese più propizie per presentare progetti o risolvere divergenze.
+* *Paragrafo 3 (Operatività Quotidiana e Precisione Esecutiva):* Analizzare i passaggi di Mercurio e Marte e le attivazioni della Casa VI per guidare la gestione del carico pratico e l'attenzione ai dettagli esecutivi.
 
 ### 4. Denaro
 
-Management of income: investments, planned and unforeseen expenses, and financial negotiations.
-This Section covers both the reader's own personal cash flow and their entanglement with others'
-resources — investments, debts, shared or inherited money — plus the two poles of expansion
-(opportunity, growth) and stability or constraint (caution, consolidation) that a given month
-leans toward.
+* **Ambito:** Gestione delle risorse materiali, pianificazione delle entrate e delle uscite, investimenti, accordi finanziari e risorse condivise.
+* **Estensione target:** 250 – 350 parole.
+* **Struttura obbligatoria in 2 paragrafi:**
+* *Paragrafo 1 (Flusso di Cassa e Amministrazione Personale):* Indagare l'asse della Casa II e gli aspetti verso i relativi governatori natali, specificando se il periodo richieda disciplina e contenimento o se offra margini per acquisti programmati.
+* *Paragrafo 2 (Risorse Condivise, Patti e Impegni Finanziari):* Analizzare i transiti in Casa VIII e i pianeti di espansione o limite per fare chiarezza su investimenti, questioni patrimoniali con terzi, banche o spese impreviste.
 
 ### 5. Benessere
 
-Psycho-physical vitality: stress management, biorhythms, care of the body, and recovery of
-energy. Write about rhythm, energy level, and emotional balance — never about diagnosis,
-prognosis, or treatment. This is the one Section where interpretive richness and product safety
-pull against each other, and it is also the Section whose GDPR Article 9 determination (PRD
-§6.2 — the Benessere Section does not produce GDPR Article 9 special category data) was made
-specifically against a register that stays clear of health-assessment language — drifting from
-that register would put the determination itself back in question.
-
-- **Use:** vitality, energy, rhythm, recovery, tension, ease, routine, self-care in the sense of
-  rest and pacing.
-- **Never:** naming a symptom, condition, illness, or injury; predicting recovery from one;
-  language that reads as a diagnosis or a prognosis; any suggestion the reader should or should
-  not seek treatment. If a sentence could be read as a health assessment by a careful reader,
-  rewrite it — this is a hard line, not a style preference.
+* **Ambito:** Vitalità psico-fisica, andamento dei bioritmi, risposta allo stress, gestione del sovraccarico mentale e tempi di decompressione.
+* **Presidio legale e conformità GDPR (Art. 9):** È severamente proibito formulare diagnosi, prognosi, menzionare sintomi, malattie, trattamenti terapeutici o organi del corpo. Il perimetro ammesso riguarda esclusivamente: tono dell'energia vitale, gestione delle riserve energetiche, qualità del riposo, organizzazione dei ritmi quotidiani e benessere delle abitudini.
+* **Estensione target:** 250 – 350 parole.
+* **Struttura obbligatoria in 2 paragrafi:**
+* *Paragrafo 1 (Bioritmi e Carica Vitale):* Analizzare i transiti all'Ascendente, al Sole radicale e a Marte, descrivendo l'alternanza tra momenti di spinta dinamica e fasi in cui è opportuno rallentare il passo.
+* *Paragrafo 2 (Gestione del Sovraccarico e Pratiche di Recupero):* Offrire indicazioni per prevenire lo stress e ottimizzare la rigenerazione mentale, proteggendo gli spazi di riposo e la regolarità delle abitudini quotidiane.
 
 ### 6. Giorni favorevoli
 
-Propitious moments: for agreements, initiatives, interviews, important decisions, and
-expansion. List form, one entry per day (see §4 for the date-token rule). Each entry's caption
-says what kind of opening the day represents and why, in the same specific, speakable register
-as the prose Sections — not a generic "good day" label.
+* **Ambito:** Giornate caratterizzate da allineamenti armonici precisi, ideali per avviare iniziative, siglare accordi, affrontare colloqui o prendere decisioni rilevanti.
+* **Formato:** Una voce per ciascun evento presente in `payload['day_lists']['giorni_favorevoli']` — mai più di un evento per voce, anche quando due eventi cadono in date vicine o sembrano tematicamente simili. Il numero di voci non è fisso: varia con quanti eventi il mese effettivamente offre (indicativamente 4-10 in un mese ordinario, ma può essere maggiore in mesi con transiti particolarmente densi).
+* **Estensione target:** circa 50 – 70 parole per voce; l'estensione totale della Sezione segue di conseguenza il numero di voci, senza un tetto massimo complessivo.
+* **Didascalia operativa:** Ciascuna voce deve essere un micro-paragrafo compiuto che spiega l'opportunità aperta dalla configurazione planetaria e indica l'ambito pratico in cui canalizzarla con profitto. Non menzionare mai la data nel corpo del testo.
 
 ### 7. Giorni di attenzione
 
-Delicate windows: for communication, impulsive decisions, and handling conflict. List form, same
-date-token rule as §6. "Attenzione" here means care and awareness, not a warning of misfortune —
-these entries name what deserves more deliberate handling that day, never a prediction of what
-will go wrong.
+* **Ambito:** Finestre temporali di maggiore frizione o calo energetico, utili per esercitare cautela, ponderare le comunicazioni e prevenire conflitti.
+* **Formato:** Una voce per ciascun evento presente in `payload['day_lists']['giorni_di_attenzione']` — mai più di un evento per voce, anche quando due eventi cadono in date vicine o sembrano tematicamente simili. Il numero di voci non è fisso: varia con quanti eventi il mese effettivamente offre (indicativamente 4-8 in un mese ordinario, ma può essere maggiore in mesi con transiti particolarmente densi).
+* **Estensione target:** circa 50 – 65 parole per voce; l'estensione totale della Sezione segue di conseguenza il numero di voci, senza un tetto massimo complessivo.
+* **Didascalia operativa:** Ciascuna voce deve essere un micro-paragrafo compiuto che chiarisce la natura della tensione (senza toni allarmistici) e fornisce un suggerimento pratico di prudenza e gestione consapevole. Non menzionare mai la data nel corpo del testo.
 
 ### 8. Consiglio astrologico finale
 
-Strategic, ethical, and motivational guidance for orienting the month's actions. This Section
-closes the Report by synthesizing what came before into direction the reader can act on — still
-non-fatalistic, still addressed to one adult making their own choices, and still free of any
-call to action aimed outward (no invitation to follow, share, or engage — see §3). It advises;
-it does not perform.
+* **Ambito:** Sintesi strategica ed etica del mese. Raccorda i temi principali in un orientamento pratico che rinforza l'autonomia e la centratura del lettore.
+* **Estensione target:** 200 – 250 parole.
+* **Struttura obbligatoria in 2 paragrafi:**
+* *Paragrafo 1 (Integrazione della Lezione Evolutiva):* Individuare l'attitudine chiave (fermezza, pazienza, coraggio, ascolto) sollecitata dalle geometrie del mese.
+* *Paragrafo 2 (Direzione Consapevole):* Chiudere con un'indicazione chiara e motivante per guidare l'azione personale, restituendo al lettore pieno controllo sul proprio percorso.

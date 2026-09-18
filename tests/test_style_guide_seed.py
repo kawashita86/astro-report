@@ -50,7 +50,7 @@ def test_content_before_the_marker_is_discarded(tmp_path: Path) -> None:
 def test_the_shipped_seed_file_loads_without_error() -> None:
     body = load_style_guide_seed(DEFAULT_STYLE_GUIDE_SEED_PATH)
 
-    assert body.startswith("## Purpose and how to read this guide")
+    assert body.startswith("# Guida di Redazione del Report Previsionale Mensile Personalizzato")
     assert "## 8. Consiglio astrologico finale" in body
 
 

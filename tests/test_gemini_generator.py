@@ -26,8 +26,9 @@ from shell.adapters.gemini.generator import (
     _FIRST_REPORT_STATEMENT,
     _MODEL,
     _NOTHING_SIGNIFICANT_CHANGED_STATEMENT,
-    _RESPONSE_SCHEMA,
     GeminiGenerator,
+    _build_id_aliases,
+    _build_response_schema,
 )
 from shell.computation import load_computation_config
 from shell.ports.generator import StyleGuideVersion
@@ -226,7 +227,8 @@ def test_a_populated_theme_with_real_dataclass_and_datetime_fields_renders_witho
 def test_system_instruction_carries_the_style_guide_and_response_schema_matches() -> None:
     """AC: the Style Guide version in force must be supplied with every
     request, and the model must be asked for exactly the module's own
-    ``_RESPONSE_SCHEMA`` -- not some ad-hoc shape built inline."""
+    ``_build_response_schema()`` output for this Payload -- not some ad-hoc
+    shape built inline."""
     payload = _payload_with_ids(_KNOWN_ID)
     client = _FakeGeminiClient(response=_draft_response())
     generator = GeminiGenerator(api_key="unused", client=client)
@@ -236,7 +238,136 @@ def test_system_instruction_carries_the_style_guide_and_response_schema_matches(
     call = client.calls[0]
     assert _STYLE_GUIDE.content in call["system_instruction"]
     assert str(_STYLE_GUIDE.version) in call["system_instruction"]
-    assert call["response_schema"] == _RESPONSE_SCHEMA
+    aliases = _build_id_aliases(frozenset({_KNOWN_ID}))
+    assert call["response_schema"] == _build_response_schema(
+        frozenset(aliases.values()), favorevoli_count=0, attenzione_count=0
+    )
+
+
+#: A response that satisfies ``_validate_day_list_coverage`` for
+#: ``_payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID, "aspect-known-3")``'s two
+#: ``giorni_favorevoli`` entries -- one voce per id, matching the new
+#: one-id-per-voce contract -- so tests below that only care about what was
+#: *sent* to the client (``client.calls[0]``) don't also have to fight the
+#: day-list coverage check to get a non-raising call.
+_TWO_FAVOREVOLI_RESPONSE = _draft_response(
+    giorni_favorevoli=[
+        {"text": "Prima voce.", "entry_ids": [_ANOTHER_KNOWN_ID]},
+        {"text": "Seconda voce.", "entry_ids": ["aspect-known-3"]},
+    ]
+)
+
+
+def test_response_schema_constrains_entry_ids_to_an_enum_of_short_aliases() -> None:
+    """sprint-change-proposal-2026-09-18: ``entry_ids`` is constrained to an
+    ``enum`` of short aliases (``"e1"``, ``"e2"``, ...), never the raw
+    64-char Payload ids directly -- Gemini's structured-output compiler
+    rejects a schema whose enum is built from enough long ids (a real 400
+    INVALID_ARGUMENT: "too many states for serving"), and an unknown/mistyped
+    id is now impossible to request either way, never just caught after the
+    fact by ``_validate_citations``."""
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    client = _FakeGeminiClient(
+        response=_draft_response(
+            giorni_favorevoli=[{"text": "Voce.", "entry_ids": [_ANOTHER_KNOWN_ID]}]
+        )
+    )
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    schema = client.calls[0]["response_schema"]
+    amore_entry_ids_schema = schema["properties"]["amore"]["items"]["properties"]["entry_ids"]
+    expected_aliases = sorted(_build_id_aliases(frozenset({_KNOWN_ID, _ANOTHER_KNOWN_ID})).values())
+    assert amore_entry_ids_schema["items"]["enum"] == expected_aliases
+    assert _KNOWN_ID not in amore_entry_ids_schema["items"]["enum"]
+
+
+def test_response_schema_pins_day_list_sections_to_exactly_one_id_per_voce_and_the_true_count() -> (
+    None
+):
+    """sprint-change-proposal-2026-09-18: a Payload whose day lists overflow
+    the Style Guide's own referential voci count (real incident: 21
+    favorevoli / 12 attenzione entries in one month) must never be bundled
+    into fewer voci -- the schema now pins the array length to the Payload's
+    actual entry count and each voce to exactly one id, regardless of how
+    many entries that is. The six narrative Sections are untouched: they
+    keep the unconstrained, multi-id-per-sentence shape bundling is fine
+    for."""
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID, "aspect-known-3")
+    client = _FakeGeminiClient(response=_TWO_FAVOREVOLI_RESPONSE)
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    schema = client.calls[0]["response_schema"]
+    favorevoli_schema = schema["properties"]["giorni_favorevoli"]
+    assert favorevoli_schema["minItems"] == favorevoli_schema["maxItems"] == 2
+    favorevoli_entry_ids_schema = favorevoli_schema["items"]["properties"]["entry_ids"]
+    assert favorevoli_entry_ids_schema["minItems"] == favorevoli_entry_ids_schema["maxItems"] == 1
+
+    attenzione_schema = schema["properties"]["giorni_di_attenzione"]
+    assert attenzione_schema["minItems"] == attenzione_schema["maxItems"] == 0
+
+    amore_entry_ids_schema = schema["properties"]["amore"]["items"]["properties"]["entry_ids"]
+    assert "minItems" not in amore_entry_ids_schema
+    assert "maxItems" not in amore_entry_ids_schema
+
+
+def test_prompt_embeds_short_aliases_never_the_raw_long_payload_ids() -> None:
+    """The Payload block the model actually reads must be self-consistent
+    with the schema's alias enum -- the raw 64-char id must never appear in
+    the prompt text at all, only its short alias."""
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    client = _FakeGeminiClient(
+        response=_draft_response(
+            giorni_favorevoli=[{"text": "Voce.", "entry_ids": [_ANOTHER_KNOWN_ID]}]
+        )
+    )
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    prompt = client.calls[0]["prompt"]
+    assert _KNOWN_ID not in prompt
+    assert _ANOTHER_KNOWN_ID not in prompt
+    aliases = _build_id_aliases(frozenset({_KNOWN_ID, _ANOTHER_KNOWN_ID}))
+    assert f'"{aliases[_KNOWN_ID]}"' in prompt
+
+
+def test_a_model_response_citing_an_alias_is_translated_back_to_the_real_id() -> None:
+    """The end-to-end alias round trip: the fake client here plays the part
+    of the real Gemini API and returns the *alias* it was constrained to
+    (not the real id, unlike every other test's canned response) --
+    ``GeminiGenerator`` must translate it back before returning the draft,
+    so every downstream consumer (validation, rendering, storage) still only
+    ever sees real Payload ids."""
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    aliases = _build_id_aliases(frozenset({_KNOWN_ID, _ANOTHER_KNOWN_ID}))
+    response = _draft_response(
+        energia_generale=[{"text": "Una frase.", "entry_ids": [aliases[_KNOWN_ID]]}],
+        giorni_favorevoli=[{"text": "Voce.", "entry_ids": [aliases[_ANOTHER_KNOWN_ID]]}],
+    )
+    client = _FakeGeminiClient(response=response)
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert draft.energia_generale[0].entry_ids == (_KNOWN_ID,)
+
+
+def test_prompt_states_the_exact_day_list_counts_and_forbids_bundling() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID, "aspect-known-3")
+    client = _FakeGeminiClient(response=_TWO_FAVOREVOLI_RESPONSE)
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    prompt = client.calls[0]["prompt"]
+    assert "esattamente 2 eventi in payload['day_lists']['giorni_favorevoli']" in prompt
+    assert "scrivi esattamente 2 frasi in questa Sezione" in prompt
+    assert "esattamente 0 eventi" in prompt
+    assert "Non accorpare più eventi sotto la stessa frase" in prompt
 
 
 def test_generated_draft_is_never_a_string_keyed_dict() -> None:
@@ -512,9 +643,7 @@ def test_a_date_token_in_giorni_favorevoli_raises_at_the_date_token_step(
     sentence_text: str,
 ) -> None:
     payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(
-        giorni_favorevoli=[{"text": sentence_text, "entry_ids": []}]
-    )
+    response = _draft_response(giorni_favorevoli=[{"text": sentence_text, "entry_ids": []}])
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)
 
@@ -558,9 +687,7 @@ def test_a_non_date_lookalike_in_giorni_favorevoli_is_not_flagged(
     constraint also keeps clock times (``15.30``, ``9.45``) and decimals
     (``1.5``) from being flagged."""
     payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(
-        giorni_favorevoli=[{"text": sentence_text, "entry_ids": []}]
-    )
+    response = _draft_response(giorni_favorevoli=[{"text": sentence_text, "entry_ids": []}])
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)
 
@@ -750,9 +877,7 @@ def test_google_genai_client_wrapper_calls_the_real_sdk_correctly(
         text = '{"ok": true}'
 
     class _FakeModels:
-        def generate_content(
-            self, *, model: str, contents: str, config: Any
-        ) -> _FakeResponse:
+        def generate_content(self, *, model: str, contents: str, config: Any) -> _FakeResponse:
             captured["model"] = model
             captured["contents"] = contents
             captured["config"] = config

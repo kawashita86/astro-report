@@ -180,7 +180,7 @@ def test_an_offline_upgrade_runs_env_py_and_emits_the_chain() -> None:
     assert "CREATE TABLE style_guide" in completed.stdout
     assert "CREATE UNIQUE INDEX ix_style_guide_version" in completed.stdout
     assert "INSERT INTO style_guide" in completed.stdout
-    assert "## Purpose and how to read this guide" in completed.stdout
+    assert "# Guida di Redazione del Report Previsionale Mensile Personalizzato" in completed.stdout
     # 0008_report_theme: the unique index is "exactly one StoredReportTheme
     # per ReportRun" (Story 4.3) enforced at the schema level -- same
     # reasoning as 0006_report_payload's own unique index above.
