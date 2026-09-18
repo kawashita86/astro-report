@@ -292,19 +292,17 @@
       .icon-card {
         padding: 24px 28px 26px;
         display: flex;
-        gap: 22px;
-        align-items: flex-start;
-        margin-bottom: 20px;
-      }
-      .icon-card svg {
-        flex: none;
-        margin-top: 2px;
-      }
-      .icon-card-body {
-        display: flex;
         flex-direction: column;
         gap: 10px;
-        flex: 1;
+        margin-bottom: 20px;
+      }
+      .icon-card-header {
+        display: flex;
+        gap: 22px;
+        align-items: center;
+      }
+      .icon-card-header svg {
+        flex: none;
       }
 
       /* --- Page 2: the four domain cards, one full-width row each --- */
@@ -397,17 +395,16 @@
       .final-advice-card {
         padding: 28px 32px 30px;
         display: flex;
-        gap: 26px;
-        align-items: flex-start;
-      }
-      .final-advice-card svg {
-        flex: none;
-      }
-      .final-advice-body {
-        display: flex;
         flex-direction: column;
         gap: 12px;
-        flex: 1;
+      }
+      .final-advice-header {
+        display: flex;
+        gap: 26px;
+        align-items: center;
+      }
+      .final-advice-header svg {
+        flex: none;
       }
       .final-advice-text {
         font-size: 20px;
@@ -496,11 +493,11 @@
     </div>
 
     <div class="card icon-card">
-      <svg width="34" height="34" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.2" stroke-linejoin="round"><path d="M20 3c1.2 8.6 4.4 11.8 13 13-8.6 1.2-11.8 4.4-13 13-1.2-8.6-4.4-11.8-13-13 8.6-1.2 11.8-4.4 13-13z"></path><path d="M32 27c.4 2.8 1.4 3.8 4.2 4.2-2.8.4-3.8 1.4-4.2 4.2-.4-2.8-1.4-3.8-4.2-4.2 2.8-.4 3.8-1.4 4.2-4.2z"></path></svg>
-      <div class="icon-card-body">
+      <div class="icon-card-header">
+        <svg width="34" height="34" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1.2" stroke-linejoin="round"><path d="M20 3c1.2 8.6 4.4 11.8 13 13-8.6 1.2-11.8 4.4-13 13-1.2-8.6-4.4-11.8-13-13 8.6-1.2 11.8-4.4 13-13z"></path><path d="M32 27c.4 2.8 1.4 3.8 4.2 4.2-2.8.4-3.8 1.4-4.2 4.2-.4-2.8-1.4-3.8-4.2-4.2 2.8-.4 3.8-1.4 4.2-4.2z"></path></svg>
         <p class="label">Energia generale</p>
-        <p class="prose">{{ energia_generale_text }}</p>
       </div>
+      <p class="prose">{{ energia_generale_text }}</p>
     </div>
 
     <!-- Page 2 · Aree del mese -->
@@ -586,11 +583,11 @@
     </div>
 
     <div class="card final-advice-card">
-      <svg width="54" height="54" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1" stroke-linejoin="round"><path d="M20 2c1.1 10.4 5.6 16.3 16 18-10.4 1.7-14.9 7.6-16 18-1.1-10.4-5.6-16.3-16-18 10.4-1.7 14.9-7.6 16-18z"></path></svg>
-      <div class="final-advice-body">
+      <div class="final-advice-header">
+        <svg width="54" height="54" viewBox="0 0 40 40" fill="none" stroke="#A77B57" stroke-width="1" stroke-linejoin="round"><path d="M20 2c1.1 10.4 5.6 16.3 16 18-10.4 1.7-14.9 7.6-16 18-1.1-10.4-5.6-16.3-16-18 10.4-1.7 14.9-7.6 16-18z"></path></svg>
         <p class="label">Consiglio finale</p>
-        <p class="serif final-advice-text">{{ consiglio_finale_text }}</p>
       </div>
+      <p class="serif final-advice-text">{{ consiglio_finale_text }}</p>
     </div>
   </body>
 </html>
