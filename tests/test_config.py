@@ -57,8 +57,7 @@ def test_valid_environment_builds_settings() -> None:
     assert settings.session_secret_key == VALID_ENVIRONMENT["SESSION_SECRET_KEY"]
     assert settings.gemini_api_key == VALID_ENVIRONMENT["GEMINI_API_KEY"]
     assert (
-        settings.gemini_data_terms_verified_at
-        == VALID_ENVIRONMENT["GEMINI_DATA_TERMS_VERIFIED_AT"]
+        settings.gemini_data_terms_verified_at == VALID_ENVIRONMENT["GEMINI_DATA_TERMS_VERIFIED_AT"]
     )
 
 
@@ -138,9 +137,7 @@ def test_a_postgres_url_without_a_host_aborts() -> None:
     assert "host" in message
 
 
-@pytest.mark.parametrize(
-    "scheme", ["postgres", "postgresql", "postgresql+psycopg"]
-)
+@pytest.mark.parametrize("scheme", ["postgres", "postgresql", "postgresql+psycopg"])
 def test_accepted_postgres_schemes(scheme: str) -> None:
     url = f"{scheme}://astro:astro@localhost:5432/astro_report"
 
@@ -351,6 +348,66 @@ def test_report_run_mode_has_a_dataclass_level_default() -> None:
     )
 
     assert settings.report_run_mode is ReportRunMode.POLL
+
+
+# --- Matrix row: USE_REAL_GEMINI_LOCALLY (Story 4.9's opt-out) --------------
+
+
+def test_use_real_gemini_locally_unset_defaults_to_false() -> None:
+    """Mirrors ``REPORT_RUN_MODE``'s own shape: unset/blank is not a
+    missing-variable error -- it means ``False``."""
+    settings = load_settings(VALID_ENVIRONMENT)
+
+    assert settings.use_real_gemini_locally is False
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_use_real_gemini_locally_blank_also_defaults_to_false(blank: str) -> None:
+    settings = load_settings(environment_with(USE_REAL_GEMINI_LOCALLY=blank))
+
+    assert settings.use_real_gemini_locally is False
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("true", True), ("True", True), ("TRUE", True), ("false", False), ("False", False)],
+)
+def test_use_real_gemini_locally_explicit_valid_values(raw: str, expected: bool) -> None:
+    settings = load_settings(environment_with(USE_REAL_GEMINI_LOCALLY=raw))
+
+    assert settings.use_real_gemini_locally is expected
+
+
+def test_use_real_gemini_locally_invalid_value_aborts() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_with(USE_REAL_GEMINI_LOCALLY="yes"))
+
+    message = str(raised.value)
+    assert "USE_REAL_GEMINI_LOCALLY" in message
+    assert "yes" in message
+
+
+def test_use_real_gemini_locally_appears_in_repr() -> None:
+    rendered = repr(load_settings(environment_with(USE_REAL_GEMINI_LOCALLY="true")))
+
+    assert "use_real_gemini_locally=True" in rendered
+
+
+def test_use_real_gemini_locally_has_a_dataclass_level_default() -> None:
+    """Same reasoning as ``report_run_mode``'s own dataclass-level default
+    test just above: existing direct ``Settings(...)`` construction must
+    keep working unmodified."""
+    settings = Settings(
+        environment=Environment.LOCAL,
+        database_url="postgresql://astro:astro@localhost:5432/astro_report",
+        port=8000,
+        auth_password_hash=VALID_AUTH_PASSWORD_HASH,
+        session_secret_key="test-session-secret-key-at-least-32-chars-long",
+        gemini_api_key="test-gemini-api-key",
+        gemini_data_terms_verified_at="2026-01-15",
+    )
+
+    assert settings.use_real_gemini_locally is False
 
 
 # --- The password never reaches a repr, a log line or an error ---------------

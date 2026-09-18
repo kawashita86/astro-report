@@ -38,11 +38,16 @@ services:
       # hash's own `$`-delimited fields must survive as literal characters.
       AUTH_PASSWORD_HASH: "$$argon2id$$v=19$$m=65536,t=3,p=4$$BoNaYBFxFkVYK0EWHFpjhQ$$siqk2ea0LCm0U9ClzlqGrirWdOUG70cH8vNB1cGODMU"
       SESSION_SECRET_KEY: local-dev-only-session-secret-key-change-me-0000
-      # Required by load_settings() but never sent to Gemini here: under
-      # ENVIRONMENT=local, get_generator() (shell/http/routes/report_runs.py)
-      # returns RecordedResponseGenerator, which never calls the provider --
-      # these are placeholder values only (Story 4.9).
-      GEMINI_API_KEY: local-dev-unused
+      # Required by load_settings(). Under ENVIRONMENT=local, get_generator()
+      # (shell/http/routes/report_runs.py) returns RecordedResponseGenerator
+      # by default and never calls the provider, so the placeholder below is
+      # fine as-is (Story 4.9). GEMINI_API_KEY pulls from a root .env file if
+      # one is present (docker compose's own variable substitution, not this
+      # service's environment) -- set a real key there plus
+      # USE_REAL_GEMINI_LOCALLY=true to exercise the real GeminiGenerator
+      # against this local Postgres instead.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-local-dev-unused}
+      USE_REAL_GEMINI_LOCALLY: ${USE_REAL_GEMINI_LOCALLY:-false}
       GEMINI_DATA_TERMS_VERIFIED_AT: "2026-08-27"
     ports:
       - "8000:8000"

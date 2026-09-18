@@ -113,6 +113,13 @@ class Settings:
     # directly without this field and must keep working unmodified (Story
     # 3.11's Boundaries).
     report_run_mode: ReportRunMode = ReportRunMode.POLL
+    # Mirrors `report_run_mode`'s own optional-with-dataclass-default shape.
+    # `Environment.LOCAL` normally forces `RecordedResponseGenerator` (Story
+    # 4.9) so a local run never spends real Gemini quota by accident; this is
+    # the explicit, single opt-out a developer sets deliberately (never a
+    # deployment default -- `compose.yaml` leaves it unset) to exercise the
+    # real `GeminiGenerator` against a local Postgres.
+    use_real_gemini_locally: bool = False
 
     def __repr__(self) -> str:
         return (
@@ -122,7 +129,8 @@ class Settings:
             f"session_secret_key={self.redacted_session_secret_key!r}, "
             f"gemini_api_key={self.redacted_gemini_api_key!r}, "
             f"gemini_data_terms_verified_at={self.gemini_data_terms_verified_at!r}, "
-            f"report_run_mode={self.report_run_mode!r})"
+            f"report_run_mode={self.report_run_mode!r}, "
+            f"use_real_gemini_locally={self.use_real_gemini_locally!r})"
         )
 
     @property
@@ -193,9 +201,7 @@ def _read_required(
 
 def _read_environment(environ: Mapping[str, str]) -> tuple[Environment | None, str | None]:
     permitted = ", ".join(member.value for member in Environment)
-    raw, error = _read_required(
-        environ, "ENVIRONMENT", f"Permitted values: {permitted}."
-    )
+    raw, error = _read_required(environ, "ENVIRONMENT", f"Permitted values: {permitted}.")
     if error is not None:
         return None, error
     assert raw is not None
@@ -248,8 +254,7 @@ def _read_port(environ: Mapping[str, str]) -> tuple[int | None, str | None]:
         return None, f"PORT is invalid: {raw!r} is not an integer."
     if not _MIN_PORT <= port <= _MAX_PORT:
         return None, (
-            f"PORT is invalid: {port} is outside the permitted range "
-            f"{_MIN_PORT}-{_MAX_PORT}."
+            f"PORT is invalid: {port} is outside the permitted range " f"{_MIN_PORT}-{_MAX_PORT}."
         )
     return port, None
 
@@ -270,9 +275,7 @@ def _read_auth_password_hash(
     try:
         argon2.extract_parameters(raw)
     except InvalidHashError:
-        return None, (
-            "AUTH_PASSWORD_HASH is invalid: it is not a well-formed Argon2 hash."
-        )
+        return None, ("AUTH_PASSWORD_HASH is invalid: it is not a well-formed Argon2 hash.")
     return raw, None
 
 
@@ -325,8 +328,7 @@ def _read_gemini_data_terms_verified_at(
         parsed = date.fromisoformat(raw)
     except ValueError:
         return None, (
-            f"GEMINI_DATA_TERMS_VERIFIED_AT is invalid: {raw!r} is not an "
-            "ISO date (YYYY-MM-DD)."
+            f"GEMINI_DATA_TERMS_VERIFIED_AT is invalid: {raw!r} is not an " "ISO date (YYYY-MM-DD)."
         )
     if parsed > date.today():
         return None, (
@@ -356,6 +358,24 @@ def _read_report_run_mode(
         )
 
 
+def _read_use_real_gemini_locally(
+    environ: Mapping[str, str],
+) -> tuple[bool | None, str | None]:
+    """Follows ``_read_report_run_mode``'s own optional shape: unset or
+    blank means ``False``, never a missing-variable error. ``"true"``/
+    ``"false"`` (case-insensitive) are the only accepted explicit values --
+    anything else is named as invalid rather than guessed at."""
+    raw = environ.get("USE_REAL_GEMINI_LOCALLY")
+    if raw is None or not raw.strip():
+        return False, None
+    normalized = raw.strip().lower()
+    if normalized == "true":
+        return True, None
+    if normalized == "false":
+        return False, None
+    return None, (f"USE_REAL_GEMINI_LOCALLY is invalid: {raw!r} is not 'true' or 'false'.")
+
+
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """Validate ``environ`` into a frozen :class:`Settings`.
 
@@ -377,6 +397,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         _read_gemini_data_terms_verified_at(source)
     )
     report_run_mode, report_run_mode_error = _read_report_run_mode(source)
+    use_real_gemini_locally, use_real_gemini_locally_error = _read_use_real_gemini_locally(source)
 
     problems = [
         problem
@@ -389,6 +410,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             gemini_api_key_error,
             gemini_data_terms_verified_at_error,
             report_run_mode_error,
+            use_real_gemini_locally_error,
         )
         if problem is not None
     ]
@@ -407,6 +429,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         and gemini_api_key is not None
         and gemini_data_terms_verified_at is not None
         and report_run_mode is not None
+        and use_real_gemini_locally is not None
     )
     return Settings(
         environment=environment,
@@ -417,6 +440,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         gemini_api_key=gemini_api_key,
         gemini_data_terms_verified_at=gemini_data_terms_verified_at,
         report_run_mode=report_run_mode,
+        use_real_gemini_locally=use_real_gemini_locally,
     )
 
 

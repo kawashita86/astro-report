@@ -59,6 +59,8 @@ L'estensione vincolante di **2.300 – 3.000 parole** si applica alle sei sezion
 
 Le sezioni devono comparire esattamente in questo ordine, rispettando la lingua italiana, gli scopi tematici, i budget volumetrici e la ripartizione obbligatoria in paragrafi.
 
+**Sui riferimenti a Case specifiche nei paragrafi che seguono.** Dove un paragrafo indica una Casa precisa (es. "Casa X", "Casa VI", "Case V e VII"), quel riferimento descrive il territorio tematico da esplorare *quando il Payload del mese offre davvero un evento che coinvolge quella Casa* -- un ingresso, un aspetto al Medio Cielo o all'Ascendente, o un pianeta la cui Casa natale risulta dal profilo. Se per un dato mese il Payload non offre alcun evento pertinente a quella Casa specifica, il paragrafo tratta comunque il tema generale indicato (ambizione professionale, gestione del carico quotidiano, flusso di cassa, ecc.), ancorandosi al transito realmente più rilevante per quell'area -- mai inventando un'attivazione di quella Casa in assenza di un evento che la sostenga.
+
 ### 1. Energia generale del mese
 
 * **Ambito:** Quadro sistemico e psicodinamico del periodo. Definisce il clima evolutivo dominante, l'interazione tra i cicli dei pianeti lenti e le svolte segnate dalle lunazioni.

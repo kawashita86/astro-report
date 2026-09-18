@@ -89,8 +89,13 @@ def generator_for_settings(settings: Settings) -> Generator:
     """The ``Environment.LOCAL`` -> ``RecordedResponseGenerator()`` / else
     ``GeminiGenerator(settings.gemini_api_key)`` branch, shared by
     ``shell/http/routes/report_runs.py::get_generator`` and
-    :func:`_run_pending_report_runs` so both call sites can never drift."""
-    if settings.environment is Environment.LOCAL:
+    :func:`_run_pending_report_runs` so both call sites can never drift.
+
+    ``settings.use_real_gemini_locally`` (Story 4.9's own opt-out) is the one
+    exception: a developer who has explicitly set ``USE_REAL_GEMINI_LOCALLY``
+    still gets a real ``GeminiGenerator`` under ``Environment.LOCAL`` --
+    deliberate and explicit, never a deployment default."""
+    if settings.environment is Environment.LOCAL and not settings.use_real_gemini_locally:
         return RecordedResponseGenerator()
     return GeminiGenerator(settings.gemini_api_key)
 

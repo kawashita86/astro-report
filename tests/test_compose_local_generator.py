@@ -1,6 +1,8 @@
 """``compose.yaml``'s ``app`` service declares the two Gemini variables
-``load_settings()`` requires unconditionally, so ``docker compose up`` boots
-clean under ``RecordedResponseGenerator`` (Story 4.9).
+``load_settings()`` requires unconditionally, plus the optional
+``USE_REAL_GEMINI_LOCALLY`` opt-out, all with non-blank fallbacks so
+``docker compose up`` boots clean under ``RecordedResponseGenerator`` even
+with no ``.env`` present at all (Story 4.9).
 
 Mirrors ``tests/test_dockerfile_ephemeris_build.py``'s own approach: read the
 file, no Docker/compose invoked, no containers started.
@@ -39,12 +41,27 @@ def _app_service_block(compose_text: str) -> str:
 
 
 def test_app_service_declares_gemini_api_key(compose_text: str) -> None:
+    """A host ``.env`` may override ``GEMINI_API_KEY`` (Story 4.9's opt-out,
+    ``USE_REAL_GEMINI_LOCALLY``), but the ``:-local-dev-unused`` fallback
+    must still resolve to a non-blank value when no ``.env`` is present at
+    all -- otherwise a fresh clone's ``docker compose up`` fails
+    ``load_settings()``'s unconditional requirement before the server
+    starts."""
     block = _app_service_block(compose_text)
 
-    assert "GEMINI_API_KEY: local-dev-unused" in block, (
-        "load_settings() requires GEMINI_API_KEY unconditionally; without it "
-        "here, `docker compose up` fails validation before the server starts"
-    )
+    assert "GEMINI_API_KEY: ${GEMINI_API_KEY:-local-dev-unused}" in block
+
+
+def test_app_service_declares_use_real_gemini_locally_defaulting_to_false(
+    compose_text: str,
+) -> None:
+    """Same reasoning as the key itself just above: the real Gemini opt-out
+    must default to ``false`` when no ``.env`` overrides it, so
+    ``RecordedResponseGenerator`` -- never real Gemini spend -- is what a
+    fresh clone gets by default (Story 4.9)."""
+    block = _app_service_block(compose_text)
+
+    assert "USE_REAL_GEMINI_LOCALLY: ${USE_REAL_GEMINI_LOCALLY:-false}" in block
 
 
 def test_app_service_declares_gemini_data_terms_verified_at(compose_text: str) -> None:

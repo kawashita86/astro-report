@@ -175,6 +175,17 @@ _ANGLE_NODE_LABELS_IT: dict[str, str] = {
     "south_node": "Nodo Sud",
 }
 
+#: The two angles among ``_natal_targets()``'s fourteen fixed targets that
+#: are themselves a house cusp, by astrological definition -- never data-
+#: dependent, so a Claim naming the house of an Aspect whose
+#: ``transiting_body``/``natal_point`` is one of these two grounds
+#: unconditionally (sprint-change-proposal-2026-09-18). The Lunar Nodes
+#: carry no fixed house of their own and are deliberately absent.
+_ANGLE_NATAL_POINT_HOUSE: dict[str, int] = {
+    "ascendant": 1,
+    "midheaven": 10,
+}
+
 #: The Italian wrapping-noun phrase for a checkable category whose bare
 #: value(s) are not self-descriptive on their own (a house number, a
 #: day-of-month number) -- ``"body/sign"`` needs no entry here: a translated
@@ -192,11 +203,21 @@ _CATEGORY_LABELS_IT: dict[str, str] = {
 #: Which cited-entry ``"kind"`` supplies a fact for each checkable category,
 #: and which field(s) of that kind carry it -- the Design Notes category
 #: table, reimplemented as data these extraction functions read.
-_DATE_FIELD_BY_KIND: dict[str, str] = {
-    "aspect": "perfected_at",
-    "station": "station_at",
-    "ingress": "crossed_at",
-    "lunation": "occurred_at",
+#:
+#: ``"aspect"`` carries three: ``perfected_at`` (the exact date, ``None`` for
+#: a never-perfected Aspect) alongside ``orb_entry_at``/``orb_exit_at`` (the
+#: orb window's start/end) -- the Style Guide's own §4 explicitly invites
+#: describing "la finestra in cui l'aspetto è operativo (fase applicante e
+#: separante)", so a date drawn from either boundary is exactly as grounded
+#: as the perfection date itself (sprint-change-proposal-2026-09-18: a real
+#: generation cited an Aspect's ``orb_exit_at`` day and was flagged as
+#: hallucinated when only ``perfected_at`` counted). The other three kinds
+#: carry no orb window at all -- one date each, unchanged.
+_DATE_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
+    "aspect": ("perfected_at", "orb_entry_at", "orb_exit_at"),
+    "station": ("station_at",),
+    "ingress": ("crossed_at",),
+    "lunation": ("occurred_at",),
 }
 
 #: The Italian words this module can translate into a Payload-comparable
@@ -278,6 +299,70 @@ def _index_entries(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return index
 
 
+def _natal_house_by_planet(payload: dict[str, Any]) -> dict[str, int]:
+    """Every planet's own natal house, read from the Payload's ``profile``
+    sub-objects (``core/payload/assemble.py``'s per-Section natal snapshot)
+    (sprint-change-proposal-2026-09-18). A planet's natal house never
+    changes across Sections, so any one occurrence grounds a Claim
+    regardless of which Section's ``profile`` it came from.
+
+    Distinguished from a ``"house_N"``/``"ascendant"`` profile entry
+    (describing what a house itself contains, keyed ``"number"``/
+    ``"planets"``/``"ruler"``) by requiring both a string ``"name"`` and an
+    integer ``"house"`` field on the same dict -- only a planet's own
+    profile entry carries that exact shape."""
+    houses: dict[str, int] = {}
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, dict):
+            name = value.get("name")
+            house = value.get("house")
+            if isinstance(name, str) and isinstance(house, int) and not isinstance(house, bool):
+                houses[name.lower()] = house
+            for item in value.values():
+                _walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(payload)
+    return houses
+
+
+def _natal_sign_by_point(payload: dict[str, Any]) -> dict[str, str]:
+    """Every planet's own natal sign, plus the Ascendant's (the only angle
+    the Payload's ``profile`` sub-objects record a sign for), read the same
+    way ``_natal_house_by_planet()`` reads houses (sprint-change-proposal-
+    2026-09-18). A pre-computed field the Payload already carries, not
+    astronomy re-derived from a raw degree -- ``_body_sign_facts()``'s own
+    Lunation docstring draws exactly this line, forbidding the latter, not
+    the former.
+
+    The Ascendant's own profile entry carries no ``"name"`` field (it is
+    keyed literally ``"ascendant"``, unlike a planet's own profile entry),
+    so it needs the dict key itself to identify, not the shape alone."""
+    signs: dict[str, str] = {}
+
+    def _walk(value: Any, key: str | None) -> None:
+        if isinstance(value, dict):
+            sign = value.get("sign")
+            if isinstance(sign, str):
+                name = value.get("name")
+                house = value.get("house")
+                if isinstance(name, str) and isinstance(house, int) and not isinstance(house, bool):
+                    signs[name.lower()] = sign.lower()
+                elif key == "ascendant":
+                    signs["ascendant"] = sign.lower()
+            for child_key, child_value in value.items():
+                _walk(child_value, child_key)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item, key)
+
+    _walk(payload, None)
+    return signs
+
+
 def _cited_entries(
     sentence: Sentence, entry_index: dict[str, dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -325,7 +410,9 @@ def _asserted_retrograde(lowered_text: str, vocabulary: GateVocabulary) -> bool:
 # --- Per-category: what the cited entries expose ------------------------------
 
 
-def _body_sign_facts(entries: list[dict[str, Any]]) -> frozenset[str]:
+def _body_sign_facts(
+    entries: list[dict[str, Any]], natal_sign_by_point: dict[str, str]
+) -> frozenset[str]:
     """Story 5.2 amendment: a ``lunation`` entry always asserts ``"moon"``.
     A Lunation *is* the Moon (Delta-lambda between Moon and Sun crossing 0/180
     degrees, ``core/types/transits.py::Lunation``) -- its dataclass carries no
@@ -335,11 +422,17 @@ def _body_sign_facts(entries: list[dict[str, Any]]) -> frozenset[str]:
     written "Luna Nuova"/"Luna Piena" sentence failed as ``invented_fact``
     for the word "luna" -- a false positive on every single month's Report,
     since a Lunation happens monthly and Italian has no natural way to name
-    one without the word. No sign fact is added for the same entry: a
-    Lunation's ``longitude`` would let one be derived, but that is
+    one without the word. No *transiting* sign fact is added for a Lunation
+    itself: its ``longitude`` would let one be derived, but that is
     re-deriving astronomy from a raw degree, which this module's Never
-    section forbids (AD-1) -- a sign-naming Claim citing only a Lunation
+    section forbids (AD-1) -- a Claim naming the Lunation's own current sign
     still correctly fails.
+
+    (sprint-change-proposal-2026-09-18): every body/point gathered above
+    also grounds its own *natal* sign, when the Payload's ``profile`` data
+    records one -- a different, pre-computed fact ("Luna natale in Toro" is
+    not "this month's Luna Piena is in Toro"), not the re-derivation the
+    paragraph above forbids.
     """
     facts: set[str] = set()
     for entry in entries:
@@ -355,10 +448,29 @@ def _body_sign_facts(entries: list[dict[str, Any]]) -> frozenset[str]:
                 facts.add(value.lower())
         elif kind == "lunation":
             facts.add("moon")
+
+    for point in frozenset(facts):
+        sign = natal_sign_by_point.get(point)
+        if sign is not None:
+            facts.add(sign)
     return frozenset(facts)
 
 
-def _house_facts(entries: list[dict[str, Any]]) -> frozenset[int]:
+def _house_facts(
+    entries: list[dict[str, Any]],
+    natal_house_by_planet: dict[str, int],
+    natal_sign_by_point: dict[str, str],
+) -> frozenset[int]:
+    """(sprint-change-proposal-2026-09-18): alongside an Ingress's own
+    ``house_departed``/``house_entered`` and a Lunation's ``natal_house``,
+    every body/point a cited entry asserts (``_body_sign_facts``'s own
+    extraction, reused rather than re-derived here) grounds one more house:
+    a fixed angle (Ascendente/Medio Cielo) via ``_ANGLE_NATAL_POINT_HOUSE``,
+    or a planet's own natal house via ``natal_house_by_planet``. A real
+    generation hit exactly this: "la tua Venere natale si trova nella
+    seconda casa", citing only an Aspect -- true, and present in the
+    Payload's ``profile`` data, but previously ungroundable since no cited
+    entry kind carried a house field of its own for it."""
     facts: set[int] = set()
     for entry in entries:
         kind = entry.get("kind")
@@ -371,17 +483,29 @@ def _house_facts(entries: list[dict[str, Any]]) -> frozenset[int]:
             value = entry.get("natal_house")
             if isinstance(value, int) and not isinstance(value, bool):
                 facts.add(value)
+
+    for body in _body_sign_facts(entries, natal_sign_by_point):
+        angle_house = _ANGLE_NATAL_POINT_HOUSE.get(body)
+        if angle_house is not None:
+            facts.add(angle_house)
+        natal_house = natal_house_by_planet.get(body)
+        if natal_house is not None:
+            facts.add(natal_house)
     return frozenset(facts)
 
 
 def _date_facts(entries: list[dict[str, Any]]) -> frozenset[int]:
     facts: set[int] = set()
     for entry in entries:
-        field = _DATE_FIELD_BY_KIND.get(entry.get("kind"))
-        if field is None:
-            continue
-        value = entry.get(field)
-        if isinstance(value, str):
+        fields = _DATE_FIELDS_BY_KIND.get(entry.get("kind"), ())
+        for field in fields:
+            value = entry.get(field)
+            if not isinstance(value, str):
+                # Covers both a missing field and a ``None`` value (an
+                # aspect's ``perfected_at`` when ``never_perfected`` is true,
+                # or its ``orb_exit_at`` when the window is still open at
+                # month end) -- neither contributes a day fact.
+                continue
             try:
                 facts.add(datetime.fromisoformat(value).day)
             except ValueError:
@@ -473,6 +597,8 @@ def _check_claim(
     sentence: Sentence,
     sentence_index: int,
     entry_index: dict[str, dict[str, Any]],
+    natal_house_by_planet: dict[str, int],
+    natal_sign_by_point: dict[str, str],
     vocabulary: GateVocabulary,
 ) -> list[GateViolation]:
     if not sentence.entry_ids:
@@ -499,7 +625,7 @@ def _check_claim(
             section=section,
             sentence=sentence,
             sentence_index=sentence_index,
-            gathered=_body_sign_facts(entries),
+            gathered=_body_sign_facts(entries, natal_sign_by_point),
             asserted=asserted_bodies_signs,
         )
         if violation is not None:
@@ -512,7 +638,7 @@ def _check_claim(
             section=section,
             sentence=sentence,
             sentence_index=sentence_index,
-            gathered=_house_facts(entries),
+            gathered=_house_facts(entries, natal_house_by_planet, natal_sign_by_point),
             asserted=asserted_houses,
         )
         if violation is not None:
@@ -580,6 +706,8 @@ def run_gate(
     house, date, retrograde, date-token-in-day-list).
     """
     entry_index = _index_entries(payload)
+    natal_house_by_planet = _natal_house_by_planet(payload)
+    natal_sign_by_point = _natal_sign_by_point(payload)
     violations: list[GateViolation] = []
 
     for section_field in dataclass_fields(draft):
@@ -593,6 +721,8 @@ def run_gate(
                         sentence=sentence,
                         sentence_index=sentence_index,
                         entry_index=entry_index,
+                        natal_house_by_planet=natal_house_by_planet,
+                        natal_sign_by_point=natal_sign_by_point,
                         vocabulary=vocabulary,
                     )
                 )

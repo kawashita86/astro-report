@@ -133,9 +133,7 @@ def test_a_claimed_planet_not_matching_the_cited_lunations_moon_fact_is_contradi
     lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
 
     draft = _draft(
-        energia_generale=(
-            Sentence(text="Saturno domina il transito.", entry_ids=(lunation_id,)),
-        )
+        energia_generale=(Sentence(text="Saturno domina il transito.", entry_ids=(lunation_id,)),)
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
@@ -144,9 +142,7 @@ def test_a_claimed_planet_not_matching_the_cited_lunations_moon_fact_is_contradi
     assert _kinds(result) == ["contradicted_fact"]
     assert result.violations[0].section == "energia_generale"
     assert result.violations[0].entry_ids == (lunation_id,)
-    assert result.violations[0].detail == (
-        "afferma Saturno, ma le voci citate confermano Luna."
-    )
+    assert result.violations[0].detail == ("afferma Saturno, ma le voci citate confermano Luna.")
 
 
 def test_a_claimed_planet_whose_cited_id_resolves_to_no_entry_is_invented() -> None:
@@ -186,9 +182,7 @@ def test_a_claimed_day_not_matching_the_cited_aspects_perfected_at_day_is_contra
     frozen = _freeze(aspects=(aspect,))
     aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
 
-    draft = _draft(
-        amore=(Sentence(text="Il 20 porta una svolta.", entry_ids=(aspect_id,)),)
-    )
+    draft = _draft(amore=(Sentence(text="Il 20 porta una svolta.", entry_ids=(aspect_id,)),))
 
     result = run_gate(draft, frozen, _VOCABULARY)
 
@@ -212,9 +206,7 @@ def test_a_claimed_house_not_matching_the_cited_lunations_natal_house_is_contrad
 
     draft = _draft(
         amore=(
-            Sentence(
-                text="Una svolta importante nella tua quinta casa.", entry_ids=(lunation_id,)
-            ),
+            Sentence(text="Una svolta importante nella tua quinta casa.", entry_ids=(lunation_id,)),
         )
     )
 
@@ -240,9 +232,7 @@ def test_golden_example_wrong_house_from_the_design_notes() -> None:
 
     draft = _draft(
         amore=(
-            Sentence(
-                text="La luna piena illumina la tua quinta casa.", entry_ids=(lunation_id,)
-            ),
+            Sentence(text="La luna piena illumina la tua quinta casa.", entry_ids=(lunation_id,)),
         )
     )
 
@@ -342,9 +332,7 @@ def test_a_claimed_sign_is_contradicted_by_a_cited_lunations_moon_fact() -> None
     lunation_id = _find_id(frozen["sections"]["energia_generale"]["lunations"], kind="lunation")
 
     draft = _draft(
-        energia_generale=(
-            Sentence(text="Il Leone domina il tuo mese.", entry_ids=(lunation_id,)),
-        )
+        energia_generale=(Sentence(text="Il Leone domina il tuo mese.", entry_ids=(lunation_id,)),)
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
@@ -368,9 +356,7 @@ def test_a_claimed_retrograde_contradicted_by_the_cited_stations_direction() -> 
     station_id = _find_id(frozen["sections"]["energia_generale"]["stations"], kind="station")
 
     draft = _draft(
-        lavoro=(
-            Sentence(text="Mercurio è retrogrado questa settimana.", entry_ids=(station_id,)),
-        )
+        lavoro=(Sentence(text="Mercurio è retrogrado questa settimana.", entry_ids=(station_id,)),)
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
@@ -394,9 +380,7 @@ def test_a_claimed_retrograde_grounded_by_the_cited_stations_direction_has_no_vi
     station_id = _find_id(frozen["sections"]["energia_generale"]["stations"], kind="station")
 
     draft = _draft(
-        lavoro=(
-            Sentence(text="Saturno è retrogrado questa settimana.", entry_ids=(station_id,)),
-        )
+        lavoro=(Sentence(text="Saturno è retrogrado questa settimana.", entry_ids=(station_id,)),)
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
@@ -413,9 +397,7 @@ def test_an_invented_date_claim_has_the_exact_italian_detail_text() -> None:
     ``"body/sign"``/``"house"`` categories -- this pins the ``"date"``
     category's invented-fact phrasing (I/O Matrix row 'Invented date'), so a
     phrasing bug in that branch would no longer go unnoticed."""
-    draft = _draft(
-        amore=(Sentence(text="Il 8 porta una svolta.", entry_ids=("does-not-exist",)),)
-    )
+    draft = _draft(amore=(Sentence(text="Il 8 porta una svolta.", entry_ids=("does-not-exist",)),))
 
     result = run_gate(draft, _freeze(), _VOCABULARY)
 
@@ -443,9 +425,7 @@ def test_a_contradicted_retrograde_claim_has_the_exact_italian_detail_text() -> 
     station_id = _find_id(frozen["sections"]["energia_generale"]["stations"], kind="station")
 
     draft = _draft(
-        lavoro=(
-            Sentence(text="Mercurio è retrogrado questa settimana.", entry_ids=(station_id,)),
-        )
+        lavoro=(Sentence(text="Mercurio è retrogrado questa settimana.", entry_ids=(station_id,)),)
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
@@ -487,9 +467,7 @@ def test_a_date_token_in_giorni_favorevoli_fails_even_when_correctly_cited() -> 
     aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
 
     draft = _draft(
-        giorni_favorevoli=(
-            Sentence(text="Il 15 gennaio porta chiarezza.", entry_ids=(aspect_id,)),
-        )
+        giorni_favorevoli=(Sentence(text="Il 15 gennaio porta chiarezza.", entry_ids=(aspect_id,)),)
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
@@ -501,9 +479,7 @@ def test_a_date_token_in_giorni_favorevoli_fails_even_when_correctly_cited() -> 
 
 def test_a_date_token_in_giorni_di_attenzione_fails_too() -> None:
     draft = _draft(
-        giorni_di_attenzione=(
-            Sentence(text="Il 3 marzo richiede prudenza.", entry_ids=()),
-        )
+        giorni_di_attenzione=(Sentence(text="Il 3 marzo richiede prudenza.", entry_ids=()),)
     )
 
     result = run_gate(draft, _freeze(), _VOCABULARY)
@@ -518,9 +494,7 @@ def test_an_uncited_date_token_sentence_fails_both_empty_citation_and_date_token
     of-month numeral, no citation) *and* contains a date-shaped token fails
     both checks, not just one."""
     draft = _draft(
-        giorni_favorevoli=(
-            Sentence(text="Il 15 gennaio porta chiarezza.", entry_ids=()),
-        )
+        giorni_favorevoli=(Sentence(text="Il 15 gennaio porta chiarezza.", entry_ids=()),)
     )
 
     result = run_gate(draft, _freeze(), _VOCABULARY)
@@ -567,11 +541,17 @@ def test_a_non_date_lookalike_is_not_a_date_token_in_a_day_list(sentence_text: s
 
 
 @pytest.mark.parametrize("malformed", ["not-a-date", ""])
-def test_a_cited_entry_with_a_malformed_date_field_contributes_no_day_fact(
+def test_a_cited_entry_with_all_date_fields_malformed_contributes_no_day_fact(
     malformed: str,
 ) -> None:
     """Item 42: a malformed ISO date on a cited Payload entry is skipped by
-    ``_date_facts`` rather than raising out of ``run_gate``."""
+    ``_date_facts`` rather than raising out of ``run_gate``. An aspect now
+    grounds a date via three fields (sprint-change-proposal-2026-09-18:
+    ``perfected_at``/``orb_entry_at``/``orb_exit_at`` all count), so all
+    three must be malformed to reach zero facts -- malforming
+    ``perfected_at`` alone (while ``orb_entry_at`` stays well-formed) is
+    covered separately below, and downgrades to ``contradicted_fact``, not
+    ``invented_fact``, since a fact still exists to disagree with."""
     aspect = TransitAspectEvent(
         transiting_body="jupiter",
         natal_point="moon",
@@ -587,6 +567,7 @@ def test_a_cited_entry_with_a_malformed_date_field_contributes_no_day_fact(
     for entry in frozen_aspects:
         if entry["id"] == aspect_id:
             entry["perfected_at"] = malformed
+            entry["orb_entry_at"] = malformed
 
     draft = _draft(
         amore=(Sentence(text="Il 15 porta una svolta.", entry_ids=(aspect_id,)),),
@@ -595,8 +576,42 @@ def test_a_cited_entry_with_a_malformed_date_field_contributes_no_day_fact(
     result = run_gate(draft, frozen, _VOCABULARY)
 
     assert isinstance(result, GateResult)
-    # The day-15 claim cannot be grounded once the date field is unparseable.
+    # The day-15 claim cannot be grounded once every date field is unparseable.
     assert _kinds(result) == ["invented_fact"]
+
+
+def test_a_malformed_perfected_at_alone_downgrades_to_contradicted_not_invented() -> None:
+    """The companion case the test above's docstring describes: only
+    ``perfected_at`` is malformed, ``orb_entry_at`` stays well-formed (day
+    10) -- the Claim still has a fact to disagree with, so this is
+    ``contradicted_fact``, not ``invented_fact``."""
+    aspect = TransitAspectEvent(
+        transiting_body="jupiter",
+        natal_point="moon",
+        aspect="sextile",
+        perfected_at=datetime(2026, 1, 15, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 10, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    frozen_aspects = frozen["sections"]["energia_generale"]["aspects"]
+    aspect_id = _find_id(frozen_aspects, kind="aspect")
+    for entry in frozen_aspects:
+        if entry["id"] == aspect_id:
+            entry["perfected_at"] = "not-a-date"
+
+    draft = _draft(
+        amore=(Sentence(text="Il 15 porta una svolta.", entry_ids=(aspect_id,)),),
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert isinstance(result, GateResult)
+    assert _kinds(result) == ["contradicted_fact"]
+    assert result.violations[0].detail == (
+        "afferma il giorno 15, ma le voci citate confermano il giorno 10."
+    )
 
 
 def test_a_malformed_cited_entry_does_not_suppress_a_well_formed_ones_day_fact() -> None:
@@ -630,9 +645,7 @@ def test_a_malformed_cited_entry_does_not_suppress_a_well_formed_ones_day_fact()
             entry["perfected_at"] = "not-a-date"
 
     draft = _draft(
-        amore=(
-            Sentence(text="Il 15 porta una svolta.", entry_ids=(broken_id, valid_id)),
-        ),
+        amore=(Sentence(text="Il 15 porta una svolta.", entry_ids=(broken_id, valid_id)),),
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
@@ -656,11 +669,248 @@ def test_a_claim_grounded_in_every_checkable_category_produces_no_violation() ->
     ingress_id = _find_id(frozen["sections"]["energia_generale"]["ingresses"], kind="ingress")
 
     draft = _draft(
+        amore=(Sentence(text="Marte entra nella tua quinta casa il 10.", entry_ids=(ingress_id,)),)
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+# --- sprint-change-proposal-2026-09-18: orb window dates also ground a Claim -------
+
+
+def test_a_claimed_day_matching_the_cited_aspects_orb_exit_at_day_is_grounded() -> None:
+    """The Style Guide's own §4 invites describing "la finestra in cui
+    l'aspetto è operativo (fase applicante e separante)" -- a date drawn
+    from the window's close (``orb_exit_at``), not just its exact
+    perfection (``perfected_at``), must ground a Claim rather than being
+    flagged as a hallucination (a real generation hit exactly this: an
+    Aspect perfecting on the 4th, with ``orb_exit_at`` on the 17th, cited
+    for "il 17")."""
+    aspect = TransitAspectEvent(
+        transiting_body="jupiter",
+        natal_point="moon",
+        aspect="square",
+        perfected_at=datetime(2026, 1, 4, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=datetime(2026, 1, 17, tzinfo=UTC),
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+
+    draft = _draft(
+        amore=(Sentence(text="L'aspetto resta operativo fino al 17.", entry_ids=(aspect_id,)),)
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+def test_a_claimed_day_matching_the_cited_aspects_orb_entry_at_day_is_grounded() -> None:
+    """Same reasoning as the ``orb_exit_at`` case just above, for the
+    window's opening instead -- and for a never-perfected Aspect
+    (``perfected_at is None``), the orb entry is the only date it has to
+    offer at all."""
+    aspect = TransitAspectEvent(
+        transiting_body="saturn",
+        natal_point="mars",
+        aspect="trine",
+        perfected_at=None,
+        never_perfected=True,
+        orb_entry_at=datetime(2026, 1, 19, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+
+    draft = _draft(
+        lavoro=(Sentence(text="L'aspetto entra in orbe il 19.", entry_ids=(aspect_id,)),)
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+# --- sprint-change-proposal-2026-09-18: natal placement also grounds a house Claim --
+
+
+def test_a_claimed_house_matching_a_cited_bodys_own_natal_house_is_grounded() -> None:
+    """A real generation hit exactly this: "la tua Venere natale si trova
+    nella seconda casa", citing only an Aspect whose ``transiting_body`` is
+    Venus -- true (the Payload's ``profile`` data puts Venus in natal House
+    2), but previously ungroundable since no Aspect field carries a house
+    at all. The frozen fixture's ``profile`` is hand-injected (mirrors this
+    file's own malformed-date-field tests, which mutate a frozen entry
+    directly) rather than built through a real ``AmoreProfile``, since only
+    the raw dict shape ``_natal_house_by_planet()`` reads matters here."""
+    aspect = TransitAspectEvent(
+        transiting_body="venus",
+        natal_point="sun",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 5, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    frozen["sections"]["energia_generale"]["profile"] = {
+        "venus": {"name": "venus", "sign": "pisces", "house": 2, "aspects": []}
+    }
+
+    draft = _draft(
         amore=(
             Sentence(
-                text="Marte entra nella tua quinta casa il 10.", entry_ids=(ingress_id,)
+                text="La tua Venere natale si trova nella seconda casa.",
+                entry_ids=(aspect_id,),
             ),
         )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+def test_a_claimed_house_matching_the_cited_aspects_ascendant_natal_point_is_grounded() -> None:
+    """The Ascendant is definitionally House 1's own cusp -- fixed, never
+    data-dependent -- so a house Claim on an Aspect whose ``natal_point``
+    is the Ascendant grounds unconditionally, with no ``profile`` lookup
+    needed at all."""
+    aspect = TransitAspectEvent(
+        transiting_body="mars",
+        natal_point="ascendant",
+        aspect="square",
+        perfected_at=datetime(2026, 1, 9, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 7, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+
+    draft = _draft(
+        benessere=(
+            Sentence(
+                text="Marte in quadratura al tuo Ascendente attiva la tua prima casa.",
+                entry_ids=(aspect_id,),
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+def test_a_claimed_house_not_matching_any_natal_placement_is_still_contradicted() -> None:
+    """The extension only adds facts, it never suppresses a real mismatch:
+    Venus's own natal house (2, injected the same way as the grounded test
+    above) does not excuse a sentence claiming a different house (5) for
+    that same citation."""
+    aspect = TransitAspectEvent(
+        transiting_body="venus",
+        natal_point="sun",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 5, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    frozen["sections"]["energia_generale"]["profile"] = {
+        "venus": {"name": "venus", "sign": "pisces", "house": 2, "aspects": []}
+    }
+
+    draft = _draft(
+        amore=(
+            Sentence(
+                text="La tua Venere natale si trova nella quinta casa.",
+                entry_ids=(aspect_id,),
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is False
+    assert _kinds(result) == ["contradicted_fact"]
+    assert result.violations[0].detail == (
+        "afferma la casa 5, ma le voci citate confermano la casa 2."
+    )
+
+
+# --- sprint-change-proposal-2026-09-18: natal placement also grounds a sign Claim ---
+
+
+def test_a_claimed_sign_matching_the_ascendants_own_natal_sign_is_grounded() -> None:
+    """A second real generation hit this one: "Con l'Ascendente in
+    Capricorno" -- true (the Payload's ``profile`` data records the
+    Ascendant's own natal sign), but previously ungroundable since no
+    Aspect field carries a sign at all, only a body/point name. The
+    Ascendant's profile entry is keyed literally ``"ascendant"`` (no
+    ``"name"`` field of its own), unlike a planet's."""
+    aspect = TransitAspectEvent(
+        transiting_body="sun",
+        natal_point="ascendant",
+        aspect="square",
+        perfected_at=datetime(2026, 1, 9, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 7, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    frozen["sections"]["energia_generale"]["profile"] = {
+        "ascendant": {"number": 1, "sign": "capricorn", "planets": [], "aspects": []}
+    }
+
+    draft = _draft(
+        benessere=(
+            Sentence(
+                text="Con l'Ascendente in Capricorno, la disciplina è una risorsa preziosa.",
+                entry_ids=(aspect_id,),
+            ),
+        )
+    )
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert result.passed is True
+    assert result.violations == ()
+
+
+def test_a_claimed_sign_matching_a_planets_own_natal_sign_is_grounded() -> None:
+    """Same reasoning, for a planet's own natal sign instead of the
+    Ascendant's -- read off the same profile entry ``_natal_house_by_planet()``
+    already reads the house from."""
+    aspect = TransitAspectEvent(
+        transiting_body="mercury",
+        natal_point="venus",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 3, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    frozen["sections"]["energia_generale"]["profile"] = {
+        "venus": {"name": "venus", "sign": "pisces", "house": 2, "aspects": []}
+    }
+
+    draft = _draft(
+        amore=(Sentence(text="La tua Venere natale è in Pesci.", entry_ids=(aspect_id,)),)
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
@@ -745,9 +995,7 @@ def test_running_the_gate_twice_on_identical_inputs_is_byte_for_byte_identical()
     frozen = _freeze(ingresses=(ingress,))
     ingress_id = _find_id(frozen["sections"]["energia_generale"]["ingresses"], kind="ingress")
     draft = _draft(
-        amore=(
-            Sentence(text="Marte entra nella tua quinta casa il 10.", entry_ids=(ingress_id,)),
-        ),
+        amore=(Sentence(text="Marte entra nella tua quinta casa il 10.", entry_ids=(ingress_id,)),),
         lavoro=(Sentence(text="Venere illumina il tuo lavoro.", entry_ids=()),),
     )
 
@@ -856,7 +1104,11 @@ def test_index_entries_finds_an_id_that_recurs_under_two_sections() -> None:
         orb_exit_at=None,
     )
     populated = SectionPayload(
-        profile=None, aspects=(aspect,), stations=(), standing_retrogrades=(), ingresses=(),
+        profile=None,
+        aspects=(aspect,),
+        stations=(),
+        standing_retrogrades=(),
+        ingresses=(),
         lunations=(),
     )
     payload = Payload(
@@ -899,9 +1151,7 @@ def test_gate_date_token_pattern_matches_the_generators_hand_duplicated_copy() -
 # --- epic-5-retro-item-40: an accepted classify false positive reaching run_gate --
 
 
-def test_a_mundane_casa_ordinal_sentence_citing_a_house_free_entry_is_an_invented_fact() -> (
-    None
-):
+def test_a_mundane_casa_ordinal_sentence_citing_a_house_free_entry_is_an_invented_fact() -> None:
     """epic-5-retro-item-40 / epic-5-retro Finding 3: a mundane "seconda
     casa" sentence ("la mia seconda casa al mare") is classified as a house
     Claim (``casa`` + an ordinal co-occur) and, citing an Aspect -- a kind
@@ -1045,9 +1295,7 @@ def test_a_bare_duration_number_citing_a_date_free_entry_is_an_invented_fact() -
     )
 
     draft = _draft(
-        amore=(
-            Sentence(text="Per i prossimi 3 giorni rallenta.", entry_ids=(retrograde_id,)),
-        )
+        amore=(Sentence(text="Per i prossimi 3 giorni rallenta.", entry_ids=(retrograde_id,)),)
     )
 
     result = run_gate(draft, frozen, _VOCABULARY)
