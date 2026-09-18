@@ -17,6 +17,7 @@ own Section -- before a ``GeneratedDraft`` is ever returned.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import fields as dataclass_fields
 from typing import Any, Protocol
 
@@ -103,6 +104,31 @@ def _translate_aliases_to_real_ids(
         for field in dataclass_fields(draft)
     }
     return GeneratedDraft(**fields)
+
+
+#: An alias token (``"e12"``, ``"e7"``, ...) appearing inside a sentence's
+#: own ``"text"`` -- the model is instructed to put every id only in
+#: ``entry_ids``, never in the reader-facing prose, but occasionally does
+#: anyway (a real generation shipped "Le numerose retrogradazioni
+#: planetarie (e49, e17, e55, e41, e26)" straight to a client-facing
+#: Report). ``e`` immediately fused to digits, as a whole word, is not a
+#: real Italian token under any circumstance -- unlike the bare word "e"
+#: (the conjunction "and"), which this pattern never matches since it
+#: requires at least one trailing digit.
+_ALIAS_TOKEN_IN_TEXT_PATTERN = re.compile(r"\be\d+\b", re.IGNORECASE)
+
+
+def _validate_no_alias_tokens_in_text(draft: GeneratedDraft) -> None:
+    for field in dataclass_fields(draft):
+        for sentence in getattr(draft, field.name):
+            match = _ALIAS_TOKEN_IN_TEXT_PATTERN.search(sentence.text)
+            if match is not None:
+                raise GenerationError(
+                    "alias_token_in_text",
+                    f"sentence {sentence.text!r} in Section {field.name!r} leaks the "
+                    f"internal id alias {match.group()!r} into reader-facing prose -- "
+                    'ids belong only in "entry_ids", never in "text".',
+                )
 
 
 def _build_response_schema(
@@ -256,6 +282,7 @@ class GeminiGenerator:
 
         data = _parse_response(raw)
         draft = _build_draft(data)
+        _validate_no_alias_tokens_in_text(draft)
         draft = _translate_aliases_to_real_ids(draft, alias_to_id)
         _validate_citations(draft, payload)
         _validate_no_date_tokens(draft)
@@ -434,7 +461,11 @@ def _build_prompt(
         "la frase si basa -- ogni affermazione specifica deve citare almeno un id "
         'valido). Nel Payload qui sotto ogni evento porta un "id" breve (es. '
         '"e12"): usa esattamente questi identificativi brevi in "entry_ids", mai '
-        "un id diverso, più lungo o inventato.\n\n"
+        "un id diverso, più lungo o inventato. Questi id vanno SOLO nel campo "
+        '"entry_ids": il campo "text" è prosa rivolta al lettore finale e non deve '
+        "mai contenere un id, una sua parte, o un riferimento tra parentesi come "
+        '"(e12)" o "(e12, e7)" -- il lettore non vede mai il Payload e un simile '
+        "riferimento nel testo sarebbe incomprensibile e da correggere.\n\n"
         'Le Sezioni "giorni_favorevoli" e "giorni_di_attenzione" non devono MAI '
         "contenere una data (né un giorno del mese con un nome di mese, né una "
         "data in formato ISO): le date sono già proiettate a monte dal codice.\n\n"

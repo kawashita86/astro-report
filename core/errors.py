@@ -35,13 +35,19 @@ PlaceResolutionStep = Literal["geocoding", "timezone_resolution", "cache"]
 #: returned ``entry_id`` absent from the ``Payload``; ``"date_token_validation"``
 #: is a date-shaped token inside ``giorni_favorevoli``/``giorni_di_attenzione``,
 #: where dates are code-projected upstream (Story 3.7) and the model must
-#: never write one.
+#: never write one; ``"day_list_coverage_validation"`` is a Payload day-list
+#: entry with no citing sentence in its own Section (Story 3.7);
+#: ``"alias_token_in_text"`` is an internal id alias (``"e12"``) leaking into
+#: a sentence's reader-facing ``"text"`` instead of staying confined to
+#: ``"entry_ids"`` (sprint-change-proposal-2026-09-18).
 GenerationStep = Literal[
     "prompt_construction",
     "request",
     "parsing",
     "citation_validation",
     "date_token_validation",
+    "day_list_coverage_validation",
+    "alias_token_in_text",
 ]
 
 

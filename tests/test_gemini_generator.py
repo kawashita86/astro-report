@@ -547,6 +547,56 @@ def test_all_new_elements_omit_the_continuity_header_entirely() -> None:
     assert _NOTHING_SIGNIFICANT_CHANGED_STATEMENT not in prompt
 
 
+# --- sprint-change-proposal-2026-09-18: an id alias leaking into "text" -----
+
+
+def test_an_alias_token_leaking_into_reader_facing_text_raises() -> None:
+    """A real generation shipped "Le numerose retrogradazioni planetarie
+    (e49, e17, e55, e41, e26)" straight into a client-facing Report -- the
+    model is instructed to keep every id inside "entry_ids" alone, but this
+    is the defense-in-depth backstop for when it doesn't."""
+    payload = _payload_with_ids(_KNOWN_ID)
+    response = _draft_response(
+        energia_generale=[
+            {
+                "text": "Le numerose retrogradazioni planetarie (e49, e17) pesano sul mese.",
+                "entry_ids": [_KNOWN_ID],
+            }
+        ]
+    )
+    client = _FakeGeminiClient(response=response)
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    with pytest.raises(GenerationError) as caught:
+        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert caught.value.step == "alias_token_in_text"
+    assert "e49" in str(caught.value)
+
+
+def test_the_italian_conjunction_e_alone_is_never_flagged_as_a_leaked_alias() -> None:
+    """ "e" (the conjunction "and") is one of the most common words in
+    Italian prose -- the pattern must require at least one trailing digit
+    fused to it, never match the bare word."""
+    payload = _payload_with_ids(_KNOWN_ID)
+    response = _draft_response(
+        energia_generale=[
+            {
+                "text": "Marte e Venere si oppongono, e questo richiede attenzione.",
+                "entry_ids": [_KNOWN_ID],
+            }
+        ]
+    )
+    client = _FakeGeminiClient(response=response)
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert draft.energia_generale[0].text == (
+        "Marte e Venere si oppongono, e questo richiede attenzione."
+    )
+
+
 # --- Matrix row: model cites an unknown entry id -----------------------------
 
 
