@@ -174,7 +174,8 @@ class GateFailedError(RuntimeError):
     failed immediately on that same check -- ``run.regeneration_count`` is
     left unchanged and ``run.stage`` is not rewound -- routing straight to
     the existing review surface (Stories 5.7/5.8) instead of spending a paid
-    regeneration on a single flagged sentence. Otherwise it increments
+    regeneration. (The shipped threshold is 1, so this branch is inactive
+    today.) Otherwise it increments
     ``run.regeneration_count`` (never ``run.stage_failure_count``, which is
     left untouched) and, while that count is at or below
     ``_MAX_REGENERATIONS``, rewinds ``run.stage`` to ``payload_ready`` so the

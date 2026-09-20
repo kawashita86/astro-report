@@ -140,11 +140,13 @@ _STAGE_SEQUENCE: tuple[str, ...] = (
 
 #: Per-stage overrides for `with_backoff`'s keyword arguments, keyed by
 #: stage name. `draft_ready` is the only stage with a real rate-limited
-#: network call (the module's own Design Notes): 3 attempts, 6-second base
-#: delay, doubling to a second retry at 12s -- three Gemini attempts inside
-#: one `advance()` call span 0s/6s/18s, comfortably inside the provider's 10
-#: requests-per-minute ceiling even if a poll lands right after a prior
-#: `advance()` call's own attempts.
+#: network call (the module's own Design Notes): 3 attempts, 2-second base
+#: delay, doubling to a second retry at 4s -- three Gemini attempts inside
+#: one `advance()` call span 0s/2s/6s. That is 3 requests in ~6s, so a
+#: single `advance()` call stays inside the provider's 10 requests-per-minute
+#: ceiling, but a poll landing right after a prior exhausted call's attempts
+#: can approach it: the short base delay trades rate-limit headroom for a
+#: faster draft stage.
 #:
 #: `gate_passed` (`_run_gate_passed`) is capped at a single attempt. Its
 #: dominant failure mode is a deterministic `GateFailedError`: the stage
@@ -164,17 +166,17 @@ _STAGE_SEQUENCE: tuple[str, ...] = (
 #: than inside a single call. A stage absent from this mapping keeps
 #: `with_backoff`'s plain defaults (`max_attempts=3`, `shell/runner/backoff.py`).
 _STAGE_BACKOFF_OVERRIDES: dict[str, dict[str, object]] = {
-    "draft_ready": {"max_attempts": 3, "base_delay_seconds": 6.0},
+    "draft_ready": {"max_attempts": 3, "base_delay_seconds": 2.0},
     "gate_passed": {"max_attempts": 1},
 }
 
 #: Consecutive `with_backoff` exhaustions on a run's current stage, across
 #: separate `advance()` calls, before that run is marked terminally failed
 #: (Story 4.8). Each `advance()` call already spends up to 3 Gemini attempts
-#: (~18s) when stuck at `draft_ready`; 5 such exhausted `advance()` calls is
-#: ~15 real attempts -- a genuinely exhausted run, not a blip (the module's
+#: (~6s) when stuck at `draft_ready`; 3 such exhausted `advance()` calls is
+#: ~9 real attempts -- a genuinely exhausted run, not a blip (the module's
 #: own Design Notes).
-_MAX_STAGE_FAILURES = 5
+_MAX_STAGE_FAILURES = 3
 
 #: Regeneration attempts a run's current cycle may spend on a `GateFailedError`
 #: before it is marked terminally failed instead of regenerated forever
@@ -183,18 +185,23 @@ _MAX_STAGE_FAILURES = 5
 #: shared counter can't work -- a regeneration's `draft_ready` re-run succeeds
 #: by definition, resetting `stage_failure_count` before `gate_passed` even
 #: runs again). No planning artifact states a number (FR-21/AD-10 only
-#: require "bounded"); `3` mirrors `with_backoff`'s own default
-#: `max_attempts=3`.
-_MAX_REGENERATIONS = 3
+#: require "bounded"); `2` keeps a failing run from spending more than two
+#: paid regenerations (three Generator calls in total) before it reaches
+#: Francesco's review surface.
+_MAX_REGENERATIONS = 2
 
 #: A `GateFailedError` naming fewer than this many violations is not worth
 #: spending a paid regeneration on (sprint-change-proposal-2026-09-17,
-#: correct-course, amending FR-21/AD-10): a single flagged sentence is
-#: routed straight to Francesco's existing review surface (Stories 5.7/5.8)
-#: instead of silently burning a `generator.generate()` call first. Plain,
-#: non-runtime-configurable module constant, mirroring `_MAX_REGENERATIONS`
-#: just above.
-_MIN_VIOLATIONS_FOR_AUTO_REGENERATION = 2
+#: correct-course, amending FR-21/AD-10): it is routed straight to Francesco's
+#: existing review surface (Stories 5.7/5.8) instead of silently burning a
+#: `generator.generate()` call first. The correct-course proposal set this to
+#: 2 (a single flagged sentence skips regeneration); it is deliberately `1`
+#: now, which turns the short-circuit off in practice -- a `GateFailedError`
+#: always names at least one violation, so every failing check regenerates up
+#: to `_MAX_REGENERATIONS`. The branch in `advance()` is kept so raising this
+#: value re-enables it. Plain, non-runtime-configurable module constant,
+#: mirroring `_MAX_REGENERATIONS` just above.
+_MIN_VIOLATIONS_FOR_AUTO_REGENERATION = 1
 
 #: A stage function's uniform signature: every registered stage receives the
 #: same context, whether or not it needs all of it, so the registry stays a
@@ -771,7 +778,7 @@ def advance(
     stage exception. It is intercepted *inside* the retried callable so
     ``with_backoff`` never retries it (a unique-constraint conflict never
     clears on retry, and on ``draft_ready`` a retry would spend another paid
-    ``generator.generate()`` call plus ``with_backoff``'s 6 s / 12 s
+    ``generator.generate()`` call plus ``with_backoff``'s 2 s / 4 s
     sleeps); this function then rolls back, ``session.refresh(run)``, and if
     ``run.stage`` has advanced past the current stage treats it as a
     completed stage (``return run``, no counter change, INFO log). Otherwise
@@ -805,8 +812,9 @@ def advance(
     is marked terminally failed immediately on that same check --
     ``run.regeneration_count`` is left unchanged and ``run.stage`` is not
     rewound -- routing straight to the existing review surface (Stories
-    5.7/5.8) instead of spending a paid regeneration on a single flagged
-    sentence. Otherwise, before incrementing ``run.regeneration_count``
+    5.7/5.8) instead of spending a paid regeneration. (The shipped threshold
+    is 1, so this branch is inactive today; see the constant's comment.)
+    Otherwise, before incrementing ``run.regeneration_count``
     (never ``stage_failure_count``, left untouched) and, while that count is
     at or below :data:`_MAX_REGENERATIONS`, rewinds ``run.stage`` to
     ``payload_ready`` so the *next* poll re-runs ``draft_ready`` -- a

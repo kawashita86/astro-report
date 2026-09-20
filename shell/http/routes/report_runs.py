@@ -326,12 +326,14 @@ _DISPOSITION_VALUES = {value for value, _label in DISPOSITION_CHOICES}
 #: ``advance()`` after a rewind fires immediately on that redirect's own page
 #: load, not after a 2s poll wait -- but a fresh non-Gate terminal failure
 #: still cannot land inside this window, because ``_MAX_STAGE_FAILURES``
-#: (``shell/runner/driver.py``, 5) requires 5 *consecutive* stage-failure
+#: (``shell/runner/driver.py``, 3) requires 3 *consecutive* stage-failure
 #: exhaustions across separate ``advance()`` calls -- each one only reached on
 #: a subsequent, ~2s-apart poll -- before a run is marked terminally failed
-#: for a generic reason. The real minimum margin is therefore several poll
-#: intervals (well over 2s), not "one poll interval" (this story's Design
-#: Notes, review-loop 1; corrected by review-loop 2).
+#: for a generic reason. The real minimum margin is therefore two poll
+#: intervals (~4s, plus each call's own backoff sleeps), still over 2s but
+#: thinner than the original five-poll margin: lowering
+#: ``_MAX_STAGE_FAILURES`` to 2 or less would break this reasoning (this
+#: story's Design Notes, review-loop 1; corrected by review-loop 2).
 _GATE_RESULT_CORRELATION_WINDOW = timedelta(seconds=2)
 
 

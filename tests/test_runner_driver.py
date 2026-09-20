@@ -947,12 +947,13 @@ def _a_two_violation_generated_draft() -> GeneratedDraft:
     """A draft containing exactly two Claims that cite nothing -- ``"Marte"``
     in ``energia_generale`` and ``"Venere"`` in ``amore`` (both
     closed-vocabulary planet tokens, ``core/gate/vocabulary.it.json``) --
-    exactly at ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` (correct-course,
-    2026-09-17): ``run_gate()`` flags two ``"empty_citation"`` violations, so
-    today's rewind-and-regenerate behavior still applies (the boundary
-    case). Used wherever a test needs a violating draft that keeps
-    exercising the pre-existing regeneration mechanics rather than the new
-    low-violation short-circuit."""
+    at the boundary of the low-violation short-circuit (correct-course,
+    2026-09-17) when a test pins ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` to
+    2: ``run_gate()`` flags two ``"empty_citation"`` violations, so the
+    rewind-and-regenerate behavior still applies. Under the shipped value (1)
+    it is simply a failing draft above the threshold. Used wherever a test
+    needs a violating draft that keeps exercising the regeneration
+    mechanics rather than the low-violation short-circuit."""
     return GeneratedDraft(
         energia_generale=(Sentence(text="Marte è forte questo mese.", entry_ids=()),),
         amore=(Sentence(text="Venere porta armonia.", entry_ids=()),),
@@ -1316,7 +1317,7 @@ def test_gate_passed_exhausting_the_regeneration_bound_marks_the_run_terminally_
 
 
 def test_gate_passed_below_the_min_violations_threshold_fails_immediately_without_regenerating(
-    session: Session,
+    session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """I/O & Edge-Case Matrix "Below threshold" row: a ``GateFailedError``
     naming fewer than ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` violations
@@ -1326,7 +1327,12 @@ def test_gate_passed_below_the_min_violations_threshold_fails_immediately_withou
     un-rewound (still ``draft_ready``), and ``run.regeneration_count`` stays
     0, so Francesco reaches the existing Gate-failure review surface
     (Stories 5.7/5.8) immediately instead of after burning a Generator
-    call."""
+    call.
+
+    The shipped threshold is 1, which disables this branch (only a
+    zero-violation failure is below it, and that never raises), so the test
+    pins the constant to 2 to keep the short-circuit mechanism covered."""
+    monkeypatch.setattr(driver_module, "_MIN_VIOLATIONS_FOR_AUTO_REGENERATION", 2)
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
@@ -1339,7 +1345,7 @@ def test_gate_passed_below_the_min_violations_threshold_fails_immediately_withou
     assert run.stage == "draft_ready"
 
     # This poll runs gate_passed, which fails with only 1 violation --
-    # below the threshold, so it fails terminally instead of rewinding.
+    # below the (pinned) threshold, so it fails terminally instead of rewinding.
     result = _advance(session, run, natal_chart, generator=generator)
 
     assert result.stage == "draft_ready", "must not rewind to payload_ready"
@@ -1362,14 +1368,41 @@ def test_gate_passed_below_the_min_violations_threshold_fails_immediately_withou
     assert stored_reports == []
 
 
-def test_gate_passed_at_the_min_violations_threshold_still_rewinds_and_regenerates(
+def test_gate_passed_single_violation_regenerates_under_the_shipped_threshold(
     session: Session,
+) -> None:
+    """With the shipped ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` (1), even a
+    single-violation ``GateFailedError`` is regenerated rather than routed
+    straight to review: the low-violation short-circuit is effectively off."""
+    assert driver_module._MIN_VIOLATIONS_FOR_AUTO_REGENERATION == 1
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+
+    generator = _FakeGenerator(_a_violating_generated_draft())
+    # natal, transits, payload, draft -- one poll each.
+    for _ in range(4):
+        _advance(session, run, natal_chart, generator=generator)
+    assert run.stage == "draft_ready"
+
+    result = _advance(session, run, natal_chart, generator=generator)
+
+    assert result.stage == "payload_ready"
+    assert result.regeneration_count == 1
+    assert result.failed_at is None
+
+
+def test_gate_passed_at_the_min_violations_threshold_still_rewinds_and_regenerates(
+    session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """I/O & Edge-Case Matrix "At threshold (boundary)" row: a
     ``GateFailedError`` naming exactly ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION``
     violations (here, 2 -- ``_a_two_violation_generated_draft()``) is NOT
     skipped -- today's rewind-to-``payload_ready``/increment behavior
-    applies exactly as it did before this change."""
+    applies exactly as it did before this change. The threshold is pinned to
+    2 so "exactly at" stays true whatever the shipped value is."""
+    monkeypatch.setattr(driver_module, "_MIN_VIOLATIONS_FOR_AUTO_REGENERATION", 2)
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
@@ -1399,7 +1432,7 @@ def test_gate_passed_at_the_min_violations_threshold_still_rewinds_and_regenerat
 
 
 def test_gate_passed_low_violation_short_circuit_applies_after_a_prior_regeneration(
-    session: Session,
+    session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Architecture (AD-10, amended 2026-09-17, correct-course): the
     low-violation short-circuit "applies on every failing check in the run's
@@ -1411,7 +1444,9 @@ def test_gate_passed_low_violation_short_circuit_applies_after_a_prior_regenerat
     still short-circuit correctly: ``failed_at`` set, ``run.stage`` not
     rewound a second time, and -- the detail this test exists to prove --
     ``regeneration_count`` stays at its already-incremented value (1),
-    unchanged by this second failure rather than bumped to 2."""
+    unchanged by this second failure rather than bumped to 2. The threshold
+    is pinned to 2 (the shipped value, 1, disables the short-circuit)."""
+    monkeypatch.setattr(driver_module, "_MIN_VIOLATIONS_FOR_AUTO_REGENERATION", 2)
 
     class _TwoViolationsThenOneViolationGenerator:
         def __init__(self) -> None:
@@ -2007,20 +2042,21 @@ class _AlwaysFailingGenerator:
         raise RuntimeError("simulated persistent rate limit")
 
 
-def test_draft_ready_failing_five_consecutive_drive_calls_marks_the_run_terminally_failed(
+def test_draft_ready_failing_max_stage_failures_drive_calls_marks_the_run_terminally_failed(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """I/O & Edge-Case Matrix: "Persistent draft_ready failure across many
-    polls" -- the Gemini call always raises; drive() is called 5 times; the
-    5th call sets failed_at/failure_reason and the run never advances past
-    payload_ready.
+    polls" -- the Gemini call always raises; drive() is called
+    ``_MAX_STAGE_FAILURES`` times; the last call sets failed_at/failure_reason
+    and the run never advances past payload_ready.
 
-    ``draft_ready``'s real override (``base_delay_seconds=6.0``,
-    ``tests/test_runner_backoff.py`` proves that schedule itself) is swapped
-    for a zero-delay one here, so this behavioral test -- 5 consecutive
-    ``drive()`` calls -- doesn't spend the real ~18s/call ``with_backoff``
-    would otherwise sleep; ``max_attempts`` (the thing this test's failure
-    count depends on) is left unchanged.
+    ``draft_ready``'s real override (``base_delay_seconds=2.0``,
+    ``tests/test_runner_backoff.py`` proves the schedule mechanism itself) is
+    swapped for a zero-delay one here, so this behavioral test --
+    ``_MAX_STAGE_FAILURES`` consecutive ``drive()`` calls -- doesn't spend
+    the real ~6s/call ``with_backoff`` would otherwise sleep;
+    ``max_attempts`` (the thing this test's failure count depends on) is
+    left unchanged.
     """
     monkeypatch.setitem(
         driver_module._STAGE_BACKOFF_OVERRIDES,
@@ -2033,7 +2069,7 @@ def test_draft_ready_failing_five_consecutive_drive_calls_marks_the_run_terminal
     session.commit()
 
     generator = _AlwaysFailingGenerator()
-    for _ in range(4):
+    for _ in range(driver_module._MAX_STAGE_FAILURES - 1):
         _drive(session, run, natal_chart, generator=generator)
         assert run.stage == "payload_ready"
         assert run.failed_at is None
@@ -2041,7 +2077,7 @@ def test_draft_ready_failing_five_consecutive_drive_calls_marks_the_run_terminal
     result = _drive(session, run, natal_chart, generator=generator)
 
     assert result.stage == "payload_ready"
-    assert result.stage_failure_count == 5
+    assert result.stage_failure_count == driver_module._MAX_STAGE_FAILURES
     assert result.failed_at is not None
     assert result.failure_reason is not None
     assert "draft_ready" in result.failure_reason
@@ -2053,7 +2089,7 @@ def test_a_failed_run_is_a_noop_on_drive(
     """I/O & Edge-Case Matrix: "Polling a failed run" -- once
     ``run.failed_at`` is set, ``drive()`` does nothing further: no stage
     function runs, nothing about the run changes. A zero-delay draft_ready
-    override keeps the fixture's 5 failing drive() calls fast, mirroring
+    override keeps the fixture's failing drive() calls fast, mirroring
     the previous test's own reasoning."""
     monkeypatch.setitem(
         driver_module._STAGE_BACKOFF_OVERRIDES,
@@ -2066,7 +2102,7 @@ def test_a_failed_run_is_a_noop_on_drive(
     session.commit()
 
     generator = _AlwaysFailingGenerator()
-    for _ in range(5):
+    for _ in range(driver_module._MAX_STAGE_FAILURES):
         _drive(session, run, natal_chart, generator=generator)
     assert run.failed_at is not None, "fixture did not fail the run -- test is vacuous"
     failed_at_before = run.failed_at
@@ -2089,7 +2125,7 @@ def test_draft_ready_failing_then_succeeding_resets_the_failure_counter(
     -- a fail-once-then-succeed Generator still advances the run to
     draft_ready within one drive() call (with_backoff's own retry), and
     ``stage_failure_count`` resets to 0. A zero-delay draft_ready override
-    avoids the one real 6s sleep this fixture would otherwise wait through."""
+    avoids the one real 2s sleep this fixture would otherwise wait through."""
     monkeypatch.setitem(
         driver_module._STAGE_BACKOFF_OVERRIDES,
         "draft_ready",
@@ -2135,14 +2171,14 @@ def test_a_stage_other_than_draft_ready_failing_persistently_also_reaches_termin
 
     monkeypatch.setitem(_STAGE_FUNCTIONS, "natal_ready", _always_fail)
 
-    for _ in range(4):
+    for _ in range(driver_module._MAX_STAGE_FAILURES - 1):
         _drive(session, run, natal_chart)
         assert run.failed_at is None
 
     result = _drive(session, run, natal_chart)
 
     assert result.stage is None
-    assert result.stage_failure_count == 5
+    assert result.stage_failure_count == driver_module._MAX_STAGE_FAILURES
     assert result.failed_at is not None
     assert "natal_ready" in result.failure_reason
 
