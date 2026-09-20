@@ -2952,7 +2952,9 @@ def test_the_draft_page_offers_modifica_e_ricontrolla_prefilled_with_the_open_vi
     assert response.status_code == 200
     assert "Modifica e ricontrolla" in response.text
     assert f'action="/report-runs/{run.id}/violations/0/correct"' in response.text
-    assert '<textarea name="sentence_text">Marte è retrogrado.</textarea>' in response.text
+    assert re.search(
+        r'<textarea name="sentence_text"[^>]*>Marte è retrogrado\.</textarea>', response.text
+    )
     assert "Ricontrolla" in response.text
 
 
