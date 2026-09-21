@@ -65,6 +65,12 @@ USER astro
 # container. Render injects PORT; compose.yaml sets it explicitly.
 EXPOSE 8000
 
+# Docker-level health for Coolify (the VPS), whose own probe needs curl or wget,
+# which this image does not ship. Render ignores HEALTHCHECK and keeps using
+# render.yaml's healthCheckPath. Same route: /healthz, on the PORT uvicorn binds.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ['PORT'], timeout=4)"
+
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 # `exec` inside sh -c replaces the shell, so the container's only process is uvicorn.
 CMD ["sh", "-c", "exec uvicorn shell.http.app:app --no-access-log --host 0.0.0.0 --port ${PORT} --workers 1"]
