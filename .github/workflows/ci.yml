@@ -100,6 +100,7 @@ jobs:
             echo "::notice::Coolify secrets not configured; skipping the production deploy."
             exit 0
           fi
-          curl --fail-with-body --silent --show-error --max-time 60 \
+          # POST: Coolify 4.3 answers a GET on /api/v1/deploy with "use POST".
+          curl --fail-with-body --silent --show-error --max-time 60 -X POST \
             -H "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
             "${COOLIFY_DEPLOY_WEBHOOK}"
