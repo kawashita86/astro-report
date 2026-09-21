@@ -13,10 +13,13 @@ import logging
 import time
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 
 from shell.config import Environment, Settings
-from shell.http.app import app, create_app
+from shell.http.app import app, create_app, get_session
 from shell.http.auth import (
     ALLOWLIST,
     SESSION_COOKIE_NAME,
@@ -52,6 +55,17 @@ LOCAL = Settings(
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(create_app(LOCAL))
+
+
+def _serve_from_an_empty_sqlite(application: FastAPI) -> None:
+    """``GET /`` reads the database; point it at an empty in-memory SQLite so
+    the test does not depend on a Postgres at ``LOCAL.database_url`` (CI's
+    service container has other credentials; most machines have none)."""
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    application.dependency_overrides[get_session] = lambda: Session(engine)
 
 
 # --- sign_session / verify_session: the stateless token -----------------------
@@ -230,6 +244,7 @@ def test_an_expired_cookie_is_rejected_uniformly(client: TestClient) -> None:
 
 
 def test_a_valid_cookie_clears_the_checkpoint(client: TestClient) -> None:
+    _serve_from_an_empty_sqlite(client.app)
     valid = sign_session(int(time.time()) + 3600, SESSION_SECRET_KEY)
     client.cookies.set(SESSION_COOKIE_NAME, valid)
 

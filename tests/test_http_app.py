@@ -20,12 +20,20 @@ from decimal import Decimal
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 
 from core.ephemeris.identity import EphemerisIdentity
 from core.types.computation import ComputationConfig
 from shell.config import Environment, ReportRunMode, Settings
 from shell.http import app as shell_http_app
-from shell.http.app import app, computation_config, create_app, ephemeris_identity
+from shell.http.app import (
+    app,
+    computation_config,
+    create_app,
+    ephemeris_identity,
+    get_session,
+)
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
 
 #: Argon2 hash of "correct horse battery staple" — a fixed test password,
@@ -60,6 +68,17 @@ PRODUCTION = Settings(
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(create_app(LOCAL))
+
+
+def _serve_from_an_empty_sqlite(application: FastAPI) -> None:
+    """``GET /`` reads the database; point it at an empty in-memory SQLite so
+    the test does not depend on a Postgres at ``LOCAL.database_url`` (CI's
+    service container has other credentials; most machines have none)."""
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    application.dependency_overrides[get_session] = lambda: Session(engine)
 
 
 @pytest.fixture
@@ -528,6 +547,7 @@ def test_a_session_from_signing_in_authenticates_later_requests(client: TestClie
     checkpoint and lets a request reach FastAPI's own routing -- proven now
     by `GET /` returning the Story 9.2 dashboard (200) rather than the
     middleware's anonymous 401."""
+    _serve_from_an_empty_sqlite(client.app)
     login = client.post(
         "/login", data={"password": AUTH_PASSWORD}, follow_redirects=False
     )

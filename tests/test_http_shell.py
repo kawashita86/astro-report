@@ -314,14 +314,14 @@ def test_reduced_motion_also_kills_the_toast_skeleton_and_spinner_animations() -
 
 
 def test_shell_js_wires_the_poll_backoff_and_manual_retry() -> None:
-    """AC — the backoff gate (5s/15s) and the manual ``Riprova`` retry are
+    """AC — the backoff gate (1s, then 2s: c1c9d9a) and the manual ``Riprova`` retry are
     wired client-side only: a veto on ``htmx:beforeRequest`` for the
     already-present ``every 2s`` trigger, never a change to that trigger's
     own cadence or to any server route."""
     js = (_STATIC_DIR / "shell.js").read_text(encoding="utf-8")
 
-    assert "5000" in js
-    assert "15000" in js
+    assert "POLL_BACKOFF_MS_FIRST = 1000;" in js
+    assert "POLL_BACKOFF_MS_SUBSEQUENT = 2000;" in js
     assert "poll-retry" in js
     assert "pollBackoff" in js
     assert "[data-poll-retry]" in js

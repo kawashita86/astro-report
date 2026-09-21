@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, event
+from sqlalchemy.engine import make_url
 from sqlmodel import Session, SQLModel
 
 from shell.runner.advisory_lock import _ADVANCE_LOCK_NAMESPACE, try_acquire_advance_lock
@@ -105,7 +106,9 @@ def test_two_connections_single_flight_on_a_real_postgres() -> None:
     """Two connections both call ``try_acquire_advance_lock`` for one run id:
     exactly one gets the lock, the other gets ``False`` without blocking, and
     the lock is gone once the winner's transaction commits."""
-    url = os.environ["MIGRATION_TEST_DATABASE_URL"]
+    # The app's own driver (psycopg 3); a bare postgresql:// URL would make
+    # SQLAlchemy reach for psycopg2, which is not a dependency.
+    url = make_url(os.environ["MIGRATION_TEST_DATABASE_URL"]).set(drivername="postgresql+psycopg")
     engine = create_engine(url)
     run_id = uuid4()
 
