@@ -22,6 +22,12 @@ every run reaches ``gate_passed`` with ``failed_at is None`` (the throughput
 guarantee). It is skipped unless ``RUN_LATENCY_MEASUREMENT=1`` so the
 default ``uv run pytest`` stays fast; run it deliberately as a release
 action and paste its printed block into ``latency.md``.
+
+Story 10.7 adds ``test_measure_epic10_latency`` (``RUN_LATENCY_MEASUREMENT=epic10``):
+the same idea against the running local docker app with real Gemini -- draft,
+per-Section, regeneration and PDF timings, which the guards below hold to the
+Epic 10 targets. Each guard is a plain function over the record's dict so a
+negative test can prove it fails (``test_the_guard_detects_a_*``).
 """
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ import re
 
 import pytest
 
+from tests._latency_epic10 import bound_one_regen_seconds
 from tests._release_validation import (
     REPO_ROOT,
     assert_outcome_permits_release,
@@ -53,30 +60,44 @@ _MAX_RECORD_AGE_DAYS = 550
 _REPORT_BUDGET_SECONDS = 180
 _MONTH_SCAN_BUDGET_SECONDS = 10
 
-#: The minimum live-Gemini generation sample size the composed per-Report p90
-#: may rest on (Boundaries: ``real_gen_sample_n >= 5``).
-_MIN_REAL_GEN_SAMPLE_N = 5
-
 #: The throughput target NFR-5 states: forty Reports in a single working
 #: session.
 _SESSION_REPORTS_TARGET = 40
+
+#: Epic 10's targets (Story 10.7): draft p90 at most, PDF first export at most,
+#: repeat download strictly under.
+_DRAFT_BUDGET_SECONDS = 60
+_PDF_FIRST_BUDGET_SECONDS = 6
+_PDF_REPEAT_BUDGET_SECONDS = 1
+
+#: The fewest successful runs the Epic 10 figures may rest on.
+_MIN_EPIC10_RUNS_OK = 15
 
 _EXPECTED_KEYS = {
     "checked",
     "ratified_by",
     "ratified_on",
     "environment",
-    "report_p90_seconds",
     "report_budget_seconds",
-    "local_stage_p90_seconds",
-    "real_gen_sample_n",
-    "real_gen_p90_seconds",
+    "draft_budget_seconds",
+    "pdf_first_budget_seconds",
+    "pdf_repeat_budget_seconds",
+    "runs_ok",
+    "draft_p90_seconds",
+    "section_p90_seconds",
+    "one_regen_p90_seconds",
+    "one_regen_basis",
+    "regen_runs_observed",
+    "pdf_first_p90_seconds",
+    "pdf_repeat_p90_seconds",
     "month_scan_p90_seconds",
     "month_scan_budget_seconds",
     "session_reports",
     "sitting_confirmed",
+    "repetition_reviewed",
     "outcome",
 }
+
 
 def _epics_requirement_line(tag: str) -> str:
     """The single ``epics.md`` line that begins ``<tag>:`` (e.g. ``NFR-5``) --
@@ -118,18 +139,28 @@ def test_toml_block_parses(meta: dict[str, object]) -> None:
         "update _EXPECTED_KEYS and the matching assertions if a key was added on purpose"
     )
     for key in (
-        "report_p90_seconds",
         "report_budget_seconds",
-        "local_stage_p90_seconds",
-        "real_gen_sample_n",
-        "real_gen_p90_seconds",
+        "draft_budget_seconds",
+        "pdf_first_budget_seconds",
+        "pdf_repeat_budget_seconds",
+        "runs_ok",
+        "regen_runs_observed",
         "month_scan_p90_seconds",
         "month_scan_budget_seconds",
         "session_reports",
     ):
         assert isinstance(meta[key], int), (
-            f"`{key}` must be a whole-number integer (whole seconds / a count), "
-            f"got {meta[key]!r}"
+            f"`{key}` must be a whole-number integer (whole seconds / a count), got {meta[key]!r}"
+        )
+    for key in (
+        "draft_p90_seconds",
+        "section_p90_seconds",
+        "one_regen_p90_seconds",
+        "pdf_first_p90_seconds",
+        "pdf_repeat_p90_seconds",
+    ):
+        assert isinstance(meta[key], (int, float)) and not isinstance(meta[key], bool), (
+            f"`{key}` must be a number of seconds, got {meta[key]!r}"
         )
     assert isinstance(meta["environment"], str) and meta["environment"].strip(), (
         f"`environment` must be a non-empty string describing where the "
@@ -176,12 +207,16 @@ def test_sitting_confirmed_is_a_bool(meta: dict[str, object]) -> None:
         f"`sitting_confirmed` must be a TOML boolean (true/false), got "
         f"{meta['sitting_confirmed']!r}"
     )
+    assert isinstance(meta["repetition_reviewed"], bool), (
+        f"`repetition_reviewed` must be a TOML boolean (true/false), got "
+        f"{meta['repetition_reviewed']!r}"
+    )
 
 
 @pytest.mark.xfail(
     strict=True,
     reason="epic-8-retro-item-65: latency.md honestly records outcome = "
-    '"blocked" -- AC-4\'s human half (Francesco\'s forty-report one-sitting '
+    "\"blocked\" -- AC-4's human half (Francesco's forty-report one-sitting "
     "produce -> review -> export) has not happened, so `sitting_confirmed` is "
     "false. When that sitting is done and the field flips to true this test "
     "passes -> xfail_strict fires an XPASS -> remove this marker.",
@@ -193,21 +228,136 @@ def test_outcome_permits_release(meta: dict[str, object]) -> None:
         evidence_value=True,
         record_label="latency",
     )
+    assert meta["repetition_reviewed"] is True, (
+        "release blocked until Francesco has read the Epic 10 reports side by side "
+        "for repetition between Sections (`repetition_reviewed`)"
+    )
     assert meta["outcome"] == "pass", (
         "release blocked until latency is measured, budgets reconciled and the "
         f'record ratified (outcome = {meta["outcome"]!r}, expected "pass")'
     )
 
 
-def test_report_p90_within_budget(meta: dict[str, object]) -> None:
-    # NFR-5 says "under 3 minutes" -- strict; a p90 equal to the budget
-    # violates the requirement text, so this is `<`, not `<=`.
-    assert meta["report_p90_seconds"] < meta["report_budget_seconds"], (
-        f"measured per-Report p90 {meta['report_p90_seconds']}s is not under the "
-        f"recorded budget {meta['report_budget_seconds']}s -- reconcile the "
-        "budget (revise NFR-5 in epics.md and the PRD to the ratified value) "
-        "rather than leaving it unmet"
+def _check_report_within_budget(meta: dict[str, object]) -> None:
+    # NFR-5 says "under 3 minutes" -- strict. With regeneration counted in
+    # (the one-regeneration figure), not the single-call best case.
+    assert meta["one_regen_p90_seconds"] < meta["report_budget_seconds"], (
+        f"one-regeneration p90 {meta['one_regen_p90_seconds']}s is not under the "
+        f"recorded budget {meta['report_budget_seconds']}s -- reconcile the budget "
+        "(revise NFR-5 in epics.md and the PRD to the ratified value) rather than "
+        "leaving it unmet"
     )
+
+
+def _check_draft_within_budget(meta: dict[str, object]) -> None:
+    assert meta["draft_p90_seconds"] <= meta["draft_budget_seconds"], (
+        f"draft p90 {meta['draft_p90_seconds']}s is over the Epic 10 target "
+        f"{meta['draft_budget_seconds']}s -- do not edit the budget silently"
+    )
+
+
+def _check_pdf_within_budget(meta: dict[str, object]) -> None:
+    assert meta["pdf_first_p90_seconds"] <= meta["pdf_first_budget_seconds"], (
+        f"PDF first-export p90 {meta['pdf_first_p90_seconds']}s is over the target "
+        f"{meta['pdf_first_budget_seconds']}s"
+    )
+    assert meta["pdf_repeat_p90_seconds"] < meta["pdf_repeat_budget_seconds"], (
+        f"PDF repeat-download p90 {meta['pdf_repeat_p90_seconds']}s is not under "
+        f"{meta['pdf_repeat_budget_seconds']}s -- the stored-PDF cache is not serving"
+    )
+
+
+def _check_regen_basis(meta: dict[str, object]) -> None:
+    """A figure derived from a bound may never be recorded as observed, and the
+    bound must be the documented sum -- never a hand-typed lower number."""
+    observed = meta["regen_runs_observed"] >= 1
+    assert (meta["one_regen_basis"] == "observed") == observed, (
+        f"one_regen_basis {meta['one_regen_basis']!r} contradicts "
+        f"regen_runs_observed = {meta['regen_runs_observed']}"
+    )
+    if not observed:
+        assert meta["one_regen_basis"] == "bound"
+        bound = bound_one_regen_seconds(meta["draft_p90_seconds"], meta["section_p90_seconds"])
+        assert meta["one_regen_p90_seconds"] >= bound, (
+            f"bound-basis one_regen_p90_seconds {meta['one_regen_p90_seconds']}s is below "
+            f"draft p90 + 2 x section p90 = {bound}s"
+        )
+
+
+def _check_enough_runs(meta: dict[str, object]) -> None:
+    assert meta["runs_ok"] >= _MIN_EPIC10_RUNS_OK, (
+        f"runs_ok {meta['runs_ok']} is below the minimum {_MIN_EPIC10_RUNS_OK} -- the "
+        "Epic 10 figures must rest on real, successful runs"
+    )
+
+
+def test_report_p90_within_budget(meta: dict[str, object]) -> None:
+    _check_report_within_budget(meta)
+
+
+def test_draft_p90_within_target(meta: dict[str, object]) -> None:
+    _check_draft_within_budget(meta)
+
+
+def test_pdf_within_targets(meta: dict[str, object]) -> None:
+    _check_pdf_within_budget(meta)
+
+
+def test_regeneration_basis_is_honest(meta: dict[str, object]) -> None:
+    _check_regen_basis(meta)
+
+
+def test_epic10_sample_is_large_enough(meta: dict[str, object]) -> None:
+    _check_enough_runs(meta)
+
+
+def test_epic10_budgets_match_the_suite(meta: dict[str, object]) -> None:
+    assert meta["draft_budget_seconds"] == _DRAFT_BUDGET_SECONDS
+    assert meta["pdf_first_budget_seconds"] == _PDF_FIRST_BUDGET_SECONDS
+    assert meta["pdf_repeat_budget_seconds"] == _PDF_REPEAT_BUDGET_SECONDS
+
+
+def test_the_guard_detects_a_draft_over_budget(meta: dict[str, object]) -> None:
+    with pytest.raises(AssertionError):
+        _check_draft_within_budget({**meta, "draft_p90_seconds": _DRAFT_BUDGET_SECONDS + 0.1})
+
+
+def test_the_guard_detects_a_slow_pdf(meta: dict[str, object]) -> None:
+    with pytest.raises(AssertionError):
+        _check_pdf_within_budget({**meta, "pdf_first_p90_seconds": _PDF_FIRST_BUDGET_SECONDS + 0.1})
+    with pytest.raises(AssertionError):
+        _check_pdf_within_budget({**meta, "pdf_repeat_p90_seconds": _PDF_REPEAT_BUDGET_SECONDS})
+
+
+def test_the_guard_detects_a_report_over_the_nfr_budget(meta: dict[str, object]) -> None:
+    with pytest.raises(AssertionError):
+        _check_report_within_budget({**meta, "one_regen_p90_seconds": _REPORT_BUDGET_SECONDS})
+
+
+def test_the_guard_detects_a_bound_recorded_as_observed(meta: dict[str, object]) -> None:
+    with pytest.raises(AssertionError):
+        _check_regen_basis({**meta, "regen_runs_observed": 0, "one_regen_basis": "observed"})
+    with pytest.raises(AssertionError):
+        _check_regen_basis({**meta, "regen_runs_observed": 2, "one_regen_basis": "bound"})
+
+
+def test_the_guard_detects_a_too_low_bound(meta: dict[str, object]) -> None:
+    with pytest.raises(AssertionError):
+        _check_regen_basis(
+            {
+                **meta,
+                "regen_runs_observed": 0,
+                "one_regen_basis": "bound",
+                "draft_p90_seconds": 50.0,
+                "section_p90_seconds": 20.0,
+                "one_regen_p90_seconds": 60.0,
+            }
+        )
+
+
+def test_the_guard_detects_too_few_runs(meta: dict[str, object]) -> None:
+    with pytest.raises(AssertionError):
+        _check_enough_runs({**meta, "runs_ok": _MIN_EPIC10_RUNS_OK - 1})
 
 
 def test_month_scan_p90_within_budget(meta: dict[str, object]) -> None:
@@ -241,35 +391,10 @@ def test_month_scan_budget_matches_epics(meta: dict[str, object]) -> None:
         f"could not find NFR-10's 'under N second(s)' bound in epics.md: {line!r}"
     )
     epics_seconds = int(match.group(1))
-    assert (
-        epics_seconds == meta["month_scan_budget_seconds"] == _MONTH_SCAN_BUDGET_SECONDS
-    ), (
+    assert epics_seconds == meta["month_scan_budget_seconds"] == _MONTH_SCAN_BUDGET_SECONDS, (
         f"NFR-10 bound in epics.md is {epics_seconds}s, record "
         f"month_scan_budget_seconds is {meta['month_scan_budget_seconds']}s, this "
         f"suite expects {_MONTH_SCAN_BUDGET_SECONDS}s -- all three must agree"
-    )
-
-
-def test_composed_p90_consistent(meta: dict[str, object]) -> None:
-    composed = meta["local_stage_p90_seconds"] + meta["real_gen_p90_seconds"]
-    assert meta["report_p90_seconds"] == composed, (
-        f"report_p90_seconds {meta['report_p90_seconds']}s != "
-        f"local_stage_p90_seconds {meta['local_stage_p90_seconds']}s + "
-        f"real_gen_p90_seconds {meta['real_gen_p90_seconds']}s = {composed}s -- "
-        "the per-Report p90 is the documented sum of its two measured parts"
-    )
-
-
-def test_real_gen_sample_present(meta: dict[str, object]) -> None:
-    assert meta["real_gen_sample_n"] >= _MIN_REAL_GEN_SAMPLE_N, (
-        f"real_gen_sample_n {meta['real_gen_sample_n']} is below the minimum "
-        f"{_MIN_REAL_GEN_SAMPLE_N} -- the composed per-Report p90 must rest on a "
-        "live-Gemini generation sample, not a placeholder"
-    )
-    assert meta["real_gen_p90_seconds"] > 0, (
-        "real_gen_p90_seconds must be a positive measured value -- "
-        "RecordedResponseGenerator makes no network call, so real generation "
-        "latency has to be sampled separately"
     )
 
 
@@ -369,9 +494,7 @@ def test_measure_latency(capsys: pytest.CaptureFixture[str]) -> None:
         scan_seconds: list[float] = []
         for _ in range(_RUN_COUNT):
             started = time.perf_counter()
-            find_transit_aspects(
-                natal_chart, month_start_utc, month_end_utc, _COMPUTATION_CONFIG
-            )
+            find_transit_aspects(natal_chart, month_start_utc, month_end_utc, _COMPUTATION_CONFIG)
             find_stations(month_start_utc, month_end_utc, _COMPUTATION_CONFIG)
             find_ingresses(natal_chart, month_start_utc, month_end_utc, _COMPUTATION_CONFIG)
             find_lunations(natal_chart, month_start_utc, month_end_utc)
@@ -379,22 +502,18 @@ def test_measure_latency(capsys: pytest.CaptureFixture[str]) -> None:
 
     local_stage_p90 = _nearest_rank_p90(run_seconds)
     month_scan_p90 = _nearest_rank_p90(scan_seconds)
-    local_stage_p90_seconds = math.ceil(local_stage_p90)
     month_scan_p90_seconds = math.ceil(month_scan_p90)
 
     lines = [
         "",
         "=" * 72,
-        f"Latency measurement -- {_RUN_COUNT} end-to-end runs + "
-        f"{_RUN_COUNT} isolated month scans",
+        f"Latency measurement -- {_RUN_COUNT} end-to-end runs + {_RUN_COUNT} isolated month scans",
         "=" * 72,
         "",
         f"{'run':>4}  {'end-to-end (s)':>16}  {'month scan (s)':>16}",
     ]
     for index in range(_RUN_COUNT):
-        lines.append(
-            f"{index + 1:>4}  {run_seconds[index]:>16.4f}  {scan_seconds[index]:>16.4f}"
-        )
+        lines.append(f"{index + 1:>4}  {run_seconds[index]:>16.4f}  {scan_seconds[index]:>16.4f}")
     lines.extend(
         [
             "",
@@ -405,30 +524,140 @@ def test_measure_latency(capsys: pytest.CaptureFixture[str]) -> None:
             f"median {sorted(scan_seconds)[len(scan_seconds) // 2]:.4f}  "
             f"p90 {month_scan_p90:.4f}  max {max(scan_seconds):.4f}",
             "",
-            "Paste-ready block for docs/release-validation/latency.md (fill the",
-            "real_gen_* keys from a live-Gemini sample of n >= 5, then set",
-            "report_p90_seconds = local_stage_p90_seconds + real_gen_p90_seconds",
-            "and outcome once reconciled):",
+            "Only month_scan_p90_seconds is still recorded from this harness (the",
+            "local-stage figure is superseded by test_measure_epic10_latency):",
             "",
-            "```toml",
-            f"checked = {datetime.date.today().isoformat()}",
-            'ratified_by = "Francesco"',
-            f"ratified_on = {datetime.date.today().isoformat()}",
-            'environment = "local in-process harness (SQLite stand-in, '
-            'RecordedResponseGenerator) + live-Gemini sample"',
-            f"report_budget_seconds = {_REPORT_BUDGET_SECONDS}",
-            f"local_stage_p90_seconds = {local_stage_p90_seconds}",
-            "real_gen_sample_n = 0",
-            "real_gen_p90_seconds = 0",
-            f"report_p90_seconds = {local_stage_p90_seconds}",
-            f"month_scan_budget_seconds = {_MONTH_SCAN_BUDGET_SECONDS}",
             f"month_scan_p90_seconds = {month_scan_p90_seconds}",
-            f"session_reports = {_RUN_COUNT}",
-            "sitting_confirmed = false",
-            'outcome = "blocked"',
-            "```",
             "",
         ]
     )
+    with capsys.disabled():
+        print("\n".join(lines))
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_LATENCY_MEASUREMENT") != "epic10",
+    reason="set RUN_LATENCY_MEASUREMENT=epic10 to run the real-Gemini Epic 10 harness",
+)
+def test_measure_epic10_latency(capsys: pytest.CaptureFixture[str]) -> None:
+    """Story 10.7: 20 reports through the running local docker app (real Gemini,
+    local Postgres), each timed from start to ``gate_passed`` and through two PDF
+    exports. Prints a paste-ready toml block and saves five reports under
+    ``cache/latency-reports/`` for the side-by-side read. Asserts only that enough
+    runs succeeded -- elapsed time is data here, the record's guards judge it."""
+    from datetime import date
+    from datetime import time as time_of_day
+
+    from sqlmodel import Session, create_engine
+
+    from shell.adapters.postgres.client import (
+        Client,
+        create_client_with_chart,
+        delete_client_and_derived,
+    )
+    from tests._latency_epic10 import (
+        DATABASE_URL,
+        app_is_up,
+        authenticated_client,
+        ceil_tenth,
+        measure_run,
+        nearest_rank_p90,
+        repeated_shingle_count,
+        save_reports,
+    )
+    from tests.test_runner_advance import (
+        _COMPUTATION_CONFIG,
+        _EPHEMERIS_IDENTITY,
+        _RESOLVED_PLACE,
+        _a_natal_chart,
+    )
+
+    if not app_is_up():
+        pytest.skip("the local app is not answering on http://localhost:8000/healthz")
+    env_file = REPO_ROOT / ".env"
+    if not env_file.exists() or "USE_REAL_GEMINI_LOCALLY=true" not in env_file.read_text():
+        pytest.skip("USE_REAL_GEMINI_LOCALLY=true is not set in .env -- no real Gemini")
+
+    total_runs = 20
+    engine = create_engine(DATABASE_URL.replace("postgresql://", "postgresql+psycopg://"))
+    with Session(engine) as session:
+        client = create_client_with_chart(
+            session,
+            name="Latency Harness Ada",
+            birth_date=date(2026, 1, 1),
+            birth_time=time_of_day(0, 0),
+            resolved_place=_RESOLVED_PLACE,
+            natal_chart=_a_natal_chart(),
+            computation_config=_COMPUTATION_CONFIG,
+            ephemeris_identity=_EPHEMERIS_IDENTITY,
+        )
+        session.commit()
+        client_id = client.id
+
+    samples = []
+    try:
+        with authenticated_client() as http:
+            for index in range(total_runs):
+                samples.append(
+                    measure_run(http, client_id, month=_MONTH, capture_markdown=index < 5)
+                )
+    finally:
+        with Session(engine) as session:
+            leftover = session.get(Client, client_id)
+            if leftover is not None:
+                delete_client_and_derived(session, client=leftover)
+                session.commit()
+
+    ok = [s for s in samples if s.failure is None]
+    failed = [s for s in samples if s.failure is not None]
+    assert len(ok) >= _MIN_EPIC10_RUNS_OK, (
+        f"only {len(ok)}/{total_runs} runs succeeded: {[s.failure for s in failed]}"
+    )
+    assert ok[0].draft_seconds > 5, (
+        f"the first draft took {ok[0].draft_seconds:.1f}s -- that is the recorded "
+        "generator, not real Gemini; refusing to record it"
+    )
+
+    draft_p90 = nearest_rank_p90([s.draft_seconds for s in ok])
+    section_p90 = nearest_rank_p90([t for s in ok for t in s.section_seconds])
+    regen = [s for s in ok if s.max_attempt == 1]
+    if regen:
+        one_regen = nearest_rank_p90([s.draft_seconds for s in regen])
+        basis = "observed"
+    else:
+        one_regen = bound_one_regen_seconds(draft_p90, section_p90)
+        basis = "bound"
+    pdf_first = nearest_rank_p90([s.pdf_first_seconds for s in ok])
+    pdf_repeat = nearest_rank_p90([s.pdf_repeat_seconds for s in ok])
+    saved = save_reports(ok, REPO_ROOT / "cache" / "latency-reports")
+
+    lines = ["", "=" * 72, f"Epic 10 latency -- {len(ok)}/{total_runs} runs ok", "=" * 72, ""]
+    lines.append(f"{'run':>4} {'draft s':>9} {'attempts':>9} {'pdf 1st':>9} {'pdf 2nd':>9}")
+    for index, s in enumerate(samples):
+        lines.append(
+            f"{index + 1:>4} {s.draft_seconds:>9.1f} {s.max_attempt + 1:>9} "
+            f"{s.pdf_first_seconds:>9.2f} {s.pdf_repeat_seconds:>9.3f}"
+            + (f"  FAILED: {s.failure}" if s.failure else "")
+        )
+        lines.extend(f"        - {violation}" for violation in s.violations)
+    lines += ["", "Repeated six-word runs across Sections (saved reports):"]
+    lines += [
+        f"  {path.name}: {repeated_shingle_count(path.read_text(encoding='utf-8'))}"
+        for path in saved
+    ]
+    lines += [
+        "",
+        "```toml",
+        f"runs_ok = {len(ok)}",
+        f"draft_p90_seconds = {ceil_tenth(draft_p90)}",
+        f"section_p90_seconds = {ceil_tenth(section_p90)}",
+        f"one_regen_p90_seconds = {ceil_tenth(one_regen)}",
+        f'one_regen_basis = "{basis}"',
+        f"regen_runs_observed = {len(regen)}",
+        f"pdf_first_p90_seconds = {ceil_tenth(pdf_first)}",
+        f"pdf_repeat_p90_seconds = {math.ceil(pdf_repeat * 1000) / 1000}",
+        "```",
+        "",
+    ]
     with capsys.disabled():
         print("\n".join(lines))

@@ -73,7 +73,7 @@ def test_a_sentence_with_no_vocabulary_token_is_not_a_claim() -> None:
 
 
 def test_a_sentence_leaning_on_a_fact_without_naming_it_is_not_a_claim() -> None:
-    """"The month asks patience of you" following a Saturn passage asserts
+    """ "The month asks patience of you" following a Saturn passage asserts
     no verifiable Claim, even though it depends on one (PRD Open Question
     1). This is the documented, intentional gap -- not a bug -- ``is_claim``
     has no way to see the Saturn passage this sentence leans on, and AD-8
@@ -92,14 +92,14 @@ def test_classification_is_case_insensitive() -> None:
 #     casa+ordinal triggers on ordinary, non-astrological Italian --------------
 
 
-def test_a_bare_1_to_31_number_used_as_a_duration_is_a_false_positive_claim() -> None:
-    """epic-5-retro-item-40 / epic-5-retro Finding 3: the ``day_of_month``
-    trigger fires on ANY bare 1-31 numeral anywhere in the sentence, so a
-    plain duration ("per i prossimi 3 giorni") is classified as a Claim even
-    though it asserts no date. This is a documented, accepted design cost --
-    AD-8 forbids a narrower heuristic. This test locks the behavior as a
-    regression tripwire; it does not endorse it."""
-    assert is_claim("Per i prossimi 3 giorni rallenta.", VOCABULARY) is True
+def test_a_bare_1_to_31_number_used_as_a_duration_is_not_a_claim() -> None:
+    """epic-5-retro-item-40 had locked this as an accepted false positive; Story 10.7
+    reverses it: a number followed by a unit of time or measure ("3 giorni", "29 anni")
+    is a count, not a day of the month, and failing the Gate on it cost whole
+    regenerations. A bare numeral with no such unit is still a day-of-month Claim."""
+    assert is_claim("Per i prossimi 3 giorni rallenta.", VOCABULARY) is False
+    assert is_claim("Succede ogni 29 anni.", VOCABULARY) is False
+    assert is_claim("Il 3 rallenta.", VOCABULARY) is True
 
 
 def test_mundane_casa_plus_ordinal_is_a_false_positive_claim() -> None:
@@ -109,3 +109,18 @@ def test_mundane_casa_plus_ordinal_is_a_false_positive_claim() -> None:
     co-occurrence alone. Same accepted design cost as the day-of-month case
     above -- characterized here, not fixed."""
     assert is_claim("Ho preso la mia seconda casa al mare.", VOCABULARY) is True
+
+
+# --- Story 10.7: the ordinal must sit next to "casa" ----------------------------------
+
+
+def test_an_ordinal_in_a_time_phrase_next_to_a_house_word_is_not_a_claim() -> None:
+    sentence = (
+        "Dalla terza settimana la casa si riempie di prima luce, nella seconda metà del mese."
+    )
+    assert is_claim(sentence, VOCABULARY) is False
+
+
+def test_the_guard_detects_an_ordinal_written_after_or_in_a_list_before_casa() -> None:
+    assert is_claim("La casa quinta si accende.", VOCABULARY) is True
+    assert is_claim("La quinta e la settima casa si accendono.", VOCABULARY) is True

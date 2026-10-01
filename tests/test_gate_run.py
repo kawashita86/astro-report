@@ -450,6 +450,459 @@ def test_a_claim_with_no_cited_entries_is_an_empty_citation_violation() -> None:
     assert result.violations[0].entry_ids == ()
 
 
+# --- Story 10.7: an uncited Claim true of the natal chart is grounded by the profile --
+
+
+def _frozen_with_natal_jupiter() -> dict[str, Any]:
+    frozen = _freeze()
+    frozen["sections"]["energia_generale"]["profile"] = {
+        "house_10": {
+            "number": 10,
+            "planets": [
+                {
+                    "name": "jupiter",
+                    "longitude": 111.3249,
+                    "sign": "cancer",
+                    "degree": 21.3249,
+                    "house": 10,
+                    "retrograde": True,
+                }
+            ],
+        }
+    }
+    return frozen
+
+
+_NATAL_JUPITER_SENTENCE = (
+    "La presenza di Giove retrogrado nella tua Decima Casa, sebbene sia un fattore "
+    "natale, continua a sottintendere un'esigenza di radicamento."
+)
+
+
+def test_an_uncited_natal_claim_true_of_the_profile_passes() -> None:
+    draft = _draft(lavoro=(Sentence(text=_NATAL_JUPITER_SENTENCE, entry_ids=()),))
+
+    result = run_gate(draft, _frozen_with_natal_jupiter(), _VOCABULARY)
+
+    assert result.passed is True
+
+
+def test_the_guard_detects_an_uncited_natal_claim_with_the_wrong_house() -> None:
+    sentence = _NATAL_JUPITER_SENTENCE.replace("Decima", "Quinta")
+    draft = _draft(lavoro=(Sentence(text=sentence, entry_ids=()),))
+
+    result = run_gate(draft, _frozen_with_natal_jupiter(), _VOCABULARY)
+
+    assert _kinds(result) == ["empty_citation"]
+
+
+def test_the_guard_detects_an_uncited_body_with_no_placement_and_no_natal_marker() -> None:
+    draft = _draft(lavoro=(Sentence(text="Giove invita alla disciplina.", entry_ids=()),))
+
+    result = run_gate(draft, _frozen_with_natal_jupiter(), _VOCABULARY)
+
+    assert _kinds(result) == ["empty_citation"]
+
+
+def _frozen_money_profile() -> dict[str, Any]:
+    frozen = _freeze()
+    frozen["sections"]["energia_generale"]["profile"] = {
+        "saturn": {"name": "saturn", "sign": "aries", "house": 6, "aspects": []},
+        "venus": {"name": "venus", "sign": "pisces", "house": 4, "aspects": []},
+        "house_2": {
+            "number": 2,
+            "sign": "scorpio",
+            "planets": [],
+            "ruler": {"house": 2, "traditional_ruler": "mars", "modern_ruler": "pluto"},
+        },
+        "house_8": {
+            "number": 8,
+            "sign": "taurus",
+            "planets": [],
+            "ruler": {"house": 8, "traditional_ruler": "venus", "modern_ruler": "venus"},
+        },
+    }
+    return frozen
+
+
+def test_an_uncited_body_placed_in_its_natal_house_is_grounded() -> None:
+    frozen = _frozen_money_profile()
+    right = _draft(
+        denaro=(Sentence(text="La presenza di Saturno nella tua Sesta Casa pesa.", entry_ids=()),)
+    )
+    wrong = _draft(
+        denaro=(Sentence(text="La presenza di Saturno nella tua Terza Casa pesa.", entry_ids=()),)
+    )
+
+    assert run_gate(right, frozen, _VOCABULARY).passed is True
+    assert _kinds(run_gate(wrong, frozen, _VOCABULARY)) == ["empty_citation"]
+
+
+def test_an_uncited_sentence_mixing_a_house_cusp_and_a_natal_planet_is_grounded() -> None:
+    frozen = _frozen_money_profile()
+    text = (
+        "La tua Seconda Casa in Scorpione cerca controllo, con la tua Venere natale in Quarta Casa."
+    )
+    wrong = text.replace("Scorpione", "Leone")
+
+    assert run_gate(_draft(denaro=(Sentence(text=text, entry_ids=()),)), frozen, _VOCABULARY).passed
+    assert not run_gate(
+        _draft(denaro=(Sentence(text=wrong, entry_ids=()),)), frozen, _VOCABULARY
+    ).passed
+
+
+def test_a_house_ruler_named_beside_its_house_is_grounded_without_a_citation_of_it() -> None:
+    frozen = _frozen_money_profile()
+    aspect = TransitAspectEvent(
+        transiting_body="saturn",
+        natal_point="saturn",
+        aspect="sextile",
+        perfected_at=datetime(2026, 1, 9, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 7, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    cited = _freeze(aspects=(aspect,))
+    frozen["sections"]["energia_generale"]["aspects"] = cited["sections"]["energia_generale"][
+        "aspects"
+    ]
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    right = _draft(
+        denaro=(
+            Sentence(
+                text="La tua Ottava Casa in Toro, governata da Venere, sorride.",
+                entry_ids=(aspect_id,),
+            ),
+        )
+    )
+    wrong = _draft(
+        denaro=(
+            Sentence(
+                text="La tua Ottava Casa in Toro, governata da Marte, sorride.",
+                entry_ids=(aspect_id,),
+            ),
+        )
+    )
+
+    assert run_gate(right, frozen, _VOCABULARY).passed is True
+    assert run_gate(wrong, frozen, _VOCABULARY).passed is False
+
+
+def test_the_guard_detects_an_uncited_natal_claim_with_a_date() -> None:
+    draft = _draft(lavoro=(Sentence(text="Il 15 gennaio il tuo Giove natale pesa.", entry_ids=()),))
+
+    result = run_gate(draft, _frozen_with_natal_jupiter(), _VOCABULARY)
+
+    assert "empty_citation" in _kinds(result)
+
+
+def test_the_guard_detects_an_uncited_natal_retrograde_the_profile_denies() -> None:
+    frozen = _frozen_with_natal_jupiter()
+    jupiter = frozen["sections"]["energia_generale"]["profile"]["house_10"]["planets"][0]
+    jupiter["retrograde"] = False
+    draft = _draft(lavoro=(Sentence(text=_NATAL_JUPITER_SENTENCE, entry_ids=()),))
+
+    result = run_gate(draft, frozen, _VOCABULARY)
+
+    assert _kinds(result) == ["empty_citation"]
+
+
+def test_a_verb_bilancia_is_not_read_as_the_sign_libra() -> None:
+    aspect = TransitAspectEvent(
+        transiting_body="sun",
+        natal_point="mars",
+        aspect="conjunction",
+        perfected_at=datetime(2026, 1, 30, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 28, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    draft = _draft(
+        energia_generale=(
+            Sentence(
+                text="Il Sole si unisce al tuo Marte natale, ma bilancia la spinta con prudenza.",
+                entry_ids=(aspect_id,),
+            ),
+        )
+    )
+
+    assert run_gate(draft, frozen, _VOCABULARY).passed is True
+
+
+def test_the_guard_detects_the_sign_libra_still_checked() -> None:
+    aspect = TransitAspectEvent(
+        transiting_body="sun",
+        natal_point="mars",
+        aspect="conjunction",
+        perfected_at=datetime(2026, 1, 30, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 28, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    draft = _draft(
+        energia_generale=(
+            Sentence(
+                text="Il Sole in Bilancia si unisce al tuo Marte natale.", entry_ids=(aspect_id,)
+            ),
+        )
+    )
+
+    assert _kinds(run_gate(draft, frozen, _VOCABULARY)) == ["contradicted_fact"]
+
+
+def test_a_house_named_with_its_own_cusp_sign_is_grounded() -> None:
+    frozen = _frozen_with_natal_jupiter()
+    frozen["sections"]["energia_generale"]["profile"]["house_2"] = {
+        "number": 2,
+        "sign": "pisces",
+        "planets": [],
+    }
+    aspect = TransitAspectEvent(
+        transiting_body="venus",
+        natal_point="sun",
+        aspect="trine",
+        perfected_at=datetime(2026, 1, 5, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    cited = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(cited["sections"]["energia_generale"]["aspects"], kind="aspect")
+    frozen["sections"]["energia_generale"]["aspects"] = cited["sections"]["energia_generale"][
+        "aspects"
+    ]
+    right = _draft(
+        denaro=(Sentence(text="La tua Seconda Casa in Pesci chiede cura.", entry_ids=(aspect_id,)),)
+    )
+    wrong = _draft(
+        denaro=(Sentence(text="La tua Seconda Casa in Toro chiede cura.", entry_ids=(aspect_id,)),)
+    )
+
+    assert run_gate(right, frozen, _VOCABULARY).passed is True
+    assert run_gate(wrong, frozen, _VOCABULARY).passed is False
+
+
+def _frozen_amore_profile(*, cited_body: str = "mars") -> tuple[dict[str, Any], str]:
+    """A frozen Payload whose profile describes houses 5 and 7 (cusp sign and ruler)
+    and which holds one aspect for ``cited_body``; returns it with that aspect's id."""
+    aspect = TransitAspectEvent(
+        transiting_body=cited_body,
+        natal_point="mars",
+        aspect="conjunction",
+        perfected_at=datetime(2026, 1, 3, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2026, 1, 1, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    frozen["sections"]["energia_generale"]["profile"] = {
+        "house_5": {
+            "number": 5,
+            "sign": "aquarius",
+            "planets": [],
+            "ruler": {"house": 5, "traditional_ruler": "saturn", "modern_ruler": "uranus"},
+        },
+        "house_7": {
+            "number": 7,
+            "sign": "aries",
+            "planets": [],
+            "ruler": {"house": 7, "traditional_ruler": "mars", "modern_ruler": "mars"},
+        },
+        "mars": {"name": "mars", "sign": "capricorn", "house": 4, "aspects": []},
+    }
+    return frozen, aspect_id
+
+
+def test_an_ordinal_that_is_a_time_phrase_is_not_a_house() -> None:
+    frozen, aspect_id = _frozen_amore_profile()
+    text = (
+        "Dalla terza settimana, nella seconda metà del mese e prima di tutto, "
+        "la tua Quinta Casa si anima con Marte natale."
+    )
+    draft = _draft(amore=(Sentence(text=text, entry_ids=(aspect_id,)),))
+
+    assert run_gate(draft, frozen, _VOCABULARY).passed is False  # Quinta Casa is not Mars's house
+
+    ok = text.replace("Quinta", "Quarta")
+    assert run_gate(
+        _draft(amore=(Sentence(text=ok, entry_ids=(aspect_id,)),)), frozen, _VOCABULARY
+    ).passed
+
+
+def test_the_guard_detects_an_ordinal_that_really_names_a_house() -> None:
+    frozen, aspect_id = _frozen_amore_profile()
+    draft = _draft(
+        amore=(Sentence(text="La terza casa si anima con Marte natale.", entry_ids=(aspect_id,)),)
+    )
+
+    assert _kinds(run_gate(draft, frozen, _VOCABULARY)) == ["contradicted_fact"]
+
+
+def test_a_house_ruled_by_a_cited_body_is_grounded() -> None:
+    frozen, aspect_id = _frozen_amore_profile()
+    right = _draft(
+        amore=(
+            Sentence(
+                text="Marte, governatore della tua Settima Casa, si attiva.", entry_ids=(aspect_id,)
+            ),
+        )
+    )
+    wrong = _draft(
+        amore=(
+            Sentence(
+                text="Marte, governatore della tua Quinta Casa, si attiva.", entry_ids=(aspect_id,)
+            ),
+        )
+    )
+
+    assert run_gate(right, frozen, _VOCABULARY).passed is True
+    assert _kinds(run_gate(wrong, frozen, _VOCABULARY)) == ["contradicted_fact"]
+
+
+def test_an_uncited_house_only_sentence_is_grounded_by_the_profile() -> None:
+    frozen, _ = _frozen_amore_profile()
+    right = _draft(
+        amore=(Sentence(text="La tua Quinta Casa in Acquario cerca amicizia.", entry_ids=()),)
+    )
+    no_sign = _draft(
+        amore=(
+            Sentence(text="La natura della tua Quinta Casa invita alla leggerezza.", entry_ids=()),
+        )
+    )
+
+    other_house = _draft(
+        amore=(Sentence(text="L'energia nella tua Quarta Casa tocca le radici.", entry_ids=()),)
+    )
+
+    assert run_gate(right, frozen, _VOCABULARY).passed is True
+    assert run_gate(no_sign, frozen, _VOCABULARY).passed is True
+    assert run_gate(other_house, frozen, _VOCABULARY).passed is True
+
+
+def test_the_guard_detects_an_uncited_house_only_sentence_the_profile_denies() -> None:
+    frozen, _ = _frozen_amore_profile()
+    wrong_sign = _draft(
+        amore=(Sentence(text="La tua Quinta Casa in Toro cerca radici.", entry_ids=()),)
+    )
+    unknown_cusp = _draft(
+        amore=(Sentence(text="La tua Nona Casa in Leone invita a viaggiare.", entry_ids=()),)
+    )
+    with_retrograde = _draft(
+        amore=(Sentence(text="La tua Quinta Casa è retrograda, retrogrado.", entry_ids=()),)
+    )
+
+    for draft in (wrong_sign, unknown_cusp, with_retrograde):
+        assert _kinds(run_gate(draft, frozen, _VOCABULARY)) == ["empty_citation"]
+
+
+def _frozen_with_standing_retrograde(end: str) -> tuple[dict[str, Any], str]:
+    frozen = _freeze()
+    entry_id = "f" * 64
+    frozen["sections"]["energia_generale"]["standing_retrogrades"] = [
+        {
+            "id": entry_id,
+            "kind": "standing_retrograde",
+            "body": "jupiter",
+            "retrograde_start_utc": "2025-11-11T23:00:00+00:00",
+            "retrograde_end_utc": end,
+        }
+    ]
+    return frozen, entry_id
+
+
+def test_a_standing_retrograde_end_date_outside_the_month_is_grounded() -> None:
+    frozen, entry_id = _frozen_with_standing_retrograde("2026-01-31T23:00:00+00:00")
+    draft = _draft(
+        energia_generale=(
+            Sentence(text="Giove retrogrado prosegue fino al 1 febbraio.", entry_ids=(entry_id,)),
+        )
+    )
+
+    assert run_gate(draft, frozen, _VOCABULARY).passed is True
+
+
+def test_the_guard_detects_a_standing_retrograde_date_two_days_off() -> None:
+    frozen, entry_id = _frozen_with_standing_retrograde("2026-01-31T23:00:00+00:00")
+    draft = _draft(
+        energia_generale=(
+            Sentence(text="Giove retrogrado prosegue fino al 3 febbraio.", entry_ids=(entry_id,)),
+        )
+    )
+
+    assert _kinds(run_gate(draft, frozen, _VOCABULARY)) == ["contradicted_fact"]
+
+
+def test_a_count_of_years_is_not_a_day_of_the_month() -> None:
+    aspect = TransitAspectEvent(
+        transiting_body="saturn",
+        natal_point="saturn",
+        aspect="conjunction",
+        perfected_at=datetime(2026, 1, 1, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2025, 12, 20, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen = _freeze(aspects=(aspect,))
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    ok = _draft(
+        energia_generale=(
+            Sentence(
+                text="Saturno al tuo Saturno natale torna solo ogni 29 anni.",
+                entry_ids=(aspect_id,),
+            ),
+        )
+    )
+    day = _draft(
+        energia_generale=(
+            Sentence(
+                text="Saturno al tuo Saturno natale si perfeziona il 29.", entry_ids=(aspect_id,)
+            ),
+        )
+    )
+
+    assert run_gate(ok, frozen, _VOCABULARY).passed is True
+    assert _kinds(run_gate(day, frozen, _VOCABULARY)) == ["contradicted_fact"]
+
+
+def test_a_retrograde_claim_on_a_cited_body_the_payload_records_as_retrograde_is_grounded() -> None:
+    aspect = TransitAspectEvent(
+        transiting_body="jupiter",
+        natal_point="jupiter",
+        aspect="conjunction",
+        perfected_at=datetime(2026, 1, 1, tzinfo=UTC),
+        never_perfected=False,
+        orb_entry_at=datetime(2025, 12, 25, tzinfo=UTC),
+        orb_exit_at=None,
+    )
+    frozen, _ = _frozen_with_standing_retrograde("2026-01-31T23:00:00+00:00")
+    frozen["sections"]["energia_generale"]["aspects"] = _freeze(aspects=(aspect,))["sections"][
+        "energia_generale"
+    ]["aspects"]
+    aspect_id = _find_id(frozen["sections"]["energia_generale"]["aspects"], kind="aspect")
+    right = _draft(
+        lavoro=(
+            Sentence(
+                text="Giove retrogrado si unisce al tuo Giove natale.", entry_ids=(aspect_id,)
+            ),
+        )
+    )
+    other_body = _draft(
+        lavoro=(
+            Sentence(
+                text="Saturno retrogrado si unisce al tuo Giove natale.", entry_ids=(aspect_id,)
+            ),
+        )
+    )
+
+    assert run_gate(right, frozen, _VOCABULARY).passed is True
+    assert run_gate(other_body, frozen, _VOCABULARY).passed is False
+
+
 # --- Matrix row: date token in day list --------------------------------------------
 
 
@@ -1254,7 +1707,7 @@ def test_multiple_violations_from_one_sentence_all_share_its_own_sentence_index(
     assert all(violation.sentence_index == 1 for violation in result.violations)
 
 
-def test_a_bare_duration_number_citing_a_date_free_entry_is_an_invented_fact() -> None:
+def test_a_duration_is_not_a_day_but_a_bare_day_is_still_checked() -> None:
     """epic-5-retro-item-40: "per i prossimi 3 giorni" is classified as a
     day-of-month Claim (the trigger fires on any bare 1-31). Citing a
     ``StandingRetrograde`` -- a kind that exposes no date fact -- ``run_gate()``
@@ -1294,11 +1747,10 @@ def test_a_bare_duration_number_citing_a_date_free_entry_is_an_invented_fact() -
         kind="standing_retrograde",
     )
 
-    draft = _draft(
+    duration = _draft(
         amore=(Sentence(text="Per i prossimi 3 giorni rallenta.", entry_ids=(retrograde_id,)),)
     )
+    bare_day = _draft(amore=(Sentence(text="Il 17 rallenta.", entry_ids=(retrograde_id,)),))
 
-    result = run_gate(draft, frozen, _VOCABULARY)
-
-    assert result.passed is False
-    assert _kinds(result) == ["invented_fact"]
+    assert run_gate(duration, frozen, _VOCABULARY).passed is True
+    assert run_gate(bare_day, frozen, _VOCABULARY).passed is False

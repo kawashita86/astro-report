@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import fields as dataclass_fields
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from core.gate.classify import is_claim
+from core.gate.classify import days_of_month_named, house_ordinals_named, is_claim
 from core.types.gate import GateResult, GateViolation, GateVocabulary
 from core.types.generation import GeneratedDraft, Sentence
 
@@ -218,7 +218,13 @@ _DATE_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
     "station": ("station_at",),
     "ingress": ("crossed_at",),
     "lunation": ("occurred_at",),
+    "standing_retrograde": ("retrograde_start_utc", "retrograde_end_utc"),
 }
+
+#: Entry kinds whose dates are stored as a UTC instant at a local midnight boundary
+#: (a retrograde ending "1 febbraio" in Rome is ``...-01-31T23:00:00Z``): a claimed day
+#: one off the UTC day is the same local day, so the neighbouring day also grounds it.
+_TIMEZONE_SLACK_KINDS = frozenset({"standing_retrograde"})
 
 #: The Italian words this module can translate into a Payload-comparable
 #: value, keyed by the ``GateVocabulary`` word-list field each one must stay
@@ -267,6 +273,25 @@ def _values_phrase(kind: str, values: frozenset[Any]) -> str:
         return ", ".join(sorted(body_sign_label(str(value)) for value in values))
     joined = ", ".join(sorted(str(value) for value in values))
     return f"{_CATEGORY_LABELS_IT.get(kind, kind)} {joined}"
+
+
+#: "bilancia" is both the sign Libra and a common verb ("bilancia questa spinta"). The
+#: sign is written after a preposition ("in Bilancia", "della Bilancia") or capitalised
+#: mid-sentence; a lowercase "bilancia" anywhere else is the verb, not a Claim.
+_BILANCIA_PATTERN = re.compile(r"(\b\w+\s+)?\bbilancia\b")
+_SIGN_PREPOSITIONS = frozenset({"in", "di", "del", "della", "dalla", "nella", "alla", "segno"})
+
+
+def _mask_verbal_bilancia(lowered: str) -> str:
+    """``lowered`` with a verbal "bilancia" blanked so it is not read as the sign Libra."""
+
+    def _replace(match: re.Match[str]) -> str:
+        before = (match.group(1) or "").strip()
+        if before in _SIGN_PREPOSITIONS:
+            return match.group(0)
+        return (match.group(1) or "") + "bilanciare"
+
+    return _BILANCIA_PATTERN.sub(_replace, lowered)
 
 
 def _contains_word(text: str, token: str) -> bool:
@@ -329,6 +354,89 @@ def _natal_house_by_planet(payload: dict[str, Any]) -> dict[str, int]:
     return houses
 
 
+def _natal_retrograde_by_planet(payload: dict[str, Any]) -> dict[str, bool]:
+    """Every planet's own natal retrograde flag, read from the same ``profile``
+    sub-objects, by the same name-plus-integer-house shape test, as
+    ``_natal_house_by_planet()``."""
+    flags: dict[str, bool] = {}
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, dict):
+            name = value.get("name")
+            house = value.get("house")
+            retrograde = value.get("retrograde")
+            if (
+                isinstance(name, str)
+                and isinstance(house, int)
+                and not isinstance(house, bool)
+                and isinstance(retrograde, bool)
+            ):
+                flags[name.lower()] = retrograde
+            for item in value.values():
+                _walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(payload)
+    return flags
+
+
+def _natal_house_cusp_sign(payload: dict[str, Any]) -> dict[int, str]:
+    """Each house's own cusp sign, read from the Payload's ``house_N`` profile entries
+    (``{"number": 10, "sign": "cancer", "planets": [...]}``) -- a pre-computed fact like
+    the planets' natal signs, never re-derived from a degree."""
+    signs: dict[int, str] = {}
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, dict):
+            number = value.get("number")
+            sign = value.get("sign")
+            if (
+                isinstance(number, int)
+                and not isinstance(number, bool)
+                and isinstance(sign, str)
+                and isinstance(value.get("planets"), list)
+            ):
+                signs[number] = sign.lower()
+            for item in value.values():
+                _walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(payload)
+    return signs
+
+
+def _natal_house_rulers(payload: dict[str, Any]) -> dict[int, frozenset[str]]:
+    """Each house's rulers (traditional, modern, co-ruler), read from the ``ruler``
+    sub-objects of the Payload's ``house_N`` profile entries -- pre-computed facts, so
+    "Marte, governatore della tua Settima Casa" is grounded by a cited Mars entry."""
+    rulers: dict[int, frozenset[str]] = {}
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, dict):
+            ruler = value.get("ruler")
+            if isinstance(ruler, dict):
+                house = ruler.get("house")
+                names = frozenset(
+                    str(ruler[key]).lower()
+                    for key in ("traditional_ruler", "modern_ruler", "co_ruler")
+                    if isinstance(ruler.get(key), str)
+                )
+                if isinstance(house, int) and not isinstance(house, bool):
+                    rulers[house] = rulers.get(house, frozenset()) | names
+            for item in value.values():
+                _walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(payload)
+    return rulers
+
+
 def _natal_sign_by_point(payload: dict[str, Any]) -> dict[str, str]:
     """Every planet's own natal sign, plus the Ascendant's (the only angle
     the Payload's ``profile`` sub-objects record a sign for), read the same
@@ -386,19 +494,16 @@ def _asserted_bodies_signs(lowered_text: str, vocabulary: GateVocabulary) -> fro
 
 
 def _asserted_houses(lowered_text: str, vocabulary: GateVocabulary) -> frozenset[int]:
-    if not _contains_word(lowered_text, "casa"):
-        return frozenset()
     asserted: set[int] = set()
-    for word in vocabulary.casa_ordinals:
+    for word in house_ordinals_named(lowered_text, vocabulary.casa_ordinals):
         house = _CASA_ORDINAL_TO_HOUSE.get(word)
-        if house is not None and _contains_word(lowered_text, word):
+        if house is not None:
             asserted.add(house)
     return frozenset(asserted)
 
 
 def _asserted_days_of_month(lowered_text: str, vocabulary: GateVocabulary) -> frozenset[int]:
-    matches = re.findall(vocabulary.day_of_month_pattern, lowered_text)
-    return frozenset(int(match) for match in matches)
+    return days_of_month_named(lowered_text, vocabulary.day_of_month_pattern)
 
 
 def _asserted_retrograde(lowered_text: str, vocabulary: GateVocabulary) -> bool:
@@ -507,12 +612,36 @@ def _date_facts(entries: list[dict[str, Any]]) -> frozenset[int]:
                 # month end) -- neither contributes a day fact.
                 continue
             try:
-                facts.add(datetime.fromisoformat(value).day)
+                moment = datetime.fromisoformat(value)
+                facts.add(moment.day)
+                if entry.get("kind") in _TIMEZONE_SLACK_KINDS:
+                    neighbour = timedelta(days=1 if moment.hour >= 12 else -1)
+                    facts.add((moment + neighbour).day)
             except ValueError:
                 # A malformed date field in a cited Payload entry contributes
                 # no day fact rather than crashing the whole Gate run.
                 continue
     return frozenset(facts)
+
+
+def _retrograde_bodies(
+    entry_index: dict[str, dict[str, Any]], natal_retrograde_by_planet: dict[str, bool]
+) -> frozenset[str]:
+    """Bodies the Payload records as retrograde this month (a standing retrograde or a
+    retrograde station anywhere in it) or at birth. "la congiunzione di Giove retrogrado
+    al tuo Giove natale" cites the aspect, not Jupiter's retrograde entry, yet is true by
+    the Payload: a cited body that is retrograde in it grounds a retrograde claim."""
+    bodies = {name for name, flag in natal_retrograde_by_planet.items() if flag}
+    for entry in entry_index.values():
+        body = entry.get("body")
+        if not isinstance(body, str):
+            continue
+        kind = entry.get("kind")
+        if kind == "standing_retrograde" or (
+            kind == "station" and entry.get("direction") == "retrograde"
+        ):
+            bodies.add(body.lower())
+    return frozenset(bodies)
 
 
 def _retrograde_facts(entries: list[dict[str, Any]]) -> frozenset[bool]:
@@ -591,6 +720,75 @@ def _category_violation(
     return None
 
 
+#: A sentence that says outright it speaks of the *natal* chart ("fattore natale",
+#: "Venere natale"). Only such a sentence may be grounded by the Payload's natal
+#: profile data instead of a cited entry; without the marker an uncited sentence
+#: about, say, Saturn in Aries could be a transit claim the profile cannot vouch for.
+_NATAL_MARKER_PATTERN = re.compile(r"\bnatal[ei]\b")
+
+
+def _grounded_by_natal_profile(
+    lowered: str,
+    *,
+    natal_house_by_planet: dict[str, int],
+    natal_sign_by_point: dict[str, str],
+    natal_retrograde_by_planet: dict[str, bool],
+    natal_house_cusp_sign: dict[int, str],
+    vocabulary: GateVocabulary,
+) -> bool:
+    """Whether an *uncited* Claim is wholly true of the natal chart.
+
+    CAP-19 asks that a Claim's body, sign, house and retrograde condition be present
+    in the Payload; the natal ``profile`` data is in the Payload, it just carries no
+    entry id to cite. Requiring a citation anyway rejected true natal sentences ("Giove
+    retrogrado nella tua Decima Casa, sebbene sia un fattore natale", "la tua Quinta
+    Casa in Acquario") and, with every rejection costing a regeneration, kept most real
+    drafts from ever passing. Two shapes pass, never with a day of the month:
+
+    - it names natal bodies, says "natale" or places them in a sign or house, and every
+      sign, house and retrograde condition it asserts matches the natal placement of a
+      body it names (or a named house's own cusp sign);
+    - it names only houses (no body, no retrograde) -- a natal chart has all twelve, so
+      naming one asserts nothing the profile could contradict -- and any sign it names is
+      the cusp sign of a house it names.
+    """
+    if _asserted_days_of_month(lowered, vocabulary):
+        return False
+    asserted = _asserted_bodies_signs(lowered, vocabulary)
+    houses = _asserted_houses(lowered, vocabulary)
+    bodies = frozenset(name for name in asserted if name in natal_sign_by_point)
+    signs = asserted - bodies
+    retrograde = _asserted_retrograde(lowered, vocabulary)
+
+    if not bodies:
+        cusp_signs = {
+            natal_house_cusp_sign[house] for house in houses if house in natal_house_cusp_sign
+        }
+        return bool(houses) and not retrograde and signs <= cusp_signs
+
+    # Without "natale", a sentence must at least place a body (a sign or a house):
+    # "Saturno invita alla disciplina" asserts nothing the profile can vouch for.
+    if _NATAL_MARKER_PATTERN.search(lowered) is None and not (signs or houses):
+        return False
+    cusp_signs = {
+        natal_house_cusp_sign[house] for house in houses if house in natal_house_cusp_sign
+    }
+    if not signs <= {natal_sign_by_point[body] for body in bodies} | cusp_signs:
+        return False
+    placed_houses = {
+        house
+        for body in bodies
+        for house in (natal_house_by_planet.get(body), _ANGLE_NATAL_POINT_HOUSE.get(body))
+        if house is not None
+    }
+    cusp_named_houses = {house for house in houses if natal_house_cusp_sign.get(house) in signs}
+    if not houses <= placed_houses | cusp_named_houses:
+        return False
+    if retrograde:
+        return any(natal_retrograde_by_planet.get(body) for body in bodies)
+    return True
+
+
 def _check_claim(
     *,
     section: str,
@@ -599,9 +797,22 @@ def _check_claim(
     entry_index: dict[str, dict[str, Any]],
     natal_house_by_planet: dict[str, int],
     natal_sign_by_point: dict[str, str],
+    natal_retrograde_by_planet: dict[str, bool],
+    natal_house_cusp_sign: dict[int, str],
+    natal_house_rulers: dict[int, frozenset[str]],
+    retrograde_bodies: frozenset[str],
     vocabulary: GateVocabulary,
 ) -> list[GateViolation]:
     if not sentence.entry_ids:
+        if _grounded_by_natal_profile(
+            _mask_verbal_bilancia(sentence.text.lower()),
+            natal_house_by_planet=natal_house_by_planet,
+            natal_sign_by_point=natal_sign_by_point,
+            natal_retrograde_by_planet=natal_retrograde_by_planet,
+            natal_house_cusp_sign=natal_house_cusp_sign,
+            vocabulary=vocabulary,
+        ):
+            return []
         return [
             GateViolation(
                 kind="empty_citation",
@@ -614,31 +825,54 @@ def _check_claim(
             )
         ]
 
-    lowered = sentence.text.lower()
+    lowered = _mask_verbal_bilancia(sentence.text.lower())
     entries = _cited_entries(sentence, entry_index)
     violations: list[GateViolation] = []
 
     asserted_bodies_signs = _asserted_bodies_signs(lowered, vocabulary)
+    asserted_houses = _asserted_houses(lowered, vocabulary)
+    # "la tua Seconda Casa in Pesci": a house named together with its own cusp sign is
+    # true by the natal data even when no cited entry mentions that house or sign.
+    cusp_signs = frozenset(
+        natal_house_cusp_sign[house] for house in asserted_houses if house in natal_house_cusp_sign
+    )
+    cusp_houses = frozenset(
+        house
+        for house in asserted_houses
+        if natal_house_cusp_sign.get(house) in asserted_bodies_signs
+    )
+    # "la tua Ottava Casa in Toro, governata da Venere": the ruler of a house the sentence
+    # names is grounded by the profile, cited or not.
+    house_rulers = frozenset(
+        ruler for house in asserted_houses for ruler in natal_house_rulers.get(house, frozenset())
+    )
+    # "Marte, governatore della tua Settima Casa": a house ruled by a body the cited
+    # entries name is grounded by the profile's ruler data.
+    cited_bodies = _body_sign_facts(entries, natal_sign_by_point)
+    ruled_houses = frozenset(
+        house for house, rulers in natal_house_rulers.items() if rulers & cited_bodies
+    )
     if asserted_bodies_signs:
         violation = _category_violation(
             kind="body/sign",
             section=section,
             sentence=sentence,
             sentence_index=sentence_index,
-            gathered=_body_sign_facts(entries, natal_sign_by_point),
+            gathered=_body_sign_facts(entries, natal_sign_by_point) | cusp_signs | house_rulers,
             asserted=asserted_bodies_signs,
         )
         if violation is not None:
             violations.append(violation)
 
-    asserted_houses = _asserted_houses(lowered, vocabulary)
     if asserted_houses:
         violation = _category_violation(
             kind="house",
             section=section,
             sentence=sentence,
             sentence_index=sentence_index,
-            gathered=_house_facts(entries, natal_house_by_planet, natal_sign_by_point),
+            gathered=_house_facts(entries, natal_house_by_planet, natal_sign_by_point)
+            | cusp_houses
+            | ruled_houses,
             asserted=asserted_houses,
         )
         if violation is not None:
@@ -663,7 +897,8 @@ def _check_claim(
             section=section,
             sentence=sentence,
             sentence_index=sentence_index,
-            gathered=_retrograde_facts(entries),
+            gathered=_retrograde_facts(entries)
+            | (frozenset({True}) if cited_bodies & retrograde_bodies else frozenset()),
             asserted=frozenset({True}),
         )
         if violation is not None:
@@ -708,13 +943,17 @@ def run_gate(
     entry_index = _index_entries(payload)
     natal_house_by_planet = _natal_house_by_planet(payload)
     natal_sign_by_point = _natal_sign_by_point(payload)
+    natal_retrograde_by_planet = _natal_retrograde_by_planet(payload)
+    natal_house_cusp_sign = _natal_house_cusp_sign(payload)
+    natal_house_rulers = _natal_house_rulers(payload)
+    retrograde_bodies = _retrograde_bodies(entry_index, natal_retrograde_by_planet)
     violations: list[GateViolation] = []
 
     for section_field in dataclass_fields(draft):
         section = section_field.name
         sentences: tuple[Sentence, ...] = getattr(draft, section)
         for sentence_index, sentence in enumerate(sentences):
-            if is_claim(sentence.text, vocabulary):
+            if is_claim(_mask_verbal_bilancia(sentence.text.lower()), vocabulary):
                 violations.extend(
                     _check_claim(
                         section=section,
@@ -723,6 +962,10 @@ def run_gate(
                         entry_index=entry_index,
                         natal_house_by_planet=natal_house_by_planet,
                         natal_sign_by_point=natal_sign_by_point,
+                        natal_retrograde_by_planet=natal_retrograde_by_planet,
+                        natal_house_cusp_sign=natal_house_cusp_sign,
+                        natal_house_rulers=natal_house_rulers,
+                        retrograde_bodies=retrograde_bodies,
                         vocabulary=vocabulary,
                     )
                 )

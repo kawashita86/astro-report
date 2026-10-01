@@ -81,28 +81,55 @@ def _aliased_payload_json(payload: dict[str, Any], aliases: dict[str, str]) -> s
 
 #: An alias token (``"e12"``, ``"e7"``, ...) appearing inside a sentence's
 #: own ``"text"`` -- the model is instructed to put every id only in
-#: ``entry_ids``, never in the reader-facing prose, but occasionally does
-#: anyway (a real generation shipped "Le numerose retrogradazioni
-#: planetarie (e49, e17, e55, e41, e26)" straight to a client-facing
-#: Report). ``e`` immediately fused to digits, as a whole word, is not a
-#: real Italian token under any circumstance -- unlike the bare word "e"
-#: (the conjunction "and"), which this pattern never matches since it
-#: requires at least one trailing digit.
+#: ``entry_ids``, never in the reader-facing prose, but often does anyway (a
+#: real generation shipped "Le numerose retrogradazioni planetarie (e49, e17,
+#: e55, e41, e26)" straight to a client-facing Report). ``e`` immediately fused
+#: to digits, as a whole word, is not a real Italian token under any
+#: circumstance -- unlike the bare word "e" (the conjunction "and"), which this
+#: pattern never matches since it requires at least one trailing digit.
 _ALIAS_TOKEN_IN_TEXT_PATTERN = re.compile(r"\be\d+\b", re.IGNORECASE)
 
+#: A bracketed run of alias tokens, "(e49)" or "(e49, e17 e e55)", with the space
+#: before it -- removed whole so no empty parentheses are left behind.
+_ALIAS_GROUP_PATTERN = re.compile(
+    r"\s*[(\[]\s*e\d+(?:\s*(?:,|;|\be\b|\bed\b)\s*e\d+)*\s*[)\]]", re.IGNORECASE
+)
 
-def _validate_section_no_alias_tokens_in_text(
-    section: str, sentences: tuple[Sentence, ...]
-) -> None:
+
+def _strip_alias_tokens_from_text(
+    section: str, sentences: tuple[Sentence, ...], known_aliases: frozenset[str]
+) -> tuple[Sentence, ...]:
+    """Clean leaked id aliases out of reader-facing prose instead of rejecting the draft.
+
+    A leaked alias is a formatting slip, not a wrong fact: the model meant to cite that
+    entry. So the token is removed from the text and, outside the date-list Sections
+    (whose schema pins exactly one id per sentence), added to the sentence's
+    ``entry_ids`` when it is not already there -- the Gate still checks the sentence
+    against every entry it cites. Rejecting cost a whole regeneration per slip and
+    exhausted the attempt bound on most runs (Story 10.7).
+    """
+    cleaned: list[Sentence] = []
     for sentence in sentences:
-        match = _ALIAS_TOKEN_IN_TEXT_PATTERN.search(sentence.text)
-        if match is not None:
-            raise GenerationError(
-                "alias_token_in_text",
-                f"sentence {sentence.text!r} in Section {section!r} leaks the "
-                f"internal id alias {match.group()!r} into reader-facing prose -- "
-                'ids belong only in "entry_ids", never in "text".',
+        leaked = _ALIAS_TOKEN_IN_TEXT_PATTERN.findall(sentence.text)
+        if not leaked:
+            cleaned.append(sentence)
+            continue
+        text = _ALIAS_GROUP_PATTERN.sub("", sentence.text)
+        text = _ALIAS_TOKEN_IN_TEXT_PATTERN.sub("", text)
+        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r"\s{2,}", " ", text).strip()
+        entry_ids = sentence.entry_ids
+        if section not in _DATE_TOKEN_SECTIONS:
+            extra = tuple(
+                dict.fromkeys(
+                    a.lower()
+                    for a in leaked
+                    if a.lower() in known_aliases and a.lower() not in entry_ids
+                )
             )
+            entry_ids = entry_ids + extra
+        cleaned.append(Sentence(text=text, entry_ids=entry_ids))
+    return tuple(cleaned)
 
 
 def _build_section_response_schema(
@@ -243,7 +270,7 @@ class GeminiGenerator:
                 "parsing", f"the model response is missing the 'sentences' list for {section!r}."
             )
         sentences = _parse_sentences(section, data["sentences"])
-        _validate_section_no_alias_tokens_in_text(section, sentences)
+        sentences = _strip_alias_tokens_from_text(section, sentences, frozenset(aliases.values()))
         sentences = tuple(
             Sentence(
                 text=sentence.text,
@@ -417,7 +444,13 @@ _SECTION_FRAMING = (
     '(es. "e12"): usa esattamente questi identificativi brevi in "entry_ids", mai un '
     'id diverso, più lungo o inventato. Gli id vanno SOLO in "entry_ids": il campo '
     '"text" è prosa rivolta al lettore finale e non deve mai contenere un id, una '
-    'sua parte, o un riferimento tra parentesi come "(e12)".'
+    'sua parte, o un riferimento tra parentesi come "(e12)".\n\n'
+    "Ogni giorno o data che scrivi deve venire dai campi dell'evento che citi. Un "
+    'aspetto con "never_perfected": true e "perfected_at": null non diventa mai '
+    "esatto nel mese: non scrivere MAI una data di perfezionamento per lui (né "
+    '"si perfezionerà il 24 gennaio" né simili); puoi dire solo che entra in orbita '
+    '(da "orb_entry_at") o che resta attivo. Se per un evento il Payload non dà una '
+    "data, non indicarne nessuna."
 )
 
 

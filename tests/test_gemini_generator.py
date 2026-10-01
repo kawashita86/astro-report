@@ -928,16 +928,45 @@ def test_other_sections_ignore_written_sections() -> None:
     assert "Testo dell'amore." not in client.calls[0]["prompt"]
 
 
-def test_generate_section_alias_leak_in_text_raises() -> None:
+def test_generate_section_strips_an_alias_leak_and_cites_it() -> None:
     payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    aliases = _two_id_aliases()
     generator, _ = _section_generator(
-        _section_response({"text": "Vedi (e1, e2).", "entry_ids": []})
+        _section_response(
+            {
+                "text": "Giove è in congiunzione (e1, e2), e questo conta.",
+                "entry_ids": [aliases[_KNOWN_ID]],
+            }
+        )
     )
 
-    with pytest.raises(GenerationError) as excinfo:
-        generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    sentences = generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
 
-    assert excinfo.value.step == "alias_token_in_text"
+    assert sentences[0].text == "Giove è in congiunzione, e questo conta."
+    assert sentences[0].entry_ids == (_KNOWN_ID, _ANOTHER_KNOWN_ID)
+
+
+def test_generate_section_strips_a_bare_alias_and_ignores_an_unknown_one() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, _ = _section_generator(
+        _section_response({"text": "Il transito e999 pesa.", "entry_ids": []})
+    )
+
+    sentences = generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert sentences[0].text == "Il transito pesa."
+    assert sentences[0].entry_ids == ()
+
+
+def test_generate_section_keeps_the_conjunction_e() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, _ = _section_generator(
+        _section_response({"text": "Sole e Luna dialogano.", "entry_ids": []})
+    )
+
+    sentences = generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert sentences[0].text == "Sole e Luna dialogano."
 
 
 def test_generate_section_unknown_id_raises_at_the_citation_step() -> None:
@@ -1037,3 +1066,14 @@ def test_the_whole_report_generate_call_is_gone() -> None:
 
     assert not hasattr(GeminiGenerator, "generate")
     assert not hasattr(RecordedResponseGenerator, "generate")
+
+
+def test_the_section_prompt_forbids_a_perfection_date_for_a_never_perfected_aspect() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, client = _section_generator(_section_response())
+
+    generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    prompt = client.calls[0]["prompt"]
+    assert '"never_perfected": true' in prompt
+    assert "non scrivere MAI una data di perfezionamento" in prompt
