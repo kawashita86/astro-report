@@ -148,11 +148,11 @@ A pain to solve, and with it a ceiling to remove. Francesco is a working astrolo
 
 - **CAP-30** — Watch a report run progress
   - **intent:** Francesco can start a report run and watch it move through its stages, and can leave the view or close the tab and come back without the run being lost or restarted.
-  - **success:** Starting a run returns to the run view immediately without waiting for any stage; the view shows the run's current stage and reflects each advance as it happens; a run left or closed mid-flight resumes from its last completed stage when the view is reopened; a terminally failed run shows which stage failed and why — distinct from a Gate failure, which routes to the review surface of CAP-20. Mechanism in `ARCHITECTURE-SPINE.md` AD-10/AD-20 and `EXPERIENCE.md` (*Report Run Lifecycle*).
+  - **success:** Starting a run returns to the run view immediately without waiting for any stage; the view shows the run's current stage and reflects each advance as it happens; a run left or closed mid-flight resumes from its last completed stage when the view is reopened; a terminally failed run shows which stage failed and why — distinct from a Gate failure, which routes to the review surface of CAP-20; during drafting the view shows each Section's own state (waiting, writing, written, failed) and each Section's text as soon as it is written. Mechanism in `ARCHITECTURE-SPINE.md` AD-10/AD-20 and `EXPERIENCE.md` (*Report Run Lifecycle*).
 
 ## Constraints
 
-- The Generator narrates and never computes: it receives the Report Payload, the Style Guide version and the two ReportThemes, and nothing else — no tools, no database handle, no prior Report prose.
+- The Generator narrates and never computes: it receives the Report Payload, the Style Guide version, the two ReportThemes, and the name of the one Section it is writing — and, for Consiglio finale only, the sentence texts of this same draft's Sections 1–7 — and nothing else: no tools, no database handle, no prior Report's prose. *(Amended 2026-10-01, correct-course.)*
 - No astronomical fact may appear in a Report that is not in its Report Payload, and the Groundedness Gate is the only path to export.
 - Claim-level determinism is the bar, not byte-identical prose. Wording may vary between runs; Claims may never vary, exceed the Payload, or contradict each other.
 - Identical Client birth data, month and ComputationConfig produce a byte-identical Report Payload, on every run and every deployment.
@@ -188,7 +188,7 @@ A pain to solve, and with it a ceiling to remove. Francesco is a working astrolo
 - No delivery mechanics. The product produces a file; sending it stays manual.
 - No Corpus-based voice conditioning, exemplar retrieval or fine-tuning in v1 — phase 2, gated on the count from CAP-22.
 - No multi-year narrative memory and no alternative report formats (quarterly, annual, per-domain) in v1.
-- No capacity planning beyond 200 Reports per month; no horizontal scale, multi-region, queue broker or background worker process. A report run is advanced only by the operator's own polling of the run view (`ARCHITECTURE-SPINE.md` AD-20).
+- No capacity planning beyond 200 Reports per month; no horizontal scale, multi-region, queue broker or separate worker process. A report run is advanced by one in-process driver with a bounded generation executor, started by the start request and resumed on boot (`ARCHITECTURE-SPINE.md` AD-20, AD-21). *(Amended 2026-10-01, correct-course.)*
 - No observability stack beyond structured logs — no metrics backend, no alerting, no tracing.
 - The system does not teach astrology. It assumes a professional operator and explains nothing about its own reasoning beyond exposing the facts.
 

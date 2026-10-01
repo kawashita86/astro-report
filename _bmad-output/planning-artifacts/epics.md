@@ -406,6 +406,15 @@ one new `/` route. No `core/` change, no FR change, no data-model change. Depend
 done plus Story 3.10. `report_export.html` is explicitly excluded (client document, not chrome).
 Added 2026-08-28 via `sprint-change-proposal-2026-08-28-ui-rebuild.md`.
 
+### Epic 10: Fast reports — parallel Section generation and instant PDF
+
+Francesco gets a report on screen in under a minute, sees each Section appear as it is written,
+waits only for the Sections the Gate rejected, and downloads the PDF in seconds.
+**FRs covered:** FR-16, FR-19, FR-21 (amended), NFR throughput/latency, NFR cost (amended)
+**Governed by:** AD-9, AD-10, AD-20 (amended 2026-10-01), AD-21 (new); AD-6, AD-7 unchanged
+**Notes:** Ports md-report's per-Section generation, driver, leases and progressive UI. Story 10.1
+(PDF) is independent and ships first. Added 2026-10-01 via `sprint-change-proposal-2026-10-01.md`.
+
 ### Dependency flow
 
 ```
@@ -2297,3 +2306,209 @@ So that the tool matches the language of the work and holds up during a long bat
 **Given** `report_export.html`
 **When** this epic completes
 **Then** it is untouched — it remains the Georgia-serif client document and does not inherit `DESIGN.md`
+
+
+---
+
+## Epic 10: Fast reports — parallel Section generation and instant PDF
+
+Francesco gets a report on screen in under a minute, sees each Section appear as it is written, waits
+only for the Sections the Gate rejected, and downloads the PDF in seconds. Ports md-report's
+per-Section generation, RunDriver, leases and progressive drafting view into astro-report, keeping
+every existing correctness contract (Payload, id aliases, Gate, export gate, review paths).
+
+**FRs covered:** FR-16, FR-19, FR-21 (amended), NFR throughput/latency, NFR cost (amended)
+**Governed by:** AD-9, AD-10, AD-20 (amended 2026-10-01), AD-21 (new) · **Unchanged:** AD-6, AD-7
+**Notes:** Source: `sprint-change-proposal-2026-10-01.md`. Build order: 10.1 (independent) → 10.2 →
+10.3 → 10.4 → 10.5 → 10.6 → 10.7. Reference implementation: `../md-report` (`shell/runner/driver.py`,
+`advance.py`, `lease.py`, `core/draft_state.py`, templates `_avanzamento.html`, `_rail_riga.html`,
+`_sezione.html`, `_oob.html`, table `exported_pdf`).
+
+### Story 10.1: A PDF in seconds, and instantly the second time
+
+As Francesco,
+I want the PDF to download in a few seconds, and instantly when I download it again,
+So that exporting forty reports in an afternoon is not dominated by waiting on the renderer.
+
+**Acceptance Criteria:**
+
+**Given** `report_export.html`
+**When** this story lands
+**Then** the prose cards (Energia generale, Amore/Lavoro/Denaro/Benessere, both day lists, Consiglio
+finale) use block layout — side-by-side arrangements use floats or `display: table` — and flex/grid
+remains only on small fixed-size rows (icon + heading, placement rows)
+**And** a real report's PDF is visually checked against `mockups/key-pdf-export.html`
+
+**Given** the realistic-length export fixture with a real natal wheel
+**When** it is rendered locally
+**Then** `html_to_pdf` takes ≤ 1.2 s (was 3.5 s; generous ceiling in a perf test)
+
+**Given** a new forward-only table `exported_pdf` (`report_id`, `fingerprint`, `pdf_bytes`, `created_at`)
+**When** a PDF is downloaded
+**Then** the fingerprint hashes everything the PDF depends on (rendered draft, Client name and birth
+data, chart id, template file hash); a match serves the stored bytes with no WeasyPrint call, a miss
+renders and stores
+**And** `ExportRecord` and `run.stage` are written exactly as today on every download
+**And** a hand-correction of a Section changes the fingerprint
+**And** the migration is checked against real Postgres (`MIGRATION_TEST_DATABASE_URL`)
+
+### Story 10.2: Paid flash, configured, and the data terms re-recorded
+
+As Francesco,
+I want the Gemini model and generation concurrency to be settings, on my paid account,
+So that astro-report and md-report run the same way and I can tune them without a code change.
+
+**Acceptance Criteria:**
+
+**Given** `shell/config.py`
+**When** this story lands
+**Then** `GEMINI_MODEL` (default `gemini-2.5-flash`) and `GENERATION_CONCURRENCY` (default 11, valid
+1–32) are read and validated at startup, mirroring md-report, and `.env.example` documents both
+**And** `GeminiGenerator` takes its model from `Settings`, with no hard-coded `_MODEL`
+**And** the free-tier / 10-requests-per-minute rationale is removed from `generator.py` and `driver.py`
+
+**Given** AD-9's data-terms gate
+**When** the account tier changes to paid
+**Then** `docs/release-validation/gemini-data-terms.md` records `tier = "paid"` with a new verification
+date, `tests/test_data_terms_record.py` is updated, and `GEMINI_DATA_TERMS_VERIFIED_AT` is bumped
+
+### Story 10.3: Generate one Section at a time
+
+As Francesco,
+I want each Section written by its own Generator call,
+So that Sections can be written in parallel and rewritten individually.
+
+**Acceptance Criteria:**
+
+**Given** the `Generator` port
+**When** this story lands
+**Then** it exposes `generate_section(section, payload, style_guide, theme_previous, theme_current,
+written_sections=None) -> tuple[Sentence, ...]`
+**And** each call uses a one-Section response schema (narrative or count-pinned day-list shape), the
+shared short id aliases with an `entry_ids` enum, and the alias-leak, citation, no-date-token and
+day-list-coverage validations scoped to that Section
+**And** the prompt places system instruction + Payload + continuity block first (identical across all
+eight calls, for implicit caching) and the Section-specific instruction last
+
+**Given** Consiglio astrologico finale
+**When** it is generated
+**Then** its call additionally receives Sections 1–7's sentence texts, never their ids, and still cites
+only Payload ids
+
+**Given** the recorded and local generators
+**When** this story lands
+**Then** both implement `generate_section`, and conformance fixtures are re-recorded per Section
+**And** the whole-report `generate()` is removed once Story 10.4 lands (no dead path)
+
+### Story 10.4: Section rows and the RunDriver
+
+As Francesco,
+I want a run to be written in the background, Section by Section, surviving a redeploy,
+So that a report is ready in under a minute and nothing written is ever lost.
+
+**Acceptance Criteria:**
+
+**Given** a forward-only migration
+**When** it runs
+**Then** `report_draft_section` exists with AD-21's columns, unique per (draft attempt, ordinal), and is
+removed by the Client-deletion cascade (tests use `tests/_fk.py`)
+
+**Given** `core/draft_state.py` (pure)
+**When** it is asked about a draft's Section rows
+**Then** it returns which Sections are claimable — 1–7 together, 8 only once 1–7 are complete — whether
+the draft is complete, and whether a Section's attempts are exhausted
+
+**Given** `shell/runner/driver.py` (RunDriver: `start`, `resume`, `stop`; per-run loops plus a
+generation executor capped at `GENERATION_CONCURRENCY`) and `shell/runner/lease.py`
+**When** a run is started
+**Then** the start request returns at once, the driver advances every stage under the existing advisory
+lock, fans out claimable Sections, assembles eight complete Sections into one `ReportDraft`, and moves
+on to `gate_passed`
+**And** `REPORT_RUN_MODE` and the old scheduler are removed; every HTTP handler is read-only for run
+progress
+
+**Given** a fake generator that sleeps 1 s per Section
+**When** a draft is written
+**Then** it completes in about 2 s, not 8 s
+
+**Given** a driver stopped mid-draft
+**When** `resume()` runs on the next startup
+**Then** the draft completes without rewriting any Section already complete
+
+**Given** a Section that fails `MAX_SECTION_ATTEMPTS` times
+**When** its attempts are exhausted
+**Then** the run fails with that Section named, and no partial Report is exportable
+
+**Given** the codebase
+**When** the guard test scans it
+**Then** no `threading`, `concurrent.futures` or `asyncio.create_task` use exists outside
+`shell/runner/driver.py`, with `test_the_guard_detects_a_*` negative tests
+
+### Story 10.5: Regenerate only what the Gate rejected
+
+As Francesco,
+I want a Gate failure to rewrite only the failing Sections,
+So that a regeneration costs seconds, not another full report.
+
+**Acceptance Criteria:**
+
+**Given** a `GateFailedError` above `_MIN_VIOLATIONS_FOR_AUTO_REGENERATION` and within
+`_MAX_REGENERATIONS`
+**When** the run regenerates
+**Then** a new draft attempt resets only the Sections named by the violations to `pending`, plus
+Consiglio finale whenever any of Sections 1–7 is reset, and copies every other Section forward
+unchanged
+**And** each attempt's `StoredGateResult` refers to that attempt's assembled `ReportDraft`
+**And** `regeneration_count` counts regeneration cycles exactly as before
+
+**Given** a Gate failure in Amore alone
+**When** the run regenerates
+**Then** only Amore and Consiglio finale are rewritten
+
+**Given** the accept and hand-correct paths (Stories 5.7/5.8)
+**When** they are used
+**Then** they behave as before, and a hand-correction also updates that Section's row
+
+### Story 10.6: Watch the Sections being written
+
+As Francesco,
+I want to see each Section appear as soon as it is written,
+So that I can start reading while the rest of the report is still being generated.
+
+**Acceptance Criteria:**
+
+**Given** a run in `draft_ready`
+**When** its view is open
+**Then** it shows EXPERIENCE.md's *Drafting view*: a rail of eight Sections with per-Section state
+(*In attesa*, *In scrittura*, *Scritta*, *Da rifare*, *Non riuscita*) and a sheet showing each
+written Section's prose
+**And** each 2 s poll returns only changed rail rows and Sections as HTMX out-of-band swaps
+**And** Consiglio finale shows *In attesa delle altre Sezioni* until Sections 1–7 are written
+**And** the setup stages and `gate_passed` keep Story 9.5's stage track
+
+**Given** the HTTP tests
+**When** one Section's row becomes complete while others are leased
+**Then** the poll response contains that Section's text while the others read *In scrittura*
+
+**Given** the accessibility floor (Story 9.9)
+**When** Sections complete
+**Then** one polite live region announces progress (*"5 di 8 Sezioni scritte"*), all copy is Italian,
+and styling uses `DESIGN.md` tokens
+
+### Story 10.7: Measure it
+
+As Francesco,
+I want the new latency measured on production,
+So that the 3-minute budget is checked against reality, regeneration included.
+
+**Acceptance Criteria:**
+
+**Given** production with paid `gemini-2.5-flash`
+**When** the 8-3 measurement is re-run
+**Then** `docs/release-validation/latency.md` records draft p90, per-Section p90, one-regeneration p90,
+and PDF first/repeat export times, and its guard test checks them against budget
+**And** the targets are: draft p90 ≤ 60 s, PDF first export ≤ 6 s, repeat download < 1 s
+
+**Given** five reports generated before and after Epic 10
+**When** Francesco reads them side by side
+**Then** any repetition between Sections is addressed by a new Style Guide version, recorded as such

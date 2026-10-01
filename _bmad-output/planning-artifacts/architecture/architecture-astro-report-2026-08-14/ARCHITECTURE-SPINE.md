@@ -181,6 +181,11 @@ No arrow runs from `core` to `shell`. There is no exception.
 - **Rule:** exactly one `Generator` adapter is configured. Changing provider is a deliberate
   configuration change gated on a recorded data-terms verification, never an automatic fallback. Rate
   limits and transient failures are absorbed by bounded backoff and by run checkpointing (AD-10).
+  **(Amended 2026-10-01, correct-course):** the configured adapter is Gemini on a **paid** account;
+  the model is a setting (`GEMINI_MODEL`, default `gemini-2.5-flash`, read only in
+  `shell/config.py`), and so is the process-wide cap on concurrent Generator calls
+  (`GENERATION_CONCURRENCY`, default 11, max 32). Changing the model is a configuration change;
+  changing the provider or the account's terms still requires a recorded data-terms verification.
 
 ### AD-10 — A report run is a checkpointed row advancing through persisted stages
 
@@ -193,8 +198,9 @@ No arrow runs from `core` to `shell`. There is no exception.
   run resumes at the first incomplete stage; **AD-20 fixes what invokes that advance and when — the
   poll request, one stage at a time, never a background job.** Every stage function is idempotent on
   its input.
-  **Automatic regeneration under FR-21 replaces the whole Report, never a single failing Section**,
-  so a regeneration count means one thing and Sections cannot come from different drafts. **(Amended
+  ~~Automatic regeneration under FR-21 replaces the whole Report, never a single failing Section,
+  so a regeneration count means one thing and Sections cannot come from different drafts.~~
+  **(Superseded 2026-10-01, correct-course — see the amendment at the end of this AD.)** **(Amended
   2026-09-02, correct-course, Story 5.7/5.8):** `gate_passed` is now reached by one of three routes,
   not one — an automatic Gate pass; every open violation on the current failing `GateResult`
   explicitly accepted after review (no draft change, no new Gate check); or one flagged sentence
@@ -211,6 +217,13 @@ No arrow runs from `core` to `shell`. There is no exception.
   is left untouched, exactly as the review-closed routes above leave it. This applies on every failing
   check for the run's current cycle, not only the first — a regeneration in progress that happens to
   converge to a single remaining violation is surfaced rather than spending its next attempt too.
+  **(Amended 2026-10-01, correct-course, sprint-change-proposal-2026-10-01):** `draft_ready` is
+  written Section by Section (AD-21). Automatic regeneration under FR-21 opens a new draft attempt
+  in which **only the Sections named by the failing Gate check** are rewritten, plus Consiglio
+  finale whenever any of Sections 1–7 is rewritten; every other Section is copied forward unchanged
+  into the new attempt. Each attempt still persists one complete, assembled `ReportDraft` and its own
+  `StoredGateResult`, so a Gate result always refers to one coherent draft, and
+  `regeneration_count` still counts Gate-triggered regeneration cycles per run.
 
 ### AD-11 — No durable state on the compute host's filesystem
 
@@ -322,7 +335,29 @@ No arrow runs from `core` to `shell`. There is no exception.
   retained. The repository file is the seed for version 1 only. Every Report records the Style Guide
   version that produced it. Generation refuses to run when no Style Guide version exists.
 
-### AD-20 — A report run advances one stage per poll request, never on a background job
+### AD-20 — A report run is advanced by one in-process driver, never by a request
+
+- **Binds:** FR-8–FR-22, FR-25, NFR throughput and latency, UJ-1
+- **Prevents:** a request held open for a whole generation fan-out; a redeploy losing in-flight
+  Sections; threads and executors appearing ad hoc across the codebase; a queue, broker, cron or
+  second deployable.
+- **Rule (2026-10-01, correct-course, sprint-change-proposal-2026-10-01):** the start handler
+  creates the `ReportRun` row, hands its id to the **RunDriver** (`shell/runner/driver.py`) and
+  returns immediately. The driver owns two executors: a small pool of per-run loops, and the
+  **generation executor** capped at `GENERATION_CONCURRENCY`, the process-wide brake across every
+  run. A run's loop calls the same idempotent, one-stage-per-call `advance()` (AD-10) under the same
+  Postgres advisory lock until the run reaches `gate_passed`/`failed_at` or waits on a human (Gate
+  review). During `draft_ready` it submits one job per claimable Section (AD-21). Every HTTP
+  handler — the poll included — is **read-only** with respect to run progress. On startup the
+  driver's `resume()` restarts every run with `failed_at IS NULL` and an incomplete stage; a Section
+  lease left by a dead process expires (`LEASE_TTL`) and is reclaimed. `REPORT_RUN_MODE` is removed.
+  **The driver module is the only place in the codebase allowed to create a thread, executor or
+  async task** — enforced by a guard test with negative tests. Still no queue, broker, cron or
+  second deployable.
+
+#### Superseded 2026-10-01 — the original AD-20 (kept for history)
+
+*A report run advances one stage per poll request, never on a background job*
 
 - **Binds:** FR-8–FR-22, FR-25, NFR throughput and latency, UJ-1
 - **Prevents:** a read of the run view blocking until the whole run finishes — which refreezes the
@@ -368,6 +403,22 @@ No arrow runs from `core` to `shell`. There is no exception.
   it (`failed_at`) exactly as in `poll` mode. This amendment introduces no queue, no broker, no second deployable — the
   Deferred section's "worker process and queue broker" stays out of scope, reserved for if the
   200-reports-per-month ceiling moves.
+
+### AD-21 — A draft is written Section by Section; Consiglio finale last
+
+- **Binds:** FR-16, FR-17, FR-19, FR-21, NFR throughput and latency
+- **Prevents:** one slow or failing Section holding the whole Report hostage; regeneration paying
+  for Sections that already passed; a closing Section written blind to the rest of the Report.
+- **Rule (2026-10-01, correct-course):** each draft attempt has one `report_draft_section` row per
+  Section (ordinal, name, status `pending|complete|failed`, sentences JSON, attempts, `last_error`,
+  `claimed_at`, `claim_expires_at`). Status is derived purely in `core/` (`core/draft_state.py`:
+  which Sections are claimable, whether the draft is complete) — there is no in-progress status; a
+  lease marks a Section as being written. Sections 1–7 are claimable together; Section 8 (Consiglio
+  finale) becomes claimable only when 1–7 are `complete`, and its Generator call additionally
+  receives Sections 1–7's sentence texts (no ids). Each call keeps every per-call guarantee of AD-6
+  and Story 4.5: short id aliases, an `entry_ids` enum, count-pinned day-list schemas, and the
+  alias-leak, citation, no-date-token and day-list-coverage validations. When all eight are
+  `complete`, the driver assembles one `ReportDraft` and the run advances to `gate_passed`.
 
 ## Consistency Conventions
 

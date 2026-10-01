@@ -142,6 +142,8 @@ function. Names stay Italian and lowercase throughout.
 
 **Realizes:** the mechanism behind FR-19, FR-21 · **Governed by:** AD-10, AD-20, AD-9, AD-11
 
+> *Superseded in part by Epic 10 (2026-10-01): see AD-20 (amended) and AD-21.*
+
 Introduced once two real stages exist, so everything after it slots into a frame rather than being
 retrofitted into one.
 
@@ -214,6 +216,8 @@ a text editor in the UI, prior versions retained, the version recorded on every 
 ## E8 · Generation
 
 **Realizes:** FR-16, FR-17, FR-19 · **Governed by:** AD-3, AD-6, AD-9, AD-19
+
+> *Superseded in part by Epic 10 (2026-10-01): see AD-20 (amended) and AD-21.*
 
 - The Generator port takes exactly Payload, Style Guide version, previous and current ReportTheme
   (AD-3). No database handle, no tools, no prior Report prose.

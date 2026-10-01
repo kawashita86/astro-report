@@ -547,6 +547,8 @@ Transient generation failures are retried without Francesco's involvement.
 - Provider rate limits and transient errors trigger bounded automatic retry.
 - After exhausting retries the Report is marked failed and surfaced to Francesco with the reason.
 - A failed generation never produces a partial Report that could be exported.
+- Retries are per Section: a transient failure in one Section never discards Sections already
+  written. *(Added 2026-10-01, correct-course.)*
 
 **Notes:** `[NOTE FOR PM]` Voice conditioning in v1 rests entirely on the hand-written Style Guide.
 Corpus-based few-shot conditioning is phase 2 (§4.7, §9). The brief is explicit that the Corpus is the
@@ -592,7 +594,8 @@ A Report failing the Groundedness Gate is regenerated a bounded number of times;
 surfaced.
 
 **Consequences (testable):**
-- Regeneration is automatic and bounded.
+- Regeneration is automatic and bounded, and rewrites only the Sections the failing check names
+  (plus Consiglio astrologico finale whenever another Section is rewritten).
 - A failing check naming too few violations to warrant spending a regeneration on (a configured
   ceiling) skips automatic regeneration entirely and is surfaced immediately instead.
 - On persistent failure Francesco is shown the Report, the failing Claims, and the Payload entries they
@@ -609,6 +612,7 @@ automatic regeneration.)*
 *(Amended 2026-09-17, correct-course: a low-violation failure is surfaced immediately rather than
 always spending an automatic regeneration on it first — the accept/hand-correct paths above are now
 reachable from either trigger, not only from bound exhaustion.)*
+*(Amended 2026-10-01, correct-course: per-Section regeneration.)*
 
 #### FR-22: Retain the Gate result
 
@@ -721,9 +725,15 @@ Francesco can see all Reports previously generated for a Client, in order.
   may also continue advancing while Francesco is not actively watching it — the 3-minute p90 and the
   forty-per-session ceiling are unchanged; only the requirement to keep the tab open while it runs is
   relaxed.
+  **Added 2026-10-01, correct-course:** generation is parallel per Section and always driven in the
+  background (AD-20 amended, AD-21; `REPORT_RUN_MODE` retired). The 3-minute p90 is unchanged as the
+  budget; Story 10.7 re-measures it, now including one regeneration cycle.
 - **Time budget.** End-to-end Francesco involvement per Report — entering or selecting a Client,
   generating, reviewing, exporting — stays under 15 minutes.
 - **Cost.** Running cost stays at zero at 30–200 Reports per month.
+  **Amended 2026-10-01, correct-course:** the Generator runs on a paid Gemini account
+  (`gemini-2.5-flash`), Francesco's explicit decision for latency; hosting stays at its existing fixed
+  cost. Generation is the only usage-priced line item.
 - **Availability.** Best-effort. This is a single-operator tool used in batches; an hour of downtime is
   an inconvenience, not an incident. No SLA. `[ASSUMPTION: inferred from the batch working pattern in
   UJ-1; not stated by Francesco.]`

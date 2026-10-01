@@ -281,7 +281,7 @@ Visual specs are in `DESIGN.md` → Components. This section is behavior only.
 | Full page navigation | Browser-native; no app spinner. Server renders fast (no compute on GET except the run driver — see note). |
 | A known-shape region loading via HTMX | `{component.skeleton}` matching the final layout. |
 | A single indeterminate action (export building, backup packaging) | Inline spinner on the button + disabled; `aria-busy` on the region. |
-| Report run advancing | The **stage track**, not a spinner. See *Report Run Lifecycle*. |
+| Report run advancing | The **stage track** for the setup stages, then the **Section rail** during drafting — never a spinner. See *Report Run Lifecycle*. |
 
 ### Empty
 
@@ -392,6 +392,28 @@ Visual contrast values are owned by `DESIGN.md`; this section owns behavior.
 
 ## Report Run Lifecycle *(invented — product-specific)*
 
+### Drafting view *(added 2026-10-01, correct-course)*
+
+While the run is in `draft_ready`, the stage track's draft node expands into a
+**Section rail + sheet**, ported from md-report (`_avanzamento.html`,
+`_rail_riga.html`, `_sezione.html`, `_oob.html`) and styled with this project's
+`DESIGN.md` tokens:
+
+- **Rail** (left): the eight Sections in order, each with a dot whose shape and
+  colour encode its state, plus a visible-or-screen-reader label: *In attesa*,
+  *In scrittura*, *Scritta*, *Da rifare*, *Non riuscita*. Consiglio finale shows
+  *In attesa delle altre Sezioni* until Sections 1–7 are written.
+- **Sheet** (right): each Section's prose appears the moment its row is complete;
+  unwritten Sections show a `{component.skeleton}` of the final shape.
+- **Updates:** the 2 s poll returns only the changed rail rows and Sections as HTMX
+  out-of-band swaps; nothing already on screen re-renders.
+- **Regeneration:** Sections named by a failing Gate check go *Da rifare →
+  In scrittura*; passing Sections stay visible and unchanged.
+- **Accessibility:** one polite live region on the rail's summary line
+  (*"5 di 8 Sezioni scritte"*), not on every row.
+
+Below breakpoint `md` the rail collapses into a single summary line above the sheet.
+
 The `ReportRun` is a row advancing forward-only through six persisted stages
 (ARCHITECTURE-SPINE.md AD-10). It is the operator's main loop at month-end and the
 single interaction the rebuild most needs to fix. Visual reference (both
@@ -412,6 +434,13 @@ load-bearing states): [`mockups/key-run-stage.html`](mockups/key-run-stage.html)
 
 ### Rules
 
+- **Superseding amendment (2026-10-01, correct-course, sprint-change-proposal-2026-10-01).**
+  *Non-blocking start; driver-driven advance; polling only reads.* The start `POST` hands
+  the run to the in-process RunDriver (ARCHITECTURE-SPINE.md AD-20, amended) and returns.
+  The `poll` / `background` distinction below is retired (`REPORT_RUN_MODE` removed): the
+  driver always advances the run, every poll is fast and read-only, and a closed tab
+  never pauses a run. Where the older rules below mention poll-driven advance or a slow
+  `draft_ready` poll, this amendment wins. Drafting is shown by the *Drafting view* below.
 - **Non-blocking start; poll-driven advance** (ARCHITECTURE-SPINE.md AD-20). The
   start `POST` creates the run and returns immediately to the stage view without
   running a stage. From then on, each poll `GET` advances the run by **at most

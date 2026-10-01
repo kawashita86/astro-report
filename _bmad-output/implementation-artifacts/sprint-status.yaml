@@ -127,6 +127,16 @@ development_status:
   9-8-feedback-and-state-primitives: done
   9-9-italian-everywhere-and-the-accessibility-floor: done
   epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-a-pdf-in-seconds-and-instantly-the-second-time: backlog
+  10-2-paid-flash-configured-and-the-data-terms-re-recorded: backlog
+  10-3-generate-one-section-at-a-time: backlog
+  10-4-section-rows-and-the-rundriver: backlog
+  10-5-regenerate-only-what-the-gate-rejected: backlog
+  10-6-watch-the-sections-being-written: backlog
+  10-7-measure-it: backlog
+  epic-10-retrospective: optional
 action_items:
   - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"
     epic: 1
