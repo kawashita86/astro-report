@@ -32,7 +32,9 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.pool import ConnectionPoolEntry
 from sqlmodel import Session
 
 from core.ephemeris.identity import EphemerisIdentity, verify_ephemeris_identity
@@ -81,6 +83,53 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 #: Argon2's 64 MiB-per-verify memory cost -- the one endpoint reachable
 #: without a session is not the place to skip this.
 _MAX_LOGIN_BODY_BYTES = 4096
+
+#: Upper bounds on how long a stalled connect, a silently dead TCP
+#: connection or a stuck statement can hold a pool slot. Without them a
+#: single uvicorn worker on Coolify exhausted the whole pool (SQLAlchemy's
+#: default 5 + 10 overflow): checkouts that never came back starved every
+#: request and every scheduler tick with ``QueuePool limit ... reached``.
+#: ``pool_recycle`` only replaces aged connections at checkout, it does not
+#: free a stuck one. Operational tuning, not deployment facts, so they live
+#: here rather than in ``Settings``. ``statement_timeout`` bounds a single
+#: statement only -- deliberately no ``idle_in_transaction_session_timeout``:
+#: the ``draft_ready`` stage holds its transaction (and advisory lock) open
+#: across the Gemini call.
+_DB_CONNECT_TIMEOUT_SECONDS = 10
+_DB_STATEMENT_TIMEOUT_MS = 30_000
+_DB_POOL_RECYCLE_SECONDS = 300
+_DB_KEEPALIVES_IDLE_SECONDS = 30
+_DB_KEEPALIVES_INTERVAL_SECONDS = 10
+_DB_KEEPALIVES_COUNT = 3
+_DB_CONNECT_ARGS: dict[str, object] = {
+    "connect_timeout": _DB_CONNECT_TIMEOUT_SECONDS,
+    "keepalives": 1,
+    "keepalives_idle": _DB_KEEPALIVES_IDLE_SECONDS,
+    "keepalives_interval": _DB_KEEPALIVES_INTERVAL_SECONDS,
+    "keepalives_count": _DB_KEEPALIVES_COUNT,
+}
+
+
+def _set_statement_timeout(
+    dbapi_connection: DBAPIConnection, connection_record: ConnectionPoolEntry
+) -> None:
+    """Pool ``connect`` listener: apply ``statement_timeout`` to each new
+    connection with a plain ``SET``, never the libpq ``options`` startup
+    parameter -- PgBouncer-style poolers (Neon's pooled endpoint included)
+    refuse that parameter and every connection would fail. Run under
+    autocommit so the pool's reset-on-return rollback cannot undo it. Behind
+    a transaction-mode pooler the ``SET`` lands on one server backend only,
+    so there the bound is best-effort; on a direct connection it always holds."""
+    previous_autocommit = dbapi_connection.autocommit
+    dbapi_connection.autocommit = True
+    try:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(f"SET statement_timeout = {_DB_STATEMENT_TIMEOUT_MS}")
+        finally:
+            cursor.close()
+    finally:
+        dbapi_connection.autocommit = previous_autocommit
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -155,7 +204,13 @@ def create_app(settings: Settings) -> FastAPI:
         lifespan=_lifespan,
     )
     application.state.settings = settings
-    application.state.engine = create_engine(settings.sqlalchemy_url, pool_pre_ping=True)
+    application.state.engine = create_engine(
+        settings.sqlalchemy_url,
+        pool_pre_ping=True,
+        pool_recycle=_DB_POOL_RECYCLE_SECONDS,
+        connect_args=_DB_CONNECT_ARGS,
+    )
+    event.listen(application.state.engine, "connect", _set_statement_timeout)
     application.state.computation_config = computation_config
     application.state.sections_config = sections_config
     application.state.ephemeris_identity = ephemeris_identity

@@ -20,6 +20,7 @@ from decimal import Decimal
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, event
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -126,6 +127,78 @@ def test_engine_construction_enables_pre_ping(monkeypatch: pytest.MonkeyPatch) -
     create_app(LOCAL)
 
     assert captured_kwargs.get("pool_pre_ping") is True
+
+
+def test_engine_construction_bounds_every_connection_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spec-fix-db-pool-exhaustion: a stalled connect, a silently dead TCP
+    connection or a stuck statement must never hold a pool slot forever --
+    on Coolify that exhausted the pool and hung every request."""
+    captured_kwargs: dict[str, object] = {}
+    real_create_engine = shell_http_app.create_engine
+
+    def spy_create_engine(url: str, **kwargs: object) -> Engine:
+        captured_kwargs.update(kwargs)
+        return real_create_engine(url, **kwargs)
+
+    monkeypatch.setattr(shell_http_app, "create_engine", spy_create_engine)
+
+    create_app(LOCAL)
+
+    assert captured_kwargs.get("pool_recycle") == 300
+    assert captured_kwargs.get("connect_args") == {
+        "connect_timeout": 10,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+    }
+
+
+def test_every_new_connection_gets_a_statement_timeout_without_a_startup_option() -> None:
+    """The timeout is a pool ``connect`` listener running a plain ``SET``, never
+    the libpq ``options`` startup parameter a PgBouncer-style pooler refuses
+    (spec-fix-db-pool-exhaustion, review loop 1)."""
+    application = create_app(LOCAL)
+
+    assert event.contains(
+        application.state.engine, "connect", shell_http_app._set_statement_timeout
+    )
+
+
+class _RecordingDbapiConnection:
+    """A stand-in DBAPI connection recording each executed statement and the
+    autocommit setting in force when it ran."""
+
+    def __init__(self) -> None:
+        self.autocommit = False
+        self.executed: list[tuple[str, bool]] = []
+
+    def cursor(self) -> _RecordingCursor:
+        return _RecordingCursor(self)
+
+
+class _RecordingCursor:
+    def __init__(self, connection: _RecordingDbapiConnection) -> None:
+        self._connection = connection
+
+    def execute(self, statement: str) -> None:
+        self._connection.executed.append((statement, self._connection.autocommit))
+
+    def close(self) -> None:
+        pass
+
+
+def test_the_statement_timeout_is_set_under_autocommit_and_autocommit_is_restored() -> None:
+    """Under autocommit, so the pool's reset-on-return rollback cannot undo
+    the ``SET``; the driver's own autocommit setting is put back afterward."""
+    dbapi_connection = _RecordingDbapiConnection()
+
+    shell_http_app._set_statement_timeout(dbapi_connection, None)
+
+    assert dbapi_connection.executed == [("SET statement_timeout = 30000", True)]
+    assert dbapi_connection.autocommit is False
 
 
 def test_dispose_is_called_once_when_the_app_is_run_as_a_lifespan_context(

@@ -926,3 +926,10 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-gate-skip-regen-low-violations.md`
   summary: No test drives an actual POST to `/report-runs/{id}/violations/{i}/accept` or `/correct` against a run whose `failed_at` was set via the new low-violation short-circuit -- existing coverage only asserts that the Accetta/Modifica e ricontrolla forms *render* (`action="..."` string checks) on that run's draft page, not that submitting them actually completes the Report as Stories 5.7/5.8 intend.
   evidence: The spec's own Acceptance Criteria only required rendering parity with a bound-exhausted run, and the accept/correct routes (`report_runs.py`) were explicitly out of scope for this pass (`Never: ... Stories 5.7/5.8's own code`) -- but the behavioral claim now stated in the amended PRD ("the accept/hand-correct paths above are now reachable from either trigger") is currently backed only by rendering-level evidence, not an end-to-end test.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-fix-db-pool-exhaustion.md`
+  summary: The `draft_ready` stage keeps a pooled connection (open transaction plus advisory lock) checked out for the whole Gemini round-trip, retries and backoff included, with no upper bound.
+  evidence: Surfaced by the review of spec-fix-db-pool-exhaustion; the advisory lock is transaction-scoped (`shell/runner/advisory_lock.py`), so the connection can only be freed around the external call by restructuring the lock, which is out of that spec's scope.
+- source_spec: `_bmad-output/implementation-artifacts/spec-fix-db-pool-exhaustion.md`
+  summary: AGENTS.md still describes the deployment as Render plus Neon only, although CI now deploys to Coolify (commits 7adb355, 33e4eb0).
+  evidence: AGENTS.md's opening paragraph and Policy section mention only `render.yaml` auto-deploy; `.github/workflows` posts to the Coolify deploy endpoint.

@@ -3905,6 +3905,75 @@ def test_exporting_an_already_exported_report_again_leaves_the_stage_unchanged(
     assert {record.format for record in records} == {"pdf"}
 
 
+def _a_passed_run_ready_to_export(db_session: Session) -> ReportRun:
+    """A ``gate_passed`` run with its ``Report`` row persisted -- the
+    precondition every PDF-export connection-release test below shares."""
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(
+        client_id=ada.id,
+        month="2026-01",
+        stage="gate_passed",
+        natal_chart_id=_stored_chart_id(db_session, ada.id),
+    )
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    draft = _a_generated_draft_for(frozen)
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=draft, regeneration_count=0)
+    return run
+
+
+def test_the_pdf_render_runs_with_no_database_connection_held(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """spec-fix-db-pool-exhaustion: the request session must not be inside a
+    transaction (and so holds no pooled connection) while WeasyPrint renders
+    -- a slow render on the single-worker Coolify instance helped exhaust
+    the pool. The export is still recorded afterward."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    run = _a_passed_run_ready_to_export(db_session)
+    in_transaction_during_render: list[bool] = []
+
+    def _spy_html_to_pdf(html: str, *, base_url: str) -> bytes:
+        in_transaction_during_render.append(db_session.in_transaction())
+        return b"%PDF-fake"
+
+    monkeypatch.setattr(report_runs_module, "html_to_pdf", _spy_html_to_pdf)
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-fake"
+    assert in_transaction_during_render == [False]
+    assert run.stage == "exported"
+    assert len(_export_records(db_session)) == 1
+
+
+def test_a_failed_pdf_render_records_no_export_and_leaves_the_stage_alone(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Releasing the connection before the render must not move the
+    ``ExportRecord`` write ahead of it: a render that raises leaves no
+    record and ``run.stage`` at ``gate_passed``."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    run = _a_passed_run_ready_to_export(db_session)
+
+    def _failing_html_to_pdf(html: str, *, base_url: str) -> bytes:
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(report_runs_module, "html_to_pdf", _failing_html_to_pdf)
+
+    with pytest.raises(RuntimeError, match="render failed"):
+        authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    db_session.refresh(run)
+    assert run.stage == "gate_passed"
+    assert _export_records(db_session) == []
+
+
 def test_exporting_a_run_that_is_already_exported_still_returns_a_pdf(
     authenticated_client: TestClient, db_session: Session
 ) -> None:

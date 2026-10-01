@@ -1507,6 +1507,11 @@ def download_report_pdf(
     to now, never estimated later; its ``disposition`` starts ``NULL`` and is
     set afterward, in one click, by ``record_export_disposition`` below.
 
+    The request's database connection is released before ``html_to_pdf``
+    runs and the export is recorded in a new, short transaction afterward
+    (spec-fix-db-pool-exhaustion): holding it across a slow render on the
+    single-worker Coolify instance helped exhaust the connection pool.
+
     **Accepted GET-with-side-effects deviation (epic-6-retro-item-49).** This
     route mutates on ``GET``: every hit writes an ``ExportRecord`` row, the
     first advances ``run.stage``, and it commits -- on any ``GET``, including
@@ -1532,6 +1537,11 @@ def download_report_pdf(
         wheel_svg=wheel_svg,
     )
     export_html = _templates.get_template("report_export.html").render(export_context)
+    # Release the connection before the CPU-heavy WeasyPrint render: ending
+    # the read transaction returns it to the pool. `bundle.run`/`bundle.report`
+    # stay attached (expired), so the write below reloads them in a fresh,
+    # short transaction. `rollback()`, not `close()`, which would detach them.
+    session.rollback()
     pdf_bytes = html_to_pdf(export_html, base_url=_TEMPLATES_BASE_URL)
 
     if bundle.run.stage != "exported":
