@@ -4921,3 +4921,240 @@ def test_the_passed_report_view_shows_the_correct_clients_name_not_a_decoys(
     assert f'<a href="/clients/{ada.id}/reports">Ada Lovelace</a>' in body
     assert decoy.name not in body
     assert str(decoy.id) not in body
+
+
+# --- Story 10.6: watching the Sections being written ---------------------------------
+
+
+def _a_drafting_run(db_session: Session, *, complete: dict[int, str], leased: tuple[int, ...] = ()):
+    """A ``payload_ready`` run with a stored Payload and a first draft attempt whose
+    rows are ``complete`` for ``complete`` (ordinal -> text), leased for ``leased``,
+    and plain ``pending`` otherwise."""
+    from shell.adapters.postgres.report_draft_section import (
+        ReportDraftSection,
+        open_section_rows,
+    )
+
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
+    db_session.add(run)
+    db_session.commit()
+    store_report_payload(db_session, run=run, frozen=_a_frozen_payload_with_one_aspect())
+    open_section_rows(db_session, run.id, 0)
+    db_session.flush()
+    for row in db_session.exec(
+        select(ReportDraftSection).where(ReportDraftSection.report_run_id == run.id)
+    ).all():
+        if row.ordinal in complete:
+            row.status = "complete"
+            row.sentences = [{"text": complete[row.ordinal], "entry_ids": []}]
+        elif row.ordinal in leased:
+            row.attempts = 1
+            row.claim_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        db_session.add(row)
+    db_session.commit()
+    return run
+
+
+def test_the_drafting_view_shows_the_rail_the_written_text_and_one_live_region(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    run = _a_drafting_run(db_session, complete={2: "Amore scritto."}, leased=(1, 3, 4, 5, 6, 7))
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert "Amore scritto." in response.text
+    assert response.text.count("In scrittura") == 6
+    assert "1 di 8 Sezioni scritte" in response.text
+    assert 'hx-swap="none"' in response.text
+    assert response.text.count('role="status"') == 1
+    assert "Generazione della bozza" in response.text
+    assert '<span class="spinner" aria-hidden="true"></span>' in response.text
+    assert 'class="skeleton"' in response.text
+
+
+def test_a_poll_with_seen_returns_only_the_changed_rows_and_sections(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    run = _a_drafting_run(db_session, complete={2: "Amore scritto."}, leased=(1, 3, 4, 5, 6, 7))
+    seen = "1:writing,2:pending,3:writing,4:writing,5:writing,6:writing,7:writing,8:waiting_others"
+
+    response = authenticated_client.get(
+        f"/report-runs/{run.id}", params={"seen": seen}, headers={"HX-Request": "true"}
+    )
+
+    assert response.status_code == 200
+    assert "HX-Retarget" not in response.headers
+    assert 'id="rail-summary" hx-swap-oob="innerHTML">1 di 8 Sezioni scritte' in response.text
+    assert 'id="rail-row-2"' in response.text
+    assert 'id="sheet-section-2"' in response.text
+    assert "Amore scritto." in response.text
+    for ordinal in (1, 3, 4, 5, 6, 7, 8):
+        assert f'id="rail-row-{ordinal}"' not in response.text
+        assert f'id="sheet-section-{ordinal}"' not in response.text
+    assert 'role="status"' not in response.text
+
+
+def test_a_poll_where_nothing_changed_returns_only_the_summary_and_track(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    run = _a_drafting_run(db_session, complete={2: "Amore scritto."}, leased=(1,))
+    seen = "1:writing,2:complete,3:pending,4:pending,5:pending,6:pending,7:pending,8:waiting_others"
+
+    response = authenticated_client.get(
+        f"/report-runs/{run.id}", params={"seen": seen}, headers={"HX-Request": "true"}
+    )
+
+    assert "rail-summary" in response.text
+    assert "stage-track" in response.text
+    assert "rail-row-" not in response.text
+    assert "sheet-section-" not in response.text
+    assert "Amore scritto." not in response.text
+
+
+def test_consiglio_finale_reads_waiting_for_the_other_sections(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    run = _a_drafting_run(db_session, complete={1: "Uno."})
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert response.text.count("In attesa delle altre Sezioni") == 1
+
+
+def test_a_regeneration_attempt_shows_carried_sections_and_da_rifare_ones(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    from shell.adapters.postgres.report_draft import store_report_draft
+    from shell.adapters.postgres.report_draft_section import open_section_rows
+
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
+    db_session.add(run)
+    db_session.commit()
+    frozen = _a_frozen_payload_with_one_aspect()
+    store_report_payload(db_session, run=run, frozen=frozen)
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=_a_generated_draft_for(frozen),
+    )
+    carried = {
+        ordinal: (Sentence(text=f"Sezione {ordinal} mantenuta.", entry_ids=()),)
+        for ordinal in (1, 2, 4, 5, 6, 7)
+    }
+    open_section_rows(db_session, run.id, 1, carried=carried)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert "Sezione 1 mantenuta." in response.text
+    assert "Sezione 2 mantenuta." in response.text
+    assert "Da rifare" in response.text
+    assert "4 di 8" not in response.text and "6 di 8 Sezioni scritte" in response.text
+
+
+def test_a_failed_section_reads_non_riuscita_and_the_run_stops_polling(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    from shell.adapters.postgres.report_draft_section import ReportDraftSection
+
+    run = _a_drafting_run(db_session, complete={})
+    row = db_session.exec(
+        select(ReportDraftSection)
+        .where(ReportDraftSection.report_run_id == run.id)
+        .where(ReportDraftSection.ordinal == 3)
+    ).one()
+    row.status = "failed"
+    run.failed_at = datetime(2026, 1, 2, tzinfo=UTC)
+    run.failure_reason = "Sezione non riuscita."
+    db_session.add_all([row, run])
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}", headers={"HX-Request": "true"})
+
+    assert "Non riuscita" in response.text
+    assert "Sezione non riuscita." in response.text
+    assert "hx-trigger" not in response.text
+    assert response.headers["HX-Retarget"] == "#run-status"
+    assert response.headers["HX-Reswap"] == "outerHTML"
+
+
+def test_leaving_drafting_returns_the_full_region_retargeted(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(
+        f"/report-runs/{run.id}", params={"seen": "1:writing"}, headers={"HX-Request": "true"}
+    )
+
+    assert 'id="run-status"' in response.text
+    assert "section-rail" not in response.text
+    assert response.headers["HX-Retarget"] == "#run-status"
+    assert response.headers["HX-Reswap"] == "outerHTML"
+
+
+def test_outside_drafting_there_is_no_rail(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    ada = _create_client_with_real_chart(db_session)
+    run = ReportRun(client_id=ada.id, month="2026-01", stage="transits_ready")
+    db_session.add(run)
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}")
+
+    assert "section-rail" not in response.text
+    assert 'role="status"' in response.text
+
+
+def test_polling_the_drafting_view_writes_nothing(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    from shell.adapters.postgres.report_draft_section import ReportDraftSection
+
+    run = _a_drafting_run(db_session, complete={2: "Amore scritto."}, leased=(1,))
+
+    def snapshot() -> list[tuple]:
+        db_session.expire_all()
+        rows = db_session.exec(select(ReportDraftSection)).all()
+        return sorted((r.ordinal, r.status, r.attempts, str(r.claim_expires_at)) for r in rows) + [
+            (str(db_session.get(ReportRun, run.id).updated_at),)  # type: ignore[union-attr]
+        ]
+
+    before = snapshot()
+    authenticated_client.get(
+        f"/report-runs/{run.id}", params={"seen": ""}, headers={"HX-Request": "true"}
+    )
+    assert snapshot() == before
+
+
+def _writes_in(function_source: str) -> bool:
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(function_source))
+    return any(
+        isinstance(node, ast.Attribute) and node.attr in {"add", "commit", "delete", "flush"}
+        for node in ast.walk(tree)
+    )
+
+
+def test_the_poll_handler_source_contains_no_session_write() -> None:
+    import inspect
+
+    from shell.http.routes.report_runs import _section_content, poll_report_run
+
+    assert not _writes_in(inspect.getsource(poll_report_run))
+    assert not _writes_in(inspect.getsource(_section_content))
+
+
+def test_the_guard_detects_a_session_write() -> None:
+    assert _writes_in("def handler(session):\n    session.commit()\n")
+    assert not _writes_in("def handler(session):\n    return session.get(1)\n")

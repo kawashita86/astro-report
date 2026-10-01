@@ -1,0 +1,8 @@
+{#- Drafting poll: only out-of-band fragments, applied by the poller's hx-swap="none". -#}
+<p id="rail-summary" hx-swap-oob="innerHTML">{{ rail_summary }}</p>
+{% set oob = true %}
+{% include "_stage_track.html" %}
+{% for row in rail if row.ordinal in changed %}
+{% include "_section_rail_row.html" %}
+{% include "_section_sheet_item.html" %}
+{% endfor %}

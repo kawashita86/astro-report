@@ -134,7 +134,7 @@ development_status:
   10-3-generate-one-section-at-a-time: review
   10-4-section-rows-and-the-rundriver: review
   10-5-regenerate-only-what-the-gate-rejected: review
-  10-6-watch-the-sections-being-written: backlog
+  10-6-watch-the-sections-being-written: review
   10-7-measure-it: backlog
   epic-10-retrospective: optional
 action_items:

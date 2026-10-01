@@ -576,6 +576,31 @@
     }
   });
 
+  // Story 10.6: while the drafting view is on screen the poll answers with only the
+  // rail rows and Sections that changed, so it needs to know what is shown. The
+  // page reports it as `seen` (`ordinal:state` pairs read from the DOM); the server
+  // keeps no per-viewer state and this adds no timer of its own.
+  document.body.addEventListener("htmx:configRequest", function (event) {
+    var elt = event.detail && event.detail.elt;
+    if (!isRunStatusElt(elt)) {
+      return;
+    }
+    var region = elt.id === "run-status" ? elt : elt.closest("#run-status");
+    var rows = region ? region.querySelectorAll("[data-section-ordinal][data-section-state]") : [];
+    if (!rows.length) {
+      return;
+    }
+    var seen = {};
+    rows.forEach(function (row) {
+      seen[row.getAttribute("data-section-ordinal")] = row.getAttribute("data-section-state");
+    });
+    event.detail.parameters["seen"] = Object.keys(seen)
+      .map(function (ordinal) {
+        return ordinal + ":" + seen[ordinal];
+      })
+      .join(",");
+  });
+
   function pollErrorBanner(elt) {
     if (!elt || !elt.querySelector) {
       return null;

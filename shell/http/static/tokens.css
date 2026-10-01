@@ -1919,3 +1919,142 @@ button.badge-mono {
     transform: rotate(360deg);
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Drafting view (Story 10.6): a rail of the eight Sections beside a sheet of
+ * the Sections written so far. State is encoded by dot shape as well as colour
+ * and always carries a text label. Below 900px (`md`) the rail collapses to
+ * its summary line above the sheet.
+ * ------------------------------------------------------------------------- */
+
+.drafting {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-lg);
+  margin-top: var(--space-lg);
+}
+
+.section-rail {
+  flex: 0 0 240px;
+}
+
+.section-rail__summary {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-label-size);
+  line-height: var(--font-label-line);
+  font-weight: var(--font-label-weight);
+  color: var(--ink-primary);
+}
+
+.section-rail__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.section-rail__row {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  column-gap: var(--space-sm);
+  align-items: center;
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-line);
+  color: var(--ink-primary);
+}
+
+.section-rail__label {
+  grid-column: 2;
+  font-size: var(--font-label-size);
+  line-height: var(--font-label-line);
+  color: var(--ink-secondary);
+}
+
+.section-rail__dot {
+  grid-row: 1;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-full);
+}
+
+.section-rail__row--writing .section-rail__dot {
+  border-color: var(--primary-700);
+  background: var(--primary-200);
+}
+
+.section-rail__row--complete .section-rail__dot {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.section-rail__row--redo .section-rail__dot {
+  border-color: var(--warning);
+  border-radius: var(--radius-sm);
+  transform: rotate(45deg);
+}
+
+.section-rail__row--failed .section-rail__dot {
+  border-color: var(--danger);
+  background: var(--danger);
+  border-radius: 0;
+}
+
+.section-sheet {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 720px;
+}
+
+.section-sheet__item {
+  margin-bottom: var(--space-lg);
+}
+
+.section-sheet__title {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-heading-size);
+  line-height: var(--font-heading-line);
+  font-weight: var(--font-heading-weight);
+  color: var(--ink-primary);
+}
+
+.section-sheet__prose {
+  margin: 0;
+  font-size: var(--font-body-read-size);
+  line-height: var(--font-body-read-line);
+  color: var(--ink-primary);
+}
+
+.section-sheet__list {
+  margin: 0;
+  padding-left: var(--space-lg);
+  font-size: var(--font-body-read-size);
+  line-height: var(--font-body-read-line);
+}
+
+.section-sheet__skeleton .skeleton {
+  height: 14px;
+  margin-bottom: var(--space-sm);
+}
+
+.section-sheet__skeleton .skeleton--short {
+  width: 60%;
+}
+
+@media (max-width: 899px) {
+  .drafting {
+    flex-direction: column;
+  }
+
+  .section-rail {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .section-rail__list {
+    display: none;
+  }
+}

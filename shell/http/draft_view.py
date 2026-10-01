@@ -31,6 +31,7 @@ __all__ = [
     "SECTION_TITLES",
     "deserialize_generated_draft",
     "render_draft",
+    "render_section",
 ]
 
 #: Sections 1-5 and 8, in ``GeneratedDraft``'s own fixed order (AD-6) --
@@ -217,3 +218,18 @@ def render_draft(
     for name in LIST_SECTION_NAMES:
         rendered[name] = _render_list(name, getattr(draft, name), payload, iana_zone=iana_zone)
     return rendered
+
+
+def render_section(
+    name: str,
+    sentences: tuple[Sentence, ...],
+    payload: dict[str, Any],
+    *,
+    iana_zone: str,
+) -> dict[str, Any] | list[dict[str, Any]]:
+    """One Section rendered for a reader -- the same shapes ``render_draft`` gives
+    that Section, so the drafting view shows a written Section the way the finished
+    report will, without needing the other seven to exist yet."""
+    if name in LIST_SECTION_NAMES:
+        return _render_list(name, sentences, payload, iana_zone=iana_zone)
+    return _render_prose(sentences)

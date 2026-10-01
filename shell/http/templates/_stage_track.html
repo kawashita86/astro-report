@@ -1,0 +1,11 @@
+        <ol id="stage-track" class="stage-track"{% if oob %} hx-swap-oob="true"{% endif %}>
+          {% for node in stage_track %}
+          <li class="stage-track__node stage-track__node--{{ node.state }}">
+            <span class="stage-track__dot" aria-hidden="true"></span>
+            <span class="stage-track__label">{{ node.label }}</span>
+          </li>
+          {% if not loop.last %}
+          <span class="stage-track__connector" aria-hidden="true"></span>
+          {% endif %}
+          {% endfor %}
+        </ol>

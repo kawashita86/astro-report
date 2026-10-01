@@ -67,7 +67,12 @@ from shell.adapters.postgres.report_draft import (
     next_report_draft_attempt,
     store_report_draft,
 )
-from shell.adapters.postgres.report_draft_section import open_section_rows
+from shell.adapters.postgres.report_draft_section import (
+    open_section_rows,
+    section_rows,
+    section_state,
+    sentences_from_json,
+)
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.weasyprint.render import html_to_pdf
@@ -79,11 +84,20 @@ from shell.http.draft_view import (
     SECTION_TITLES,
     deserialize_generated_draft,
     render_draft,
+    render_section,
 )
 from shell.http.flash import _flash_context_processor, set_flash
 from shell.http.payload_view import FIELD_TITLES, localize_payload
 from shell.http.report_export_view import build_export_context
 from shell.http.report_markdown import render_report_markdown
+from shell.http.section_rail import (
+    STATE_COMPLETE,
+    RailRow,
+    build_rail,
+    changed_ordinals,
+    parse_seen,
+    rail_summary,
+)
 from shell.http.stage_view import (
     build_stage_track,
     resolve_cited_entries,
@@ -521,6 +535,43 @@ def start_report_run(
     return response
 
 
+def _full_poll_response(request: Request, context: dict[str, Any], *, is_htmx: bool) -> Response:
+    """The whole ``#run-status`` region. For an HTMX poll it is retargeted at
+    ``#run-status`` and swapped as ``outerHTML``, because a drafting poller carries
+    ``hx-swap="none"`` and must be replaced, not left holding stale attributes."""
+    headers = {"HX-Retarget": "#run-status", "HX-Reswap": "outerHTML"} if is_htmx else None
+    return _templates.TemplateResponse(request, "report_run_poll.html", context, headers=headers)
+
+
+def _section_content(
+    session: Session,
+    run: ReportRun,
+    client: Client,
+    complete_rows: list[RailRow],
+    sentences_by_ordinal: dict[int, list[dict[str, Any]] | None],
+) -> dict[int, Any]:
+    """Rendered prose for the ``complete`` rows only -- never text from any other row."""
+    if not complete_rows:
+        return {}
+    stored_payload = session.exec(
+        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
+    ).first()
+    if stored_payload is None:
+        return {}
+    content: dict[int, Any] = {}
+    for row in complete_rows:
+        stored = sentences_by_ordinal.get(row.ordinal)
+        if stored is None:
+            continue
+        content[row.ordinal] = render_section(
+            row.name,
+            sentences_from_json(stored),
+            stored_payload.payload,
+            iana_zone=client.iana_zone,
+        )
+    return content
+
+
 @router.get("/report-runs/{run_id}", include_in_schema=False)
 def poll_report_run(
     run_id: UUID,
@@ -538,7 +589,9 @@ def poll_report_run(
     # AD-20: read-only. The RunDriver moves the run; this only renders where it is.
     failed = run.failed_at is not None
     gate_failed = _current_cycle_gate_failure(session, run) is not None
-    context = {
+    poll_active = run.failed_at is None and run.stage not in ("gate_passed", "exported")
+    drafting = run.stage == "payload_ready"
+    context: dict[str, Any] = {
         "run": run,
         "client": client,
         "stage_track": build_stage_track(run.stage, failed=failed, gate_failed=gate_failed),
@@ -549,9 +602,38 @@ def poll_report_run(
             failure_reason=run.failure_reason,
         ),
         "gate_failed": gate_failed,
-        "poll_active": run.failed_at is None and run.stage not in ("gate_passed", "exported"),
+        "poll_active": poll_active,
+        "drafting": drafting,
     }
-    return _templates.TemplateResponse(request, "report_run_poll.html", context)
+    is_htmx = request.headers.get("hx-request") == "true"
+    if not drafting:
+        return _full_poll_response(request, context, is_htmx=is_htmx)
+
+    # Drafting view (Story 10.6): the rail and sheet are derived from the latest
+    # attempt's Section rows. Still read-only -- nothing below writes.
+    attempt = next_report_draft_attempt(session, run.id)
+    now = datetime.now(UTC)
+    rows = section_rows(session, run.id, attempt)
+    rail = build_rail([section_state(row) for row in rows], prior_draft_exists=attempt > 0, now=now)
+    sentences_by_ordinal = {row.ordinal: row.sentences for row in rows if row.status == "complete"}
+    seen = request.query_params.get("seen")
+    oob = drafting and poll_active and is_htmx and seen is not None
+    shown = changed_ordinals(rail, parse_seen(seen)) if oob else tuple(row.ordinal for row in rail)
+    context.update(
+        rail=rail,
+        rail_summary=rail_summary(rail),
+        changed=shown,
+        section_content=_section_content(
+            session,
+            run,
+            client,
+            [row for row in rail if row.ordinal in shown and row.state == STATE_COMPLETE],
+            sentences_by_ordinal,
+        ),
+    )
+    if oob:
+        return _templates.TemplateResponse(request, "report_run_poll_oob.html", context)
+    return _full_poll_response(request, context, is_htmx=is_htmx)
 
 
 @router.post("/report-runs/{run_id}/regenerate", include_in_schema=False)

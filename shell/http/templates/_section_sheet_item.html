@@ -1,0 +1,21 @@
+<section id="sheet-section-{{ row.ordinal }}" class="section-sheet__item" data-section-ordinal="{{ row.ordinal }}" data-section-state="{{ row.state }}"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <h2 class="section-sheet__title">{{ row.title }}</h2>
+  {% set content = section_content.get(row.ordinal) %}
+  {% if row.state == "complete" and content is not none %}
+  {% if content is mapping %}
+  <p class="section-sheet__prose">{{ content.text }}</p>
+  {% else %}
+  <ul class="section-sheet__list">
+    {% for item in content %}
+    <li>{{ item.date }}{% if item.text %} — {{ item.text }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% else %}
+  <div class="section-sheet__skeleton" aria-hidden="true">
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton skeleton--short"></div>
+  </div>
+  {% endif %}
+</section>

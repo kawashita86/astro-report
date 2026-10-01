@@ -1,0 +1,5 @@
+<li id="rail-row-{{ row.ordinal }}" class="section-rail__row section-rail__row--{{ row.state }}" data-section-ordinal="{{ row.ordinal }}" data-section-state="{{ row.state }}"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <span class="section-rail__dot" aria-hidden="true"></span>
+  <span class="section-rail__title">{{ row.title }}</span>
+  <span class="section-rail__label">{{ row.label }}</span>
+</li>

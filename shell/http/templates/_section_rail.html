@@ -1,0 +1,8 @@
+<aside class="section-rail" aria-label="Avanzamento delle Sezioni">
+  <p id="rail-summary" class="section-rail__summary" role="status" aria-live="polite">{{ rail_summary }}</p>
+  <ol class="section-rail__list">
+    {% for row in rail %}
+    {% include "_section_rail_row.html" %}
+    {% endfor %}
+  </ol>
+</aside>
