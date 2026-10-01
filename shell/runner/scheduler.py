@@ -87,7 +87,7 @@ _TICK_INTERVAL_SECONDS = 2.0
 
 def generator_for_settings(settings: Settings) -> Generator:
     """The ``Environment.LOCAL`` -> ``RecordedResponseGenerator()`` / else
-    ``GeminiGenerator(settings.gemini_api_key)`` branch, shared by
+    ``GeminiGenerator`` (built with the configured model) branch, shared by
     ``shell/http/routes/report_runs.py::get_generator`` and
     :func:`_run_pending_report_runs` so both call sites can never drift.
 
@@ -97,7 +97,7 @@ def generator_for_settings(settings: Settings) -> Generator:
     deliberate and explicit, never a deployment default."""
     if settings.environment is Environment.LOCAL and not settings.use_real_gemini_locally:
         return RecordedResponseGenerator()
-    return GeminiGenerator(settings.gemini_api_key)
+    return GeminiGenerator(settings.gemini_api_key, model=settings.gemini_model)
 
 
 def _run_pending_report_runs(

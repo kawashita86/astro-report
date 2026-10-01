@@ -1,8 +1,10 @@
 # Gemini data-terms re-verification (Story 8.2)
 
-The zero-cost design (AD-9, PRD §6.2, NFR-17) depends on Google applying its
+The design (AD-9, PRD §6.2, NFR-17) depends on Google applying its
 **Paid Services** data terms — no training on submitted content, no human review
-of submitted content — to the Gemini API **free tier** for the EEA. This file is
+of submitted content — to the Gemini API. The account is on the **paid tier**
+(Paid Services apply directly; the EEA carve-out quoted below remains on record
+from the earlier free-tier reading). This file is
 the durable, dated record of that check. The machine-readable block below is
 parsed by `tests/test_data_terms_record.py`; the guard suite stays red while
 `outcome` is anything other than `"pass"`.
@@ -13,8 +15,8 @@ The ratified outcome is indexed as **RGD-1** in
 ```toml
 provider = "Google"
 model = "gemini-2.5-flash"
-tier = "free"
-checked = 2026-08-27
+tier = "paid"
+checked = 2026-10-01
 ratified_by = "Francesco"
 ratified_on = 2026-08-27
 terms_source = "https://ai.google.dev/gemini-api/terms"
@@ -27,8 +29,8 @@ outcome = "pass"
 
 ## What the design relies on
 
-EEA free-tier use of the Gemini API is governed by Google's **Paid Services**
-data terms, by way of a jurisdictional carve-out:
+Use of the Gemini API is governed by Google's **Paid Services** data terms
+(directly, on the paid tier; previously by way of a jurisdictional carve-out):
 
 - **(a) No training on submitted content** — Google does not use prompts,
   associated system instructions, cached content, uploaded files, or responses to
@@ -105,6 +107,12 @@ Central (Amsterdam); locations confirmed by Francesco. All are in the EU,
 so the residency half of this record still holds; the terms reading and its
 ratification above are unchanged.
 
+Updated 2026-10-01 (Story 10.2): the Gemini account is on the **paid tier**,
+so `tier` is now `"paid"` and `checked` is `2026-10-01`, on the strength of
+Francesco's statement that the account is paid. The Paid Services terms are the
+ones this record already quotes; no clause, the ratification, or the outcome
+changed.
+
 ## Outcome
 
 **`pass`** — the currently published terms preserve both guarantees the
@@ -154,6 +162,7 @@ over a regression.
   (`_bmad-output/planning-artifacts/epics.md`): the recorded-verification
   requirement; the zero-cost guarantee is jurisdiction-contingent.
 - **AD-9** (`_bmad-output/planning-artifacts/architecture/architecture-astro-report-2026-08-14/ARCHITECTURE-SPINE.md`):
-  a single configured Generator — Gemini `gemini-2.5-flash`, free tier, EEA data
-  terms — with no runtime failover. Mirrored in
-  `shell/adapters/gemini/generator.py` (`_MODEL`).
+  a single configured Generator — Gemini `gemini-2.5-flash`, paid tier, EEA data
+  terms — with no runtime failover. The model is the `GEMINI_MODEL` setting
+  (`shell/config.py`, `DEFAULT_GEMINI_MODEL`), passed to
+  `shell/adapters/gemini/generator.py`.

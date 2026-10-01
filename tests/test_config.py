@@ -595,3 +595,50 @@ def test_importing_config_with_a_valid_environment_succeeds() -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "8000"
+
+
+# --- Matrix rows: GEMINI_MODEL and GENERATION_CONCURRENCY (Story 10.2) --------
+
+
+def test_model_and_concurrency_default_when_unset() -> None:
+    settings = load_settings(VALID_ENVIRONMENT)
+
+    assert settings.gemini_model == "gemini-2.5-flash"
+    assert settings.generation_concurrency == 11
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_model_and_concurrency_default_when_blank(blank: str) -> None:
+    settings = load_settings(environment_with(GEMINI_MODEL=blank, GENERATION_CONCURRENCY=blank))
+
+    assert settings.gemini_model == "gemini-2.5-flash"
+    assert settings.generation_concurrency == 11
+
+
+def test_model_and_concurrency_overrides_are_carried() -> None:
+    settings = load_settings(
+        environment_with(GEMINI_MODEL=" gemini-2.5-pro ", GENERATION_CONCURRENCY="4")
+    )
+
+    assert settings.gemini_model == "gemini-2.5-pro"
+    assert settings.generation_concurrency == 4
+    assert "gemini_model='gemini-2.5-pro'" in repr(settings)
+    assert "generation_concurrency=4" in repr(settings)
+
+
+@pytest.mark.parametrize("bad", ["0", "33", "abc", "-1", "4.5", "\u0664"])
+def test_a_bad_generation_concurrency_aborts_and_is_named(bad: str) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_with(GENERATION_CONCURRENCY=bad, PORT="nope"))
+
+    message = str(raised.value)
+    assert "GENERATION_CONCURRENCY" in message
+    assert "1 and 32" in message
+    assert "PORT" in message
+
+
+@pytest.mark.parametrize("good", ["1", "32"])
+def test_generation_concurrency_bounds_are_accepted(good: str) -> None:
+    assert load_settings(
+        environment_with(GENERATION_CONCURRENCY=good)
+    ).generation_concurrency == int(good)

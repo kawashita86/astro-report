@@ -27,6 +27,9 @@ import argon2
 from argon2.exceptions import InvalidHashError
 
 __all__ = [
+    "DEFAULT_GEMINI_MODEL",
+    "DEFAULT_GENERATION_CONCURRENCY",
+    "MAX_GENERATION_CONCURRENCY",
     "ConfigError",
     "Environment",
     "ReportRunMode",
@@ -77,6 +80,15 @@ _POSTGRES_SCHEMES: tuple[str, ...] = (
 #: The SQLAlchemy dialect this project drives Postgres through.
 _SQLALCHEMY_SCHEME = "postgresql+psycopg"
 
+#: The one Generator model this application is configured against (AD-9), used when
+#: ``GEMINI_MODEL`` is unset or blank. Paid tier, EEA data terms.
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
+#: How many Section generations may be in flight at once when
+#: ``GENERATION_CONCURRENCY`` is unset or blank, and the largest value accepted.
+DEFAULT_GENERATION_CONCURRENCY = 11
+MAX_GENERATION_CONCURRENCY = 32
+
 _MIN_PORT = 1
 _MAX_PORT = 65535
 
@@ -120,6 +132,10 @@ class Settings:
     # deployment default -- `compose.yaml` leaves it unset) to exercise the
     # real `GeminiGenerator` against a local Postgres.
     use_real_gemini_locally: bool = False
+    # Optional like the two above, with dataclass defaults so tests that build
+    # `Settings(...)` directly keep working (Story 10.2).
+    gemini_model: str = DEFAULT_GEMINI_MODEL
+    generation_concurrency: int = DEFAULT_GENERATION_CONCURRENCY
 
     def __repr__(self) -> str:
         return (
@@ -130,7 +146,9 @@ class Settings:
             f"gemini_api_key={self.redacted_gemini_api_key!r}, "
             f"gemini_data_terms_verified_at={self.gemini_data_terms_verified_at!r}, "
             f"report_run_mode={self.report_run_mode!r}, "
-            f"use_real_gemini_locally={self.use_real_gemini_locally!r})"
+            f"use_real_gemini_locally={self.use_real_gemini_locally!r}, "
+            f"gemini_model={self.gemini_model!r}, "
+            f"generation_concurrency={self.generation_concurrency!r})"
         )
 
     @property
@@ -254,7 +272,7 @@ def _read_port(environ: Mapping[str, str]) -> tuple[int | None, str | None]:
         return None, f"PORT is invalid: {raw!r} is not an integer."
     if not _MIN_PORT <= port <= _MAX_PORT:
         return None, (
-            f"PORT is invalid: {port} is outside the permitted range " f"{_MIN_PORT}-{_MAX_PORT}."
+            f"PORT is invalid: {port} is outside the permitted range {_MIN_PORT}-{_MAX_PORT}."
         )
     return port, None
 
@@ -318,8 +336,7 @@ def _read_gemini_data_terms_verified_at(
     raw, error = _read_required(
         environ,
         "GEMINI_DATA_TERMS_VERIFIED_AT",
-        "Set it to the ISO date (YYYY-MM-DD) the Gemini data terms were "
-        "verified, e.g. 2026-01-15.",
+        "Set it to the ISO date (YYYY-MM-DD) the Gemini data terms were verified, e.g. 2026-01-15.",
     )
     if error is not None:
         return None, error
@@ -328,7 +345,7 @@ def _read_gemini_data_terms_verified_at(
         parsed = date.fromisoformat(raw)
     except ValueError:
         return None, (
-            f"GEMINI_DATA_TERMS_VERIFIED_AT is invalid: {raw!r} is not an " "ISO date (YYYY-MM-DD)."
+            f"GEMINI_DATA_TERMS_VERIFIED_AT is invalid: {raw!r} is not an ISO date (YYYY-MM-DD)."
         )
     if parsed > date.today():
         return None, (
@@ -376,6 +393,30 @@ def _read_use_real_gemini_locally(
     return None, (f"USE_REAL_GEMINI_LOCALLY is invalid: {raw!r} is not 'true' or 'false'.")
 
 
+def _read_gemini_model(environ: Mapping[str, str]) -> tuple[str | None, str | None]:
+    """Optional: unset or blank means :data:`DEFAULT_GEMINI_MODEL`."""
+    raw = environ.get("GEMINI_MODEL")
+    if raw is None or not raw.strip():
+        return DEFAULT_GEMINI_MODEL, None
+    return raw.strip(), None
+
+
+def _read_generation_concurrency(
+    environ: Mapping[str, str],
+) -> tuple[int | None, str | None]:
+    """Optional integer 1-32 (ASCII digits only); unset or blank means the default."""
+    raw = environ.get("GENERATION_CONCURRENCY")
+    if raw is None or not raw.strip():
+        return DEFAULT_GENERATION_CONCURRENCY, None
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit()) or not 1 <= int(text) <= MAX_GENERATION_CONCURRENCY:
+        return None, (
+            f"GENERATION_CONCURRENCY is invalid: {raw!r} is not an integer "
+            f"between 1 and {MAX_GENERATION_CONCURRENCY}."
+        )
+    return int(text), None
+
+
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """Validate ``environ`` into a frozen :class:`Settings`.
 
@@ -398,6 +439,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     )
     report_run_mode, report_run_mode_error = _read_report_run_mode(source)
     use_real_gemini_locally, use_real_gemini_locally_error = _read_use_real_gemini_locally(source)
+    gemini_model, gemini_model_error = _read_gemini_model(source)
+    generation_concurrency, generation_concurrency_error = _read_generation_concurrency(source)
 
     problems = [
         problem
@@ -411,6 +454,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             gemini_data_terms_verified_at_error,
             report_run_mode_error,
             use_real_gemini_locally_error,
+            gemini_model_error,
+            generation_concurrency_error,
         )
         if problem is not None
     ]
@@ -430,6 +475,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         and gemini_data_terms_verified_at is not None
         and report_run_mode is not None
         and use_real_gemini_locally is not None
+        and gemini_model is not None
+        and generation_concurrency is not None
     )
     return Settings(
         environment=environment,
@@ -441,6 +488,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         gemini_data_terms_verified_at=gemini_data_terms_verified_at,
         report_run_mode=report_run_mode,
         use_real_gemini_locally=use_real_gemini_locally,
+        gemini_model=gemini_model,
+        generation_concurrency=generation_concurrency,
     )
 
 

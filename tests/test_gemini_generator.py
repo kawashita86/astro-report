@@ -24,7 +24,6 @@ from core.types.transits import StandingRetrograde, TransitAspectEvent
 from shell.adapters.gemini.generator import (
     _CONTINUITY_HEADER,
     _FIRST_REPORT_STATEMENT,
-    _MODEL,
     _NOTHING_SIGNIFICANT_CHANGED_STATEMENT,
     GeminiGenerator,
     _build_id_aliases,
@@ -940,14 +939,14 @@ def test_google_genai_client_wrapper_calls_the_real_sdk_correctly(
 
     monkeypatch.setattr("shell.adapters.gemini.generator.genai.Client", _FakeSDKClient)
 
-    wrapper = _GoogleGenAIClient(api_key="secret-key")
+    wrapper = _GoogleGenAIClient(api_key="secret-key", model="gemini-2.5-pro")
     result = wrapper.generate_content(
         system_instruction="be nice", prompt="hello", response_schema={"type": "object"}
     )
 
     assert result == '{"ok": true}'
     assert captured["api_key"] == "secret-key"
-    assert captured["model"] == _MODEL
+    assert captured["model"] == "gemini-2.5-pro"
     assert captured["contents"] == "hello"
     config = captured["config"]
     assert isinstance(config, genai_types.GenerateContentConfig)
@@ -979,3 +978,50 @@ def test_the_adapter_module_imports_nothing_from_postgres_or_sqlalchemy() -> Non
                 offenders.append(node.module)
 
     assert not offenders, f"shell/adapters/gemini/generator.py imports: {offenders}"
+
+
+def test_the_injected_model_reaches_the_sdk_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``model`` flows from ``Settings`` through ``GeminiGenerator`` to
+    ``client.models.generate_content(model=...)``."""
+    from shell.adapters.gemini import generator as generator_module
+
+    seen: dict[str, object] = {}
+
+    class _FakeModels:
+        def generate_content(self, **kwargs: object) -> object:
+            seen.update(kwargs)
+            return type("Response", (), {"text": "{}"})()
+
+    class _FakeSdkClient:
+        def __init__(self, api_key: str) -> None:
+            self.models = _FakeModels()
+
+    monkeypatch.setattr(generator_module.genai, "Client", _FakeSdkClient)
+
+    wrapped = generator_module.GeminiGenerator("unused", model="gemini-2.5-pro")._client
+    wrapped.generate_content(system_instruction="s", prompt="p", response_schema={})
+
+    assert seen["model"] == "gemini-2.5-pro"
+
+
+def test_generator_for_settings_passes_the_configured_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shell.config import load_settings
+    from shell.runner import scheduler
+    from tests.test_config import environment_with
+
+    seen: dict[str, object] = {}
+
+    class _Spy:
+        def __init__(self, api_key: str, *, model: str) -> None:
+            seen["model"] = model
+
+    monkeypatch.setattr(scheduler, "GeminiGenerator", _Spy)
+    settings = load_settings(
+        environment_with(ENVIRONMENT="production", GEMINI_MODEL="gemini-2.5-pro")
+    )
+
+    scheduler.generator_for_settings(settings)
+
+    assert seen["model"] == "gemini-2.5-pro"

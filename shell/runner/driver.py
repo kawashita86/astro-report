@@ -56,7 +56,7 @@ special-casing here for "this one talks to a rate-limited API" -- so a
 transient Generator failure retries exactly like a transient local one
 would. A dedicated request-rate ceiling for the Generator adapter itself
 (rather than `with_backoff`'s own retry-on-failure) is Story 4.8's own
-deliverable, sized for its 10 RPM ceiling; nothing here anticipates it.
+deliverable; nothing here anticipates it.
 
 **`transit_events` as one JSON column, not four new tables.** Story 3.6 will
 read these events to assemble the Payload and may reshape how they're
@@ -143,10 +143,8 @@ _STAGE_SEQUENCE: tuple[str, ...] = (
 #: network call (the module's own Design Notes): 3 attempts, 2-second base
 #: delay, doubling to a second retry at 4s -- three Gemini attempts inside
 #: one `advance()` call span 0s/2s/6s. That is 3 requests in ~6s, so a
-#: single `advance()` call stays inside the provider's 10 requests-per-minute
-#: ceiling, but a poll landing right after a prior exhausted call's attempts
-#: can approach it: the short base delay trades rate-limit headroom for a
-#: faster draft stage.
+#: single `advance()` call stays brief, and the short base delay favours a
+#: faster draft stage over spacing the attempts out.
 #:
 #: `gate_passed` (`_run_gate_passed`) is capped at a single attempt. Its
 #: dominant failure mode is a deterministic `GateFailedError`: the stage
@@ -760,8 +758,8 @@ def advance(
     picks up at the first incomplete stage and recomputes nothing already
     stored (AD-10). The stage's ``with_backoff`` call uses that stage's own
     override from :data:`_STAGE_BACKOFF_OVERRIDES` when one exists (Story
-    4.8) -- ``draft_ready``'s Gemini attempts stay within the provider's
-    10 requests-per-minute ceiling -- and the plain defaults otherwise.
+    4.8) -- ``draft_ready``'s short Gemini retry schedule -- and the plain
+    defaults otherwise.
 
     The ``with_backoff`` attempt runs the stage function inside its own
     ``session.begin_nested()`` SAVEPOINT (epic-4-retro item 23): a two-write

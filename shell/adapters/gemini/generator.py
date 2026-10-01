@@ -37,13 +37,10 @@ from shell.adapters.generation.validation import (
     _validate_day_list_coverage,
     _validate_no_date_tokens,
 )
+from shell.config import DEFAULT_GEMINI_MODEL
 from shell.ports.generator import StyleGuideVersion
 
 __all__ = ["GeminiGenerator"]
-
-#: Free tier, EEA data terms (AD-9's own technical decision) -- the exactly
-#: one Generator adapter this application is configured against.
-_MODEL = "gemini-2.5-flash"
 
 
 def _day_list_count(payload: dict[str, Any], section: str) -> int:
@@ -214,14 +211,15 @@ class _GoogleGenAIClient:
     never needs to know the real SDK's shape either.
     """
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model: str) -> None:
         self._client = genai.Client(api_key=api_key)
+        self._model = model
 
     def generate_content(
         self, *, system_instruction: str, prompt: str, response_schema: dict[str, Any]
     ) -> str | None:
         response = self._client.models.generate_content(
-            model=_MODEL,
+            model=self._model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -241,8 +239,14 @@ class GeminiGenerator:
     injection.
     """
 
-    def __init__(self, api_key: str, *, client: _GeminiClient | None = None) -> None:
-        self._client = client or _GoogleGenAIClient(api_key)
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        model: str = DEFAULT_GEMINI_MODEL,
+        client: _GeminiClient | None = None,
+    ) -> None:
+        self._client = client or _GoogleGenAIClient(api_key, model)
 
     def generate(
         self,
@@ -339,7 +343,7 @@ _UNCITED_SUFFIX = (
 _CONTINUITY_HEADER = "Continuità rispetto al mese precedente (fatti calcolati, non da indovinare):"
 
 _FIRST_REPORT_STATEMENT = (
-    "Questo è il primo Report per questo Cliente: non fare alcun riferimento a " "mesi precedenti."
+    "Questo è il primo Report per questo Cliente: non fare alcun riferimento a mesi precedenti."
 )
 
 _NOTHING_SIGNIFICANT_CHANGED_STATEMENT = (
@@ -522,7 +526,7 @@ def _parse_sentences(section: str, raw_sentences: Any) -> tuple[Sentence, ...]:
         if not isinstance(entry_ids, list) or not all(isinstance(item, str) for item in entry_ids):
             raise GenerationError(
                 "parsing",
-                f"Section {section!r}, sentence {index}: 'entry_ids' must be a list " "of strings.",
+                f"Section {section!r}, sentence {index}: 'entry_ids' must be a list of strings.",
             )
         sentences.append(Sentence(text=text, entry_ids=tuple(entry_ids)))
     return tuple(sentences)

@@ -48,7 +48,7 @@ services:
       # against this local Postgres instead.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-local-dev-unused}
       USE_REAL_GEMINI_LOCALLY: ${USE_REAL_GEMINI_LOCALLY:-false}
-      GEMINI_DATA_TERMS_VERIFIED_AT: "2026-08-27"
+      GEMINI_DATA_TERMS_VERIFIED_AT: "2026-10-01"
     ports:
       - "8000:8000"
     depends_on:

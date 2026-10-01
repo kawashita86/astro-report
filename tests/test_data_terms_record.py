@@ -16,6 +16,7 @@ import re
 
 import pytest
 
+from shell.config import DEFAULT_GEMINI_MODEL
 from tests._release_validation import REPO_ROOT, assert_record_not_stale, load_record_meta
 
 RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "gemini-data-terms.md"
@@ -25,7 +26,6 @@ _MAX_RECORD_AGE_DAYS = 550
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 COMPOSE_FILE = REPO_ROOT / "compose.yaml"
 README = REPO_ROOT / "README.md"
-GENERATOR = REPO_ROOT / "shell" / "adapters" / "gemini" / "generator.py"
 
 # Hosting sites in the EU/EEA (AD-9 / NFR-17). The Netcup VPS in Vienna is the
 # only one this project deploys to; the set exists so the check reads as intent.
@@ -54,7 +54,6 @@ _VERIFIED_AT = re.compile(
     r'^\s*GEMINI_DATA_TERMS_VERIFIED_AT\s*[:=]\s*"?(\d{4}-\d{2}-\d{2})"?',
     re.MULTILINE,
 )
-_MODEL_LITERAL = re.compile(r'^_MODEL\s*=\s*"([^"]+)"', re.MULTILINE)
 
 
 def _readme_deployment_section() -> str:
@@ -88,8 +87,7 @@ def test_toml_block_parses(meta: dict[str, object]) -> None:
 
 def test_checked_is_a_date(meta: dict[str, object]) -> None:
     assert isinstance(meta["checked"], datetime.date), (
-        f"`checked` must be a bare ISO date (parses to datetime.date), got "
-        f"{meta['checked']!r}"
+        f"`checked` must be a bare ISO date (parses to datetime.date), got {meta['checked']!r}"
     )
 
 
@@ -131,26 +129,24 @@ def test_terms_snapshot_is_wayback_url(meta: dict[str, object]) -> None:
 
 
 def test_provider_model_tier_match_generator(meta: dict[str, object]) -> None:
-    match = _MODEL_LITERAL.search(GENERATOR.read_text(encoding="utf-8"))
-    assert match is not None, f"could not find `_MODEL = \"...\"` in {GENERATOR}"
-    assert meta["model"] == match.group(1), (
-        f"record model {meta['model']!r} != configured Generator _MODEL "
-        f"{match.group(1)!r} -- re-run the data-terms check when the model changes (AD-9)"
+    assert meta["model"] == DEFAULT_GEMINI_MODEL, (
+        f"record model {meta['model']!r} != the Settings default model "
+        f"{DEFAULT_GEMINI_MODEL!r} -- re-run the data-terms check when the model changes (AD-9)"
     )
     assert meta["provider"] == "Google", f"unexpected provider: {meta['provider']!r}"
-    assert meta["tier"] == "free", f"unexpected tier: {meta['tier']!r}"
+    assert meta["tier"] == "paid", f"unexpected tier: {meta['tier']!r}"
 
 
 def test_outcome_is_valid(meta: dict[str, object]) -> None:
     assert meta["outcome"] in {"pass", "blocked"}, (
-        f"`outcome` must be exactly \"pass\" or \"blocked\", got {meta['outcome']!r}"
+        f'`outcome` must be exactly "pass" or "blocked", got {meta["outcome"]!r}'
     )
 
 
 def test_outcome_permits_release(meta: dict[str, object]) -> None:
     assert meta["outcome"] == "pass", (
         "release blocked until data-terms change reassessed "
-        f"(outcome = {meta['outcome']!r}, expected \"pass\")"
+        f'(outcome = {meta["outcome"]!r}, expected "pass")'
     )
 
 
@@ -187,9 +183,7 @@ def test_env_example_dates_match_record(meta: dict[str, object]) -> None:
     expected = checked.isoformat()
     for path in (ENV_EXAMPLE, COMPOSE_FILE):
         match = _VERIFIED_AT.search(path.read_text(encoding="utf-8"))
-        assert match is not None, (
-            f"{path.name}: no GEMINI_DATA_TERMS_VERIFIED_AT date found"
-        )
+        assert match is not None, f"{path.name}: no GEMINI_DATA_TERMS_VERIFIED_AT date found"
         assert match.group(1) == expected, (
             f"{path.name}: GEMINI_DATA_TERMS_VERIFIED_AT {match.group(1)!r} != "
             f"record checked date {expected!r}"

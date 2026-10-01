@@ -42,6 +42,8 @@ All seven are required; none has a default.
 | `AUTH_PASSWORD_HASH` | yes | Argon2 hash of the single sign-in password — never the plaintext |
 | `SESSION_SECRET_KEY` | yes | random string, at least 32 characters; signs the session cookie |
 | `GEMINI_API_KEY` | yes | Gemini API key for the Generator adapter; never sent under `ENVIRONMENT=local` |
+| `GEMINI_MODEL` | no | Gemini model the Generator calls; default `gemini-2.5-flash` |
+| `GENERATION_CONCURRENCY` | no | Section generations in flight at once, integer 1–32; default `11` |
 | `GEMINI_DATA_TERMS_VERIFIED_AT` | yes | ISO date (`YYYY-MM-DD`), not in the future — when the Gemini data terms were verified (NFR-17) |
 
 Nothing is defaulted. A missing or invalid variable aborts startup with a
@@ -148,8 +150,8 @@ At the target volume of 30–200 Reports per month:
 | Component | Plan | Cost |
 | --- | --- | --- |
 | Netcup VPS 1000 G12 (Vienna, AT): Coolify, app container, Postgres 18 | VPS 1000 G12 (256 GB disk) | €12 |
-| Gemini API (EEA free tier) | Free | €0 |
-| **Total** | | **€12/month** |
+| Gemini API (`gemini-2.5-flash`, paid tier) | Pay per use | usage-based |
+| **Total** | | **€12/month + Gemini usage** |
 
 Payload growth is a few hundred MB a year, so the disk is not a constraint
 (RGD-3, `docs/release-validation/storage-growth.md`).

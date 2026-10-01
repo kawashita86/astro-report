@@ -66,8 +66,9 @@ context.
 
 **Context.** The zero-cost design (AD-9, PRD §6.2, NFR-17) depends on Google
 applying its Paid-Services data terms — no training on submitted content, no
-human review of submitted content — to the Gemini API free tier for the EEA, via
-the EEA/CH/UK jurisdictional carve-out. The published terms had advanced to
+human review of submitted content — to the Gemini API; first by way of the
+EEA/CH/UK jurisdictional carve-out on the free tier, and from 2026-10-01
+directly, the account being on the paid tier. The published terms had advanced to
 "Effective March 23, 2026" since the 2026-01-15 planning reading, and a new
 Paid-Services safety-logging clause (limited-retention abuse-detection logging)
 had appeared.
@@ -77,7 +78,7 @@ abuse-detection logging is not model training and not human annotation. The
 re-verification outcome is **`pass`** — the currently published terms preserve
 both guarantees, hosting (Render `frankfurt`) and storage (Neon
 `Europe/Frankfurt`) are in the EU/EEA, and the release may proceed. If a later
-re-check finds guarantee (a) or (b) materially weakened for the EEA free tier,
+re-check finds guarantee (a) or (b) materially weakened for the Gemini API,
 set `outcome = "blocked"` and re-open the story — do not write `pass` over a
 regression.
 
