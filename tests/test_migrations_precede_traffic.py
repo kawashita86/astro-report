@@ -1,7 +1,7 @@
 """Migrations complete before the service accepts traffic, and a failure aborts.
 
-Render's pre-deploy command is a paid-instance feature, so the ordering lives in
-the container entrypoint instead. That makes the ordering a property of two
+The ordering lives in the container entrypoint rather than in a hosting
+platform's pre-deploy hook. That makes the ordering a property of two
 files rather than of a platform setting — and a property nobody would notice
 losing, because an image whose migrations run *after* the server starts still
 boots, still passes a health check, and still serves the previous schema.

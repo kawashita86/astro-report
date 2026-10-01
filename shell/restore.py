@@ -1,8 +1,8 @@
 """Restore a ``GET /backup`` export into an empty database (Story 8.5).
 
 Story 6.5 ships ``GET /backup`` -- the operator-held logical export that is
-this application's real durability mechanism (AD-17: Neon's free plan has no
-scheduled backups, only a ~6-hour PITR window). This module is the other
+the operator-held copy of this application's data (AD-17), alongside Coolify's
+scheduled Postgres backups to Backblaze B2. This module is the other
 half: :func:`restore_backup` inserts every row of such an export back into an
 empty schema, and ``python -m shell.restore <backup.json>`` is the operator
 CLI that does it against the database named by ``DATABASE_URL``.

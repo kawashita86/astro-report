@@ -32,7 +32,7 @@ services:
       DATABASE_URL: postgresql://astro:astro@postgres:5432/astro_report
       PORT: "8000"
       # Local-only credentials (Story 1.4) — never used in production, where
-      # both are supplied via render.yaml's sync: false secrets instead.
+      # both are set as secrets in the Coolify application's environment.
       # Hashes "local-dev-password"; see .env.example for how to regenerate.
       # `$` is doubled: compose interpolates a bare `$var` in this file, and the
       # hash's own `$`-delimited fields must survive as literal characters.

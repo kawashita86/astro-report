@@ -62,12 +62,12 @@ USER astro
 # PORT is deliberately NOT defaulted here. Nothing this application reads has a
 # default: a missing variable aborts startup with a message naming it, and an
 # image that quietly picked 8000 would make that contract false inside the
-# container. Render injects PORT; compose.yaml sets it explicitly.
+# container. Coolify's environment and compose.yaml both set it explicitly.
 EXPOSE 8000
 
 # Docker-level health for Coolify (the VPS), whose own probe needs curl or wget,
-# which this image does not ship. Render ignores HEALTHCHECK and keeps using
-# render.yaml's healthCheckPath. Same route: /healthz, on the PORT uvicorn binds.
+# which this image does not ship, so Coolify's probe is off and it uses this
+# HEALTHCHECK instead. Route: /healthz, on the PORT uvicorn binds.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ['PORT'], timeout=4)"
 

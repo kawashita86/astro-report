@@ -102,38 +102,44 @@ uv run alembic upgrade head
 
 Two environments only: local (above) and production. There is no staging.
 
-Production is one Render web service (free plan, EU region, Docker runtime)
-backed by one Neon Postgres project (free plan, Europe/Frankfurt). All durable
-state is in Postgres; the container filesystem is ephemeral and nothing written
-at runtime is read back after a restart.
+Production is one Docker container on Coolify, on a Netcup VPS in Vienna, AT,
+backed by a Postgres 18 on the same VPS. Hosting and storage location:
+**Vienna, AT** (EU). All durable state is in Postgres; the container
+filesystem is ephemeral and nothing written at runtime is read back after a
+restart. Coolify takes scheduled backups of the production Postgres and
+stores them off the VPS in a Backblaze B2 bucket in EU Central (Amsterdam); the operator export from
+`GET /backup` (AD-17) is a second, operator-held copy.
 
 Gemini's EEA data terms are re-verified in
 `docs/release-validation/gemini-data-terms.md` (NFR-17); when the provider,
-model, or terms change, follow that file's *Next re-verification trigger*
-section.
+model, terms or hosting location change, follow that file's *Next
+re-verification trigger* section.
 
-`render.yaml` is the blueprint. `docker-entrypoint.sh` applies migrations and
-only then `exec`s the server, so:
+Deploys are driven from CI only. The `deploy` job in
+`.github/workflows/ci.yml` runs on pushes to `main` after the `test` job
+passes and POSTs to the Coolify deploy webhook; Coolify's own auto-deploy is
+off, so a red build never reaches production. `docker-entrypoint.sh` applies
+migrations and only then `exec`s the server, so:
 
 - migrations complete before the process accepts traffic;
-- a failing migration exits non-zero, the health check never passes, the deploy
-  is marked failed and the previous version keeps serving.
-
-Render's `preDeployCommand` would express this more directly, but it is a
-paid-instance feature and this project must cost nothing. Move the migration
-step there if the service ever moves to a paid plan.
+- a failing migration exits non-zero, the Dockerfile `HEALTHCHECK` on
+  `/healthz` never passes, the deploy is marked failed and the previous
+  container keeps serving.
 
 ### First deploy (needs account access)
 
-1. Create the Neon project in **Europe/Frankfurt**, free plan, Postgres 18.
-2. Create the Render service from `render.yaml` (Blueprint), region
-   **Frankfurt**, free plan.
-3. Set `DATABASE_URL` on the Render service to the Neon connection string. It is
-   marked `sync: false` in the blueprint so the secret stays out of the
-   repository. `PORT` is supplied by Render; `ENVIRONMENT=production` is in the
-   blueprint.
-4. Deploy, then confirm over HTTPS that `/healthz` responds and that the deploy
-   log shows migrations completing before the server starts.
+1. On the Coolify instance, create a Postgres 18 database and an application
+   built from this repository's `Dockerfile`. Turn Coolify's auto-deploy and
+   its own health probe off (the image ships neither curl nor wget; Coolify
+   falls back to the Dockerfile `HEALTHCHECK`).
+2. Set the application's environment: `ENVIRONMENT=production`, `PORT`,
+   `DATABASE_URL` (the VPS Postgres), `AUTH_PASSWORD_HASH`,
+   `SESSION_SECRET_KEY`, `GEMINI_API_KEY`, `GEMINI_DATA_TERMS_VERIFIED_AT`.
+   See `.env.example` for each one and how to generate the secrets.
+3. Add the `COOLIFY_DEPLOY_WEBHOOK` and `COOLIFY_API_TOKEN` repository secrets
+   on GitHub; until both exist the `deploy` job is skipped with a notice.
+4. Push to `main`, then confirm over HTTPS that `/healthz` responds and that
+   the deploy log shows migrations completing before the server starts.
 
 ## Running cost
 
@@ -141,10 +147,9 @@ At the target volume of 30–200 Reports per month:
 
 | Component | Plan | Cost |
 | --- | --- | --- |
-| Render web service (EU, Docker) | Free | €0 |
-| Neon Postgres 18 (Europe/Frankfurt) | Free (0.5 GB) | €0 |
-| **Total** | | **€0/month** |
+| Netcup VPS 1000 G12 (Vienna, AT): Coolify, app container, Postgres 18 | VPS 1000 G12 (256 GB disk) | €12 |
+| Gemini API (EEA free tier) | Free | €0 |
+| **Total** | | **€12/month** |
 
-The free Render service spins down when idle and takes a few seconds to wake —
-acceptable, because availability is best-effort with no SLA. A design that would
-require paid infrastructure at this volume is raised, not absorbed.
+Payload growth is a few hundred MB a year, so the disk is not a constraint
+(RGD-3, `docs/release-validation/storage-growth.md`).

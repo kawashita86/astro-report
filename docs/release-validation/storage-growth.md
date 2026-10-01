@@ -2,9 +2,10 @@
 
 Report Payloads are stored permanently — NFR-9 makes losing one unacceptable,
 because a lost Payload permanently breaks the traceability guarantee for its
-Report — on Neon's **0.5 GB** free plan. The PRD carries no storage budget and
-no Assumptions Index item covers storage; nothing had measured how long a real
-`report_payload` row is or how long the free tier fits. This file is the
+Report — in the production Postgres, which since 2026-10-01 shares the Netcup
+VPS's **256 GB** disk (until then, Neon's 0.5 GB free plan). The PRD carries no
+storage budget and no Assumptions Index item covers storage; nothing had
+measured how long a real `report_payload` row is or how long the storage fits. This file is the
 durable, dated record of that measurement and the growth projection built from
 it. The machine-readable block below is parsed by
 `tests/test_storage_growth_record.py`; the guard suite stays red while the
@@ -17,19 +18,18 @@ while `outcome` is anything other than `"pass"`.
 ```toml
 checked = 2026-08-27
 ratified_by = "Francesco"
-ratified_on = 2026-08-27
+ratified_on = 2026-10-01
 sample_n = 12
 payload_p90_bytes = 64259          # nearest-rank p90, canonical_json_bytes of persisted report_payload rows
 storage_overhead_factor = 1.5      # additive on-disk overhead: Postgres row header + the two indexes + duplicated typed columns (TOAST compression works the other way — see prose)
 projected_row_bytes = 96389        # ceil(payload_p90_bytes * storage_overhead_factor)
 reports_per_month = 200            # upper bound shared by NFR-5 ("100–200/month") and NFR-7 ("30–200/month")
 monthly_growth_bytes = 19277800    # projected_row_bytes * reports_per_month
-ceiling_bytes = 500000000          # Neon free plan, README "Running cost" table: Free (0.5 GB) = 0.5 * 1000**3
-ceiling_reached_on = 2028-10-25    # checked + round(ceiling_bytes / monthly_growth_bytes * 30.44) days
-half_ceiling_reached_on = 2027-09-26
-policy_decision = "raised"
-policy_ratified_by = "Francesco"
-policy_ratified_on = 2026-08-27
+ceiling_bytes = 256000000000       # Netcup VPS 1000 G12 disk, README "Running cost" table: (256 GB disk) = 256 * 1000**3
+ceiling_reached_on = 3133-05-25    # checked + round(ceiling_bytes / monthly_growth_bytes * 30.44) days
+half_ceiling_reached_on = 2580-01-09
+policy_decision = "none"
+policy_ratified_by = ""
 outcome = "pass"
 ```
 
@@ -50,9 +50,12 @@ against it, not just the machine block.
   is recoverable by recomputation; a Payload is not. That is why the machine
   block projects the Payload row alone — it is the row that can never be
   reclaimed.
-- **Neon free plan, 0.5 GB.** README's "Running cost" table:
-  `Neon Postgres 18 (Europe/Frankfurt) | Free (0.5 GB) | €0`. The zero-cost
-  target assumes this whole-database ceiling is not crossed at target volume.
+- **Netcup VPS disk, 256 GB.** README's "Running cost" table:
+  `Netcup VPS 1000 G12 (Vienna, AT) | VPS 1000 G12 (256 GB disk) | €12`.
+  Postgres shares that disk with the OS, Docker images, Coolify and its local
+  backups, so the usable ceiling is lower than 256 GB — immaterial at a growth
+  rate measured in megabytes per month. (Until 2026-10-01 the ceiling was
+  Neon's 0.5 GB free plan; see the policy section.)
   NFR-5 states the volume range as "100–200 per month"; NFR-7 states it as
   "30–200 per month". The projection uses **200/month**, the upper bound common
   to both; a 100/month variant is given for the lower end.
@@ -108,7 +111,7 @@ overhead and ignores TOAST compression, which pulls the real ratio down. It is
 intentionally on the pessimistic side so the projected dates are early rather
 than late.
 
-**Production cross-check (pending real data).** Once Neon holds real rows,
+**Production cross-check (pending real data).** Once production Postgres holds real rows,
 Francesco runs `SELECT pg_total_relation_size('report_payload'), count(*) FROM
 report_payload;` and divides — recorded as a check on the 1.5× factor, not as
 the primary number (mirrors Story 8.3's `ExportRecord` cross-check). If the real
@@ -149,7 +152,7 @@ p90 of each row in the same 12-run sample:
 
 **The machine block projects `report_payload` alone — that is a *floor*, not a
 conservative bound.** Projecting only the un-prunable Payload row against the
-*whole-database* 0.5 GB ceiling pushes the ceiling date **later** than reality,
+*whole-database* ceiling pushes the ceiling date **later** than reality,
 because every run also writes the sibling rows above (and, per exported Report,
 an `ExportRecord` and a `Report` row, small next to these). The realistic
 full-footprint projection below lands earlier and is what the policy is written
@@ -185,63 +188,46 @@ tolerance). The intermediate products below are shown to 3 decimals so the
 - `projected_row_bytes` = `ceil(64259 × 1.5)` = **96,389 B/row** on disk.
 - At **200 Reports/month**: `monthly_growth_bytes` = `96389 × 200` =
   **19,277,800 B/month** ≈ 18.4 MiB/month.
-  - ceiling: `round((500000000 / 19277800) × 30.44)` = `round(789.507)` =
-    **790 days** → **`ceiling_reached_on = 2028-10-25`**.
-  - half: `round((250000000 / 19277800) × 30.44)` = `round(394.754)` =
-    **395 days** → **`half_ceiling_reached_on = 2027-09-26`**.
-- At **100 Reports/month** (NFR-7's lower end): monthly growth halves to
-  **9,638,900 B/month**; the runway roughly doubles — `round(1579.0)` = 1579
-  days → ceiling ≈ **2030-12-23**, half ≈ **2028-10-25**.
+  - ceiling: `round((256000000000 / 19277800) × 30.44)` = `round(404228.698)`
+    days → **`ceiling_reached_on = 3133-05-25`**.
+  - half: `round((128000000000 / 19277800) × 30.44)` = `round(202114.349)`
+    days → **`half_ceiling_reached_on = 2580-01-09`**.
+- At **100 Reports/month** (NFR-7's lower end): the runway doubles — ceiling
+  ≈ 4240-02-19, half ≈ 3133-05-25.
 
 ### Full per-Report footprint (the realistic case)
 
 - footprint p90 = 84,697 B → `ceil(84697 × 1.5)` = **127,046 B/row**.
 - At **200 Reports/month**: `127046 × 200` = **25,409,200 B/month** ≈ 24.2
-  MiB/month.
-  - ceiling: `round((500000000 / 25409200) × 30.44)` = `round(598.990)` =
-    **599 days** → ≈ **2028-04-17**.
-  - half: `round((250000000 / 25409200) × 30.44)` = `round(299.495)` =
-    **299 days** → ≈ **2027-06-22**.
-- At **100 Reports/month**: `12,704,600 B/month` — ceiling ≈ **2029-12-07**,
-  half ≈ **2028-04-17**.
+  MiB/month — about 0.3 GB a year.
+  - ceiling ≈ **2866-05-01**; half ≈ **2446-06-29**.
+- At **100 Reports/month**: ceiling ≈ 3706-01-04, half ≈ 2866-05-01.
 
-Every one of these half-ceiling dates (2027-06 … 2028-10) falls well inside the
-guard's 60-month planning horizon (≈ 2031-08), so Story 8.4's "raised as an
-explicit decision rather than absorbed" fires — see the policy below.
+Every half-ceiling date lies centuries beyond the guard's 60-month planning
+horizon, so no storage-growth policy has to be raised: `policy_decision =
+"none"`. The dates are arithmetic, not forecasts; what they say is that disk
+space for Payloads is not a constraint on this VPS.
 
-**GB vs GiB.** Neon's plan is documented as "0.5 GB". The guard binds
-`ceiling_bytes` to `0.5 × 1000³ = 500,000,000` — the smaller, conservative
-decimal reading, not `0.5 GiB = 536,870,912`. The ~7 % difference is inside the
-noise of a 1.5× overhead estimate and does not change the decision.
+**GB vs GiB.** The disk is bound as `256 × 1000³ = 256,000,000,000` bytes, the
+smaller decimal reading, and Postgres shares it with the rest of the VPS. At
+this growth rate neither correction changes the decision.
 
 ## Storage-growth policy (decision)
 
 Indexed as **RGD-3** in [`docs/decisions/README.md`](../decisions/README.md).
 
+**Current decision (Francesco, 2026-10-01): `policy_decision = "none"`.**
+Production moved from Neon's 0.5 GB free plan to Postgres on a Netcup VPS with
+a 256 GB disk. Against that ceiling the half-ceiling date is centuries out, so
+no storage trigger or paid-tier move is needed. Unchanged from the original
+decision: **do not prune, archive, TTL, or export-and-delete Report Payloads**
+— NFR-9 makes Payload loss unacceptable and the traceability guarantee has no
+expiry. Disk usage on the VPS is ordinary host monitoring (Coolify's server
+view or `df -h`), not a release-validation trigger.
 
-Half the 0.5 GB ceiling is projected to be reached in **~10 months** (full
-footprint, 200/month) to ~13 months (payload-only, 200/month) — inside any
-reasonable planning horizon — so this is raised as a decision, not absorbed:
-
-> **When Neon storage crosses 50 % of the 0.5 GB free-plan ceiling, move the
-> Neon project to its paid tier and renegotiate the €0/month target (NFR-7) as
-> an explicit, recorded cost decision. Do not prune, archive, TTL, or
-> export-and-delete Report Payloads — NFR-9 makes Payload loss unacceptable, and
-> the traceability guarantee has no expiry.**
-
-- **Cost to attach at ratification.** Neon's entry paid-plan monthly price
-  (Francesco to confirm the current figure — Neon's pricing page). This is the
-  number NFR-7's €0/month renegotiation turns on: the policy trades the
-  zero-cost guarantee for that amount rather than trading away Payload
-  durability.
-- **Monitoring hook.** Check the Neon project dashboard's storage gauge
-  **monthly**, or set a Neon usage alert at ~40–50 % of 0.5 GB if the plan
-  offers one. Owner: Francesco. The `half_ceiling_reached_on` dates above are a
-  heads-up for *when* to expect the threshold, **not** the trigger — the gauge
-  reading is.
-- **Scope.** Designing or implementing any storage-reclamation mechanism
-  (pruning, archival, TTL, export-and-delete) is explicitly **out of scope** for
-  this story; raising the decision is the deliverable.
+**Superseded (Francesco, 2026-08-27):** *when Neon storage crossed 50 % of the
+0.5 GB free-plan ceiling, move the Neon project to its paid tier and renegotiate
+the €0/month target (NFR-7).* Retired with Neon on 2026-10-01.
 
 ## Measurement basis — accepted deviation (retro item 64)
 
@@ -255,7 +241,8 @@ typical-month fixture over twelve consecutive months, together with the additive
 `storage_overhead_factor = 1.5`, is the deliberate projection basis. It is *not*
 re-measured against adversarial fixtures or a second chart for this record.
 
-Rationale:
+Rationale (written against the superseded Neon policy; with
+`policy_decision = "none"` since 2026-10-01 the basis matters even less):
 
 - **The overhead factor already leans pessimistic.** 1.5× is additive-only and
   ignores TOAST compression on the repetitive `payload` JSON (§"How it was
@@ -280,15 +267,15 @@ if a future change makes adversarial-month sizing matter to a decision.
 
 **`pass`** — a real persisted `report_payload` row has been measured
 (`payload_p90_bytes = 64259` over `sample_n = 12`, canonical-JSON byte length of
-the `payload` column), growth is projected against the 0.5 GB ceiling bound to
+the `payload` column), growth is projected against the 256 GB VPS disk bound to
 README — both payload-only (the machine block) and the realistic full per-Report
-footprint — and the half-ceiling projection is reconciled by a ratified
-storage-growth policy rather than left standing. Release may proceed.
+footprint — and the half-ceiling projection lies far beyond the planning
+horizon, so no storage-growth policy is needed. Release may proceed.
 
-Ratified by Francesco on 2026-08-27 (`ratified_on` / `policy_ratified_on`),
-confirming the measured p90, the additive 1.5× overhead factor, the projected
-dates, the storage-growth policy (including its cost and monitoring terms), and
-the `pass` outcome.
+Ratified by Francesco on 2026-08-27, confirming the measured p90, the additive
+1.5× overhead factor and the `pass` outcome; re-ratified on 2026-10-01
+(`ratified_on`) against the 256 GB VPS ceiling, with `policy_decision =
+"none"`.
 
 ## Re-measure trigger
 
@@ -302,7 +289,7 @@ Re-run the harness and bump `checked` (and the projection, the policy dates and
 - the four transit-scan functions (`core/transits/*`) — they drive event counts
   and thus Payload size;
 - the ephemeris identity or the computation config;
-- Neon's free-plan storage ceiling, or the switch of `ReportPayload.payload`
+- the VPS disk size or hosting plan, or the switch of `ReportPayload.payload`
   from `JSON` to `JSONB` (which would change the on-disk representation);
 - the 100–200 (NFR-5) / 30–200 (NFR-7) Reports/month target.
 
@@ -320,10 +307,11 @@ this typical-month sample, re-run with those inputs.
   (`_bmad-output/planning-artifacts/epics.md`): "100–200 per month" — the line
   the guard parses; the projection uses its **200** upper bound.
 - **NFR-7 — Cost** (`_bmad-output/planning-artifacts/epics.md`): "€0/month at
-  30–200 Reports per month" — the constraint the paid-tier move renegotiates.
+  30–200 Reports per month" — already superseded in practice by the €12/month
+  VPS (README "Running cost").
   Its range (30–200) differs from NFR-5's (100–200); the projection uses the
   shared 200 upper bound and gives a 100/month lower-end variant.
-- **README "Running cost"** (`README.md`): `Neon Postgres 18 (Europe/Frankfurt)
-  | Free (0.5 GB)` — the ceiling the guard binds `ceiling_bytes` to.
+- **README "Running cost"** (`README.md`): `Netcup VPS 1000 G12 ... (256 GB
+  disk)` — the ceiling the guard binds `ceiling_bytes` to.
 - **Story 8.4 spec**
   (`_bmad-output/implementation-artifacts/spec-8-4-project-storage-growth-against-the-free-tier-ceiling.md`).

@@ -22,19 +22,18 @@ RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "gemini-data-terms.md"
 
 #: Max age of `checked` before the record is flagged stale (epic-8-retro-item-62).
 _MAX_RECORD_AGE_DAYS = 550
-RENDER_YAML = REPO_ROOT / "render.yaml"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 COMPOSE_FILE = REPO_ROOT / "compose.yaml"
 README = REPO_ROOT / "README.md"
 GENERATOR = REPO_ROOT / "shell" / "adapters" / "gemini" / "generator.py"
 
-# Render region slugs that sit in the EU/EEA (AD-9 / NFR-17). Frankfurt is the
+# Hosting sites in the EU/EEA (AD-9 / NFR-17). The Netcup VPS in Vienna is the
 # only one this project deploys to; the set exists so the check reads as intent.
-_EU_RENDER_REGIONS = {"frankfurt"}
+_EU_HOSTING_REGIONS = {"Vienna, AT"}
 
-# PRD §6.2 requires storage in the EU/EEA; this is the Neon project's zone as
-# documented in README.md / render.yaml.
-_EU_STORAGE_REGION = "Europe/Frankfurt"
+# PRD §6.2 requires storage in the EU/EEA; Postgres runs on the same VPS, as
+# documented in README.md's Deployment section.
+_EU_STORAGE_REGION = "Vienna, AT"
 
 _EXPECTED_KEYS = {
     "provider",
@@ -55,7 +54,6 @@ _VERIFIED_AT = re.compile(
     r'^\s*GEMINI_DATA_TERMS_VERIFIED_AT\s*[:=]\s*"?(\d{4}-\d{2}-\d{2})"?',
     re.MULTILINE,
 )
-_RENDER_REGION = re.compile(r"^\s*region:\s*(\S+)", re.MULTILINE)
 _MODEL_LITERAL = re.compile(r'^_MODEL\s*=\s*"([^"]+)"', re.MULTILINE)
 
 
@@ -157,9 +155,9 @@ def test_outcome_permits_release(meta: dict[str, object]) -> None:
 
 
 def test_hosting_region_is_eu(meta: dict[str, object]) -> None:
-    assert meta["hosting_region"] in _EU_RENDER_REGIONS, (
-        f"hosting_region {meta['hosting_region']!r} is not an EU render region "
-        f"{sorted(_EU_RENDER_REGIONS)}"
+    assert meta["hosting_region"] in _EU_HOSTING_REGIONS, (
+        f"hosting_region {meta['hosting_region']!r} is not an EU hosting site "
+        f"{sorted(_EU_HOSTING_REGIONS)}"
     )
 
 
@@ -174,15 +172,12 @@ def test_storage_region_is_eu(meta: dict[str, object]) -> None:
     )
 
 
-def test_region_matches_render_yaml(meta: dict[str, object]) -> None:
-    regions = _RENDER_REGION.findall(RENDER_YAML.read_text(encoding="utf-8"))
-    assert len(regions) == 1, (
-        f"expected exactly one `region:` line in render.yaml, found {regions} -- "
-        "a second service block would silently rebind this test"
-    )
-    assert regions[0] == meta["hosting_region"], (
-        f"render.yaml region {regions[0]!r} != record hosting_region "
-        f"{meta['hosting_region']!r}"
+def test_hosting_region_matches_readme(meta: dict[str, object]) -> None:
+    hosting_region = meta["hosting_region"]
+    assert isinstance(hosting_region, str)
+    assert hosting_region in _readme_deployment_section(), (
+        f"README.md's Deployment section no longer documents {hosting_region!r} "
+        "as the hosting location the record binds to"
     )
 
 

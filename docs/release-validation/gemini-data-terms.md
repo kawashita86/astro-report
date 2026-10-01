@@ -20,8 +20,8 @@ ratified_on = 2026-08-27
 terms_source = "https://ai.google.dev/gemini-api/terms"
 terms_effective = 2026-03-23
 terms_snapshot = "https://web.archive.org/web/20260820061356/https://ai.google.dev/gemini-api/terms"
-hosting_region = "frankfurt"
-storage_region = "Europe/Frankfurt"
+hosting_region = "Vienna, AT"
+storage_region = "Vienna, AT"
 outcome = "pass"
 ```
 
@@ -90,12 +90,20 @@ not weaken guarantee (a) or (b). **Not material → `outcome = "pass"`.**
 
 ## Hosting and storage location
 
-- **Hosting** — Render web service, `region:` key set to `frankfurt` in
-  `render.yaml`. EU.
-- **Storage** — Neon Postgres project in `Europe/Frankfurt` (`README.md`
-  Deployment section; `render.yaml` header comment). EU.
+- **Hosting** — one Docker container on Coolify, on a Netcup VPS in
+  `Vienna, AT` (`README.md` Deployment section). EU.
+- **Storage** — Postgres on the same VPS, `Vienna, AT`. EU.
+- **Backups** — Coolify's scheduled Postgres backups, in a Backblaze B2 bucket
+  in EU Central (Amsterdam, NL). EU.
 
-Both the compute and the durable data sit in the EU/EEA. Confirmed.
+The compute, the durable data and its backups all sit in the EU/EEA.
+Confirmed.
+
+Updated 2026-10-01: production moved from Render (`frankfurt`) plus Neon
+(`Europe/Frankfurt`) to the Netcup VPS, with backups in Backblaze B2 EU
+Central (Amsterdam); locations confirmed by Francesco. All are in the EU,
+so the residency half of this record still holds; the terms reading and its
+ratification above are unchanged.
 
 ## Outcome
 
@@ -123,13 +131,12 @@ place it is configured — this is the complete list:
 
 - `.env.example` (local, non-Docker path);
 - `compose.yaml`, the `app` service (local Docker path);
-- the value set manually on the Render service dashboard for the production
-  deployment (`render.yaml` declares the key `GEMINI_DATA_TERMS_VERIFIED_AT`
-  with `sync: false`, so it is entered by hand, not from the repo).
+- the value set manually in the Coolify application's environment for the
+  production deployment (entered by hand, not from the repo).
 
 The guard suite in `tests/test_data_terms_record.py` binds `.env.example` and
 `compose.yaml` to this record's `checked` date, so a missed edit there fails
-the build; the Render dashboard value is operator-owned and is not checkable
+the build; the Coolify value is operator-owned and is not checkable
 from the repo.
 
 If a re-check finds guarantee (a) or (b) materially weakened for the EEA free

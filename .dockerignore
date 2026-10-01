@@ -25,6 +25,5 @@ htmlcov/
 
 tests/
 compose.yaml
-render.yaml
 README.md
 product_research.md

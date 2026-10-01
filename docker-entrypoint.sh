@@ -1,11 +1,11 @@
 #!/bin/sh
 # Migrations complete before traffic is accepted.
 #
-# Render's pre-deploy command is a paid-instance feature, and this project must
-# stay inside the free tier. So the ordering is enforced here instead: migrations
-# run first, a non-zero exit aborts the container before it can serve (the deploy
-# then fails its health check and the previous version keeps running), and the
-# server replaces this shell via exec so the container runs a single process.
+# The ordering is enforced here rather than by a hosting platform's pre-deploy
+# hook, so it holds on any host that runs this image: migrations run first, a
+# non-zero exit aborts the container before it can serve (the deploy then fails
+# its health check and the previous version keeps running), and the server
+# replaces this shell via exec so the container runs a single process.
 #
 # Everything that can fail cheaply is checked BEFORE the migration, because the
 # migration is the irreversible step. Aborting after it has run would leave the

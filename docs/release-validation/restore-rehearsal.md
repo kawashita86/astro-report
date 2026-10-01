@@ -1,10 +1,10 @@
 # Restore rehearsal (Story 8.5)
 
-`GET /backup` (Story 6.5) is this application's real durability mechanism —
-AD-17 is explicit that Neon's free plan has **no scheduled backups**, only a
-~6-hour point-in-time-restore window, so the operator-held logical export plus a
-*rehearsed* restore is what stands between a dropped database and permanent data
-loss. Story 6.5 shipped the export; nothing had ever restored one. This file is
+`GET /backup` (Story 6.5) is the operator-held logical export of this
+application's data — a second line of defence alongside Coolify's scheduled
+Postgres backups to Backblaze B2, and the one that does not depend on the
+hosting stack at all. A backup nobody has restored is only a hope, so this
+export needs a *rehearsed* restore. Story 6.5 shipped the export; nothing had ever restored one. This file is
 the durable, dated record that the restore works: a complete export
 reconstructed into an empty schema, a previously exported Report reopened with
 its Payload and Gate result intact and its Claims still traceable, and the
@@ -16,7 +16,7 @@ process* — a fully-populated database serialized exactly as `GET /backup` does
 restored into an empty foreign-key-enforcing schema, and the restored Report
 reopened — by `tests/test_restore.py`, which runs on every change. What has
 **not** yet happened is the operator running `python -m shell.restore` against a
-freshly provisioned empty Neon branch and signing off on the result. That step
+freshly provisioned empty Postgres and signing off on the result. That step
 (the runbook below) is recommended before release; this record is updated with
 its real `source_backup`, `rows_restored`, `checked` / `ratified_on` and
 `ratified_by` when it is done.
@@ -37,7 +37,7 @@ checked = 2026-09-02
 ratified_by = "automated round-trip (tests/test_restore.py); operator dry-run against a real Postgres pending"
 ratified_on = 2026-09-02
 source_backup = "in-process GET /backup serialization of a fully-populated test database (tests/test_restore.py::_populate_source / _serialize_as_backup)"
-target = "empty in-process SQLite schema, foreign keys enforced (tests/test_restore.py::_fk_enforcing_engine); dry-run against an empty Neon Europe/Frankfurt branch still to be run"
+target = "empty in-process SQLite schema, foreign keys enforced (tests/test_restore.py::_fk_enforcing_engine); dry-run against an empty real Postgres still to be run"
 tables_restored = ["client", "corpus_entry", "export_record", "gate_result", "gate_violation_review", "natal_chart", "report", "report_draft", "report_payload", "report_run", "report_theme", "style_guide"]
 rows_restored = 13
 report_reopened = true
@@ -57,9 +57,9 @@ can bind them regardless of that order.
 - **AD-17 — durability is an operator action.** One authenticated route
   (`GET /backup`) produces the complete logical export, downloaded to
   Francesco's machine; the Report History banner (Story 6.6) warns whenever the
-  newest Report postdates the last export. Neon's free plan gives only a
-  ~6-hour PITR window and no scheduled backups, so this export **is** the
-  backup.
+  newest Report postdates the last export. Coolify's scheduled Postgres
+  backups go to Backblaze B2, off the VPS; this export is the independent,
+  operator-held copy that survives losing either.
 - **A backup nobody has restored is a hope, not a mechanism.** Epic 8 is the
   release gate; it requires the restore *demonstrated*. `restore_backup`
   (`shell/restore.py`) and its `python -m shell.restore <backup.json>` operator
@@ -79,8 +79,8 @@ deletes an existing row.
    authenticated `GET /backup`, held somewhere that is not the dead database's
    host. (If the app is still up, download a fresh one now — the banner tells
    you how stale the last one is.)
-2. **Provision an empty Postgres.** A fresh Neon branch or project,
-   `Europe/Frankfurt` (PRD §6.2 / `README.md` — storage stays in the EEA).
+2. **Provision an empty Postgres.** A fresh database on the Coolify VPS
+   (Vienna, AT — PRD §6.2 / `README.md`: storage stays in the EEA).
    Point `DATABASE_URL` at it.
 3. **Apply the schema.** `uv run --env-file .env alembic upgrade head`. This
    step — and only this step — creates the schema; the restore CLI never
@@ -150,7 +150,7 @@ backup.
 
 The one thing the in-process round-trip cannot exercise is the real operator
 path: a `backup-<UTC>.json` file from a live `GET /backup`, `alembic upgrade
-head` against an empty **Neon** branch, and `python -m shell.restore` driven
+head` against an empty real Postgres, and `python -m shell.restore` driven
 from the shell with `DATABASE_URL` pointed at Postgres (not SQLite). The runbook
 above is that path; running it once and pasting the real numbers into the block
 is the remaining step before this record is a full operator sign-off.
@@ -166,7 +166,7 @@ which runs on every change.
 
 What holds `outcome` at `blocked` is `rehearsed_against = "in-process-sqlite"`:
 the operator dry-run of `python -m shell.restore` against a freshly provisioned
-empty **Neon** Postgres branch (see *Still outstanding*) has not been run. Per
+empty real Postgres (see *Still outstanding*) has not been run. Per
 epic-8-retro-item-65 the guard now refuses `outcome = "pass"` while
 `rehearsed_against` is not `"real-postgres"`, so `test_outcome_permits_release`
 is a strict `xfail` until that dry-run is done — at which point set

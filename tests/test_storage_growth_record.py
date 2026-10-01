@@ -49,9 +49,10 @@ RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "storage-growth.md"
 EPICS_FILE = REPO_ROOT / "_bmad-output" / "planning-artifacts" / "epics.md"
 README = REPO_ROOT / "README.md"
 
-#: Neon's free plan is documented as "0.5 GB"; the guard binds ``ceiling_bytes``
-#: to the smaller, conservative decimal reading (0.5 * 1000**3), not 0.5 GiB.
-_CEILING_BYTES = 500_000_000
+#: The Netcup VPS disk is documented as "256 GB"; the guard binds
+#: ``ceiling_bytes`` to the smaller, conservative decimal reading
+#: (256 * 1000**3), not 256 GiB.
+_CEILING_BYTES = 256_000_000_000
 
 #: The upper bound of ``epics.md``'s NFR-5 "100-200 per month" -- bound both to
 #: the literal here and to the number parsed live out of that line, so the
@@ -135,7 +136,7 @@ def test_record_exists() -> None:
     assert RECORD_FILE.exists(), (
         f"release-validation storage-growth record missing: {RECORD_FILE} -- "
         "Story 8.4 requires a dated projection of report_payload storage growth "
-        "against Neon's 0.5 GB free-tier ceiling"
+        "against the production storage ceiling"
     )
 
 
@@ -253,17 +254,17 @@ def test_monthly_growth_consistent(meta: dict[str, object]) -> None:
 
 def test_ceiling_matches_readme(meta: dict[str, object]) -> None:
     section = _readme_running_cost_section()
-    match = re.search(r"Neon Postgres.*?Free\s*\(([\d.]+)\s*GB\)", section)
+    match = re.search(r"Netcup VPS.*?\(([\d.]+)\s*GB disk\)", section)
     assert match is not None, (
         "README.md's Running-cost table no longer has a "
-        "'Neon Postgres ... Free (N GB)' row for the guard to bind to"
+        "'Netcup VPS ... (N GB disk)' row for the guard to bind to"
     )
     readme_gb = float(match.group(1))
     readme_bytes = int(readme_gb * 1000**3)
     assert readme_bytes == meta["ceiling_bytes"] == _CEILING_BYTES, (
-        f"README says Free ({readme_gb} GB) = {readme_bytes} bytes, record "
+        f"README says ({readme_gb} GB disk) = {readme_bytes} bytes, record "
         f"ceiling_bytes is {meta['ceiling_bytes']}, this suite expects "
-        f"{_CEILING_BYTES} (0.5 * 1000**3, the conservative decimal reading) "
+        f"{_CEILING_BYTES} (256 * 1000**3, the conservative decimal reading) "
         "-- all three must agree"
     )
 

@@ -1,13 +1,8 @@
 # Runs on every push to main and every pull request, so conformance is not an
-# on-demand check (Story 1.6, AC4) -- and, as a side effect, so the whole
-# existing test suite finally runs automatically at all (deferred-work.md,
-# story 1.1 entry): render.yaml auto-deploys every commit to main regardless
-# of whether anyone happened to run pytest by hand first.
-#
-# Deliberately not wired as a required check blocking that auto-deploy --
-# that is a separate decision (branch protection plus a Render-side
-# integration), logged in deferred-work.md (story 1.6 entry) rather than
-# defaulted into as a side effect of adding CI.
+# on-demand check (Story 1.6, AC4) and the whole test suite runs automatically
+# (deferred-work.md, story 1.1 entry). It is also the production gate: the
+# `deploy` job below is the only thing that ships main, and it runs only after
+# `test` passed.
 #
 # A Postgres service container backs tests/test_migration_chain_on_postgres.py:
 # `alembic upgrade head` had never actually run against Postgres from a clean
@@ -72,11 +67,10 @@ jobs:
           MIGRATION_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/migrationtest
 
   # Production deploy (Coolify on the Netcup VPS). Runs only on pushes to main
-  # and only after `test` passed, so a red build never reaches production --
-  # the gap noted at the top of this file for the Render auto-deploy. Coolify's
-  # own auto-deploy is turned OFF for this application; this call is the only
-  # trigger. Migrations still run in docker-entrypoint.sh, and a failed health
-  # check leaves the previous container serving.
+  # and only after `test` passed, so a red build never reaches production.
+  # Coolify's own auto-deploy is turned OFF for this application; this call is
+  # the only trigger. Migrations still run in docker-entrypoint.sh, and a failed
+  # health check leaves the previous container serving.
   #
   # Needs two repository secrets (Settings -> Secrets and variables -> Actions):
   #   COOLIFY_DEPLOY_WEBHOOK  the application's "Deploy Webhook" URL from Coolify

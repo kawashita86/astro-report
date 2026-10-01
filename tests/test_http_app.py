@@ -113,8 +113,8 @@ def test_the_module_level_app_exists_for_the_server_to_import() -> None:
 
 def test_engine_construction_enables_pre_ping(monkeypatch: pytest.MonkeyPatch) -> None:
     """A stale pooled connection must be detected and transparently replaced
-    before use -- Neon, the managed Postgres provider (`render.yaml`), can
-    suspend or drop an idle connection silently."""
+    before use -- a Postgres behind a pooler, a restart or a NAT timeout can
+    drop an idle connection silently."""
     captured_kwargs: dict[str, object] = {}
     real_create_engine = shell_http_app.create_engine
 

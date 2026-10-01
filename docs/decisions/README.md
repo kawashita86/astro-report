@@ -55,7 +55,7 @@ context.
 |----|----------|----------|--------|
 | [RGD-1](#rgd-1--gemini-data-terms-re-verification-is-a-benign-change-story-82) | Gemini data-terms re-verification: the 2026-03-23 revision is a benign change; `pass` | Francesco, 2026-08-27 | `docs/release-validation/gemini-data-terms.md` |
 | [RGD-2](#rgd-2--regeneration-cost-is-a-recorded-known-limitation-the-latency-budget-is-not-revised-story-83) | Regeneration cost is a recorded known limitation; latency budget not revised | Francesco, 2026-08-27 | `docs/release-validation/latency.md` |
-| [RGD-3](#rgd-3--storage-growth-50-ceiling-policy-story-84) | Storage-growth policy: move Neon to paid tier at 50% of the free-plan ceiling; no Payload pruning | Francesco, 2026-08-27 | `docs/release-validation/storage-growth.md` |
+| [RGD-3](#rgd-3--storage-growth-50-ceiling-policy-story-84) | Storage-growth policy: no Payload pruning; no storage trigger needed on the 256 GB VPS (Neon 50% trigger superseded) | Francesco, 2026-08-27; re-decided 2026-10-01 | `docs/release-validation/storage-growth.md` |
 | [RGD-4](#rgd-4--get-with-side-effects-on-the-export-and-backup-routes-is-accepted) | `GET` with side effects on `/export/pdf`, `/export/markdown`, `/backup` is accepted | Francesco, 2026-08-28 | `shell/http/routes/report_runs.py`, `shell/http/routes/backup.py` |
 | [RGD-5](#rgd-5--corpus-content-is-stored-verbatim-anonymization-is-a-phase-2-boundary-requirement) | Corpus stored verbatim, operator-only; anonymization mandatory before any phase-2 use | Francesco, 2026-08-28 | `_bmad-output/implementation-artifacts/epic-7-context.md` |
 | [RGD-6](#rgd-6--backup-file-operator-handling-fde-only-monthly-rotation-keep-all) | `GET /backup` file: full-disk-encrypted machine only (no per-file encryption); monthly rotation; keep every backup | Francesco, 2026-08-28 | `docs/operations/backup-handling.md` |
@@ -142,9 +142,13 @@ usage alert at ~40–50 %), not the projected dates. Designing any
 storage-reclamation mechanism is explicitly out of scope — raising the decision
 is the deliverable. Outcome **`pass`**; release may proceed.
 
-**Ratified.** Francesco, 2026-08-27 (`ratified_on` / `policy_ratified_on` in the
-record's machine block). Open sub-item: the entry paid-plan monthly price to
-attach at ratification is Francesco's to confirm from Neon's pricing page.
+**Ratified.** Francesco, 2026-08-27.
+
+**Re-decided 2026-10-01 (Francesco).** Neon is retired; production Postgres
+runs on a Netcup VPS 1000 G12 (Vienna, AT, 256 GB disk, €12/month). Against
+that ceiling the half-ceiling date is centuries out, so the record now carries
+`policy_decision = "none"` and the Neon paid-tier trigger above no longer
+applies. The no-pruning rule stands. The open Neon-price sub-item is moot.
 
 **Links.**
 - Source: [`docs/release-validation/storage-growth.md`](../release-validation/storage-growth.md) — "Storage-growth policy (decision)", the full-footprint projection, and the re-measure trigger.

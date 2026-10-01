@@ -16,8 +16,8 @@ every durability-relevant table as one plaintext JSON file** —
 `Cache-Control: no-store`, built fully in memory. It is unencrypted and
 unfiltered: every Client's name, birth date, and birth place, every Report
 Payload, Draft, Theme, and Gate result, every Export record, and the Style
-Guide. It is the application's real durability mechanism (AD-17: Neon's free
-plan has no scheduled backups, only a ~6-hour point-in-time window), so the file
+Guide. Alongside Coolify's scheduled Postgres backups to Backblaze B2, it is
+the operator-held copy of the data (AD-17), so the file
 matters — and so does keeping it out of the wrong hands.
 
 The restore side is [`docs/release-validation/restore-rehearsal.md`](../release-validation/restore-rehearsal.md)

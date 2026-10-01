@@ -1,19 +1,25 @@
 <!-- bmad:context -->
-<!-- Verified 2026-08-28 against ce6767b. Managed by bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
+<!-- Verified 2026-10-01 against 7f8a0e1. Managed by bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
 
 ## astro-report
 
 Natal charts, monthly transits and grounded eight-section Italian reports for a single
 operator. Python 3.13 (`uv`), FastAPI with Jinja2/HTMX templates, SQLModel on Postgres,
-Alembic migrations; deployed as one Render web service against Neon Postgres. `core/` is a
-pure functional core; `shell/` is everything imperative and imports `core/`, never the
-reverse. The canonical build contract is `_bmad-output/specs/spec-astro-report/SPEC.md`;
-deeper design and planning live under `_bmad-output/`.
+Alembic migrations; deployed as one Docker container on Coolify (Netcup VPS) against a
+Postgres on the same VPS. `core/` is a pure functional core; `shell/` is everything
+imperative and imports `core/`, never the reverse. The canonical build contract is
+`_bmad-output/specs/spec-astro-report/SPEC.md`; deeper design and planning live under
+`_bmad-output/`.
 
 ## Policy
 
-- Work directly on `main` — no feature branches, no PRs. `render.yaml` auto-deploys every
-  commit and CI does not block it, so run `uv run pytest` locally before pushing.
+- Work directly on `main` — no feature branches, no PRs. The `deploy` job in
+  `.github/workflows/ci.yml` is the only production trigger and runs only after lint and
+  tests pass; Coolify's own auto-deploy stays off. Run `uv run pytest` locally before
+  pushing anyway — a red `main` blocks every deploy behind it.
+- Render and Neon are retired; never add a platform blueprint (`render.yaml` and the like).
+  Deploy changes go in `Dockerfile`, `docker-entrypoint.sh` (runs migrations) and the
+  `deploy` job.
 - Migrations are forward-only: never fill in a `downgrade()` body, never run
   `alembic downgrade`. Correct a bad migration with a new forward one.
   `tests/test_forward_only_migrations.py` enforces this, generator template included.
@@ -36,10 +42,10 @@ deeper design and planning live under `_bmad-output/`.
 ## Running and verifying
 
 - `uv run pytest` runs store and adapter tests against in-memory SQLite, which ignores
-  `VARCHAR(n)` lengths and foreign keys. `tests/test_migration_chain_on_postgres.py` is the
-  only real-Postgres check and skips unless `MIGRATION_TEST_DATABASE_URL` points at a
-  throwaway database — run it against real Postgres before pushing a migration (schema bugs
-  have shipped green three times without it).
+  `VARCHAR(n)` lengths and foreign keys. The real-Postgres checks
+  (`tests/*_on_postgres.py`) skip unless `MIGRATION_TEST_DATABASE_URL` points at a
+  throwaway database — run them against real Postgres before pushing a migration or an
+  engine/pool change (schema bugs have shipped green three times without it).
 
 ## Conventions that differ from defaults
 
