@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 from core.gate.run import body_sign_label
 from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
 from shell.http.payload_view import _localize_value
-from shell.runner.driver import _STAGE_SEQUENCE
+from shell.runner.advance import _STAGE_SEQUENCE
 
 __all__ = [
     "CITED_ENTRY_FIELD_LABELS",
@@ -283,7 +283,7 @@ def resolve_cited_entries(
 def _stage_index(stage: str | None) -> int:
     """``-1`` for ``None`` (nothing completed yet), otherwise ``stage``'s
     position in ``_STAGE_SEQUENCE`` -- mirrors
-    ``shell/runner/driver.py``'s own private helper of the same name and
+    ``shell/runner/advance.py``'s own private helper of the same name and
     shape, kept as a separate copy here rather than imported so this module
     depends on nothing from the driver beyond the one sequence tuple."""
     if stage is None:

@@ -2,7 +2,7 @@
 frozen Report Payload (Story 3.8, PRD FR-14).
 
 Written exactly once per ``ReportRun``, by ``store_report_payload()`` from
-``shell/runner/driver.py``'s ``payload_ready`` stage -- never updated, never
+``shell/runner/advance.py``'s ``payload_ready`` stage -- never updated, never
 deleted except as part of the FR-29 Client-deletion cascade
 (``shell/adapters/postgres/client.py``). This is what makes a citation into a
 Report mean the same thing years later: the row it points at cannot change
@@ -52,7 +52,7 @@ class ReportPayload(SQLModel, table=True):
     # `unique=True` is PRD FR-14's "every stored Report has exactly one
     # stored Report Payload", enforced at the schema level -- not merely by
     # `store_report_payload()` only ever being called once per `ReportRun`
-    # in `shell/runner/driver.py`'s `payload_ready` stage.
+    # in `shell/runner/advance.py`'s `payload_ready` stage.
     report_run_id: UUID = Field(foreign_key="report_run.id", unique=True, index=True)
     schema_version: int
     computation_config_version: int
@@ -95,7 +95,7 @@ def store_report_payload(
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``create_client_with_chart()``
     (``shell/adapters/postgres/client.py``), so it never decides the caller's
-    transaction boundary. ``shell/runner/driver.py::advance()`` commits once
+    transaction boundary. ``shell/runner/advance.py::advance()`` commits once
     this and the rest of the ``payload_ready`` stage have succeeded.
     """
     report_payload = ReportPayload(

@@ -2,7 +2,7 @@
 passed the Groundedness Gate (Story 5.3, AD-1).
 
 Written exactly once per ``ReportRun``, by ``store_report()`` from
-``shell/runner/driver.py``'s ``gate_passed`` stage -- and only on a passing
+``shell/runner/advance.py``'s ``gate_passed`` stage -- and only on a passing
 ``GateResult`` (``core/gate/run.py::run_gate()``), never before, never
 updated, never deleted except as part of the FR-29 Client-deletion cascade
 (``shell/adapters/postgres/client.py``). A ``Report`` row's mere existence
@@ -57,7 +57,7 @@ class Report(SQLModel, table=True):
     # `unique=True`: exactly one `Report` per `ReportRun` -- a run only ever
     # reaches `gate_passed` once (`advance()`'s forward-only stage advance),
     # enforced at the schema level too, not merely by `store_report()` only
-    # ever being called once per `ReportRun` in `shell/runner/driver.py`'s
+    # ever being called once per `ReportRun` in `shell/runner/advance.py`'s
     # `gate_passed` stage. Mirrors `ReportDraft.report_run_id`.
     report_run_id: UUID = Field(foreign_key="report_run.id", unique=True, index=True)
     style_guide_version: int
@@ -118,7 +118,7 @@ def store_report(
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``store_report_draft()``
     (``shell/adapters/postgres/report_draft.py``), so it never decides the
-    caller's transaction boundary. ``shell/runner/driver.py::advance()``
+    caller's transaction boundary. ``shell/runner/advance.py::advance()``
     commits once this and the rest of the ``gate_passed`` stage have
     succeeded. Called only after a passing ``GateResult`` -- never on
     failure (Story 5.3's Boundaries).

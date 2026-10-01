@@ -1,28 +1,28 @@
 """``try_acquire_advance_lock``: the non-blocking single-flight guard that
-lets exactly one concurrent poll advance a given ``ReportRun`` by one stage
-(AD-20, Story 3.10).
+lets exactly one concurrent caller advance a given ``ReportRun`` by one stage
+(AD-20, Story 3.10; callers are the ``RunDriver``'s loops since Story 10.4).
 
-``shell/runner/driver.py::advance()`` performs at most one stage transition
-per call and is invoked only from the poll handler
-(``GET /report-runs/{run_id}``). Two polls for the same run can still arrive
-together; on Postgres each takes a transaction-scoped advisory lock keyed on
-the run id, so the poll that wins advances one stage and commits -- which
-releases the lock -- while the loser returns the run's current stage
-untouched.
+``shell/runner/advance.py::advance()`` performs at most one stage transition
+per call and is invoked only by the driver's per-run loop. Two loops for the
+same run can still collide (two processes during a rolling deploy, a restart's
+``resume()`` racing a ``start``); on Postgres each takes a transaction-scoped
+advisory lock keyed on the run id, so the caller that wins advances one stage
+and commits -- which releases the lock -- while the loser returns the run's
+current stage untouched.
 
 A row lock (``SELECT ... FOR UPDATE`` on the ``ReportRun`` row) would
-serialize the polls too, but the loser would then block until the winner
-commits -- for a ``draft_ready`` poll that is the whole Generator call plus
-its backoff, reintroducing exactly the freeze AD-20 removes.
+serialize the callers too, but the loser would then block until the winner
+commits -- for a slow stage that is its whole duration plus its backoff, a caller
+stuck behind another's work for no reason.
 ``pg_try_advisory_xact_lock`` is non-blocking: the loser gets ``False`` at
-once and renders the current stage. Transaction-scoped (``_xact_``) means
+once and looks again later. Transaction-scoped (``_xact_``) means
 Postgres releases it on ``advance()``'s own ``commit()`` / ``rollback()``,
 or if the connection drops -- there is no ``pg_advisory_unlock`` to leak on
 an error path.
 
 Every non-Postgres backend (SQLite, in the test suite) returns ``True``
 without touching the database: those run a whole test on one connection, so
-there is no cross-connection concurrency to guard, and ``driver.py``'s
+there is no cross-connection concurrency to guard, and ``advance.py``'s
 concurrent-``advance()`` unique-constraint ``IntegrityError`` classification
 still stands there as defense-in-depth.
 """

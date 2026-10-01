@@ -63,8 +63,7 @@ def set_flash(
     Called on a ``RedirectResponse`` before it is returned, right after the
     write it announces has committed -- ``shell/http/routes/corpus.py``,
     ``style_guide.py`` and ``report_runs.py``'s five ``303`` sites (each
-    passes ``request.app.state.settings.environment``, mirroring how
-    ``get_generator()`` in ``report_runs.py`` already reaches settings off
+    passes ``request.app.state.settings.environment``, reaching settings off
     ``request.app.state``). The cookie carries no ``max_age``: it is meant
     to survive exactly one request (the redirect's destination ``GET``), and
     :class:`FlashClearMiddleware` deletes it from that response regardless,

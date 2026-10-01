@@ -12,10 +12,10 @@ allowlist: it must stay empty of data.
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import time
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -26,7 +26,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from core.ephemeris.identity import EphemerisIdentity
 from core.types.computation import ComputationConfig
-from shell.config import Environment, ReportRunMode, Settings
+from shell.config import Environment, Settings
 from shell.http import app as shell_http_app
 from shell.http.app import (
     app,
@@ -36,6 +36,7 @@ from shell.http.app import (
     get_session,
 )
 from shell.http.auth import SESSION_COOKIE_NAME, sign_session
+from shell.runner.driver import RunDriver
 
 #: Argon2 hash of "correct horse battery staple" — a fixed test password,
 #: never a real one.
@@ -234,62 +235,52 @@ def test_dispose_is_never_called_without_entering_the_lifespan(
     assert dispose_calls == []
 
 
-# --- The background scheduler task (Story 3.11) --------------------------------
+# --- The RunDriver (Story 10.4, AD-20) ------------------------------------------
 
 
-def test_scheduler_task_does_not_exist_before_the_lifespan_is_entered() -> None:
-    """`start_scheduler` runs inside `_lifespan`, before `yield` -- a bare
-    `create_app(...)` with no `with` must never set `scheduler_task` at all,
-    mirroring `test_dispose_is_never_called_without_entering_the_lifespan`."""
-    background_settings = dataclasses.replace(LOCAL, report_run_mode=ReportRunMode.BACKGROUND)
-    application = create_app(background_settings)
+class _SpyDriver:
+    """Stands in for the app's ``RunDriver``: records the order of lifecycle calls."""
 
-    assert not hasattr(application.state, "scheduler_task")
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def resume(self) -> None:
+        self._events.append("resume")
+
+    def stop(self) -> None:
+        self._events.append("stop")
+
+    def start(self, run_id: object) -> None:
+        self._events.append("start")
 
 
-def test_scheduler_task_is_none_in_poll_mode_even_once_the_lifespan_is_entered() -> None:
-    """`REPORT_RUN_MODE` defaults to `poll` (`LOCAL`) -- entering the lifespan
-    must never start a scheduler task in that mode."""
+def test_the_run_driver_exists_from_create_app_but_is_resumed_only_by_the_lifespan() -> None:
+    """Routes reach the driver off `application.state` from the first request, but
+    `resume()` runs inside `_lifespan` -- a bare `create_app(...)` starts nothing."""
     application = create_app(LOCAL)
 
-    with TestClient(application):
-        assert application.state.scheduler_task is None
+    assert isinstance(application.state.run_driver, RunDriver)
+    assert not application.state.run_driver.is_driving(uuid4())
 
 
-def test_scheduler_task_is_created_only_once_the_lifespan_is_entered_in_background_mode() -> None:
-    background_settings = dataclasses.replace(LOCAL, report_run_mode=ReportRunMode.BACKGROUND)
-    application = create_app(background_settings)
-
-    with TestClient(application):
-        task = application.state.scheduler_task
-        assert isinstance(task, asyncio.Task)
-        assert not task.done()
-
-    # The `with` block's exit runs the lifespan's shutdown path
-    # (`await stop_scheduler(application)`) to completion before returning --
-    # by now the task has been cancelled and awaited.
-    assert task.cancelled()
-
-
-def test_scheduler_task_is_cancelled_before_the_engine_is_disposed_in_background_mode(
+def test_the_lifespan_resumes_the_driver_then_stops_it_before_the_engine_is_disposed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`await stop_scheduler(application)` must run to completion -- task
-    cancelled *and* awaited -- before `application.state.engine.dispose()`."""
-    background_settings = dataclasses.replace(LOCAL, report_run_mode=ReportRunMode.BACKGROUND)
-    application = create_app(background_settings)
-    engine = application.state.engine
-    captured: dict[str, bool] = {}
-
-    def _spy_dispose() -> None:
-        captured["task_was_already_cancelled"] = application.state.scheduler_task.cancelled()
-
-    monkeypatch.setattr(engine, "dispose", _spy_dispose)
+    application = create_app(LOCAL)
+    events: list[str] = []
+    application.state.run_driver = _SpyDriver(events)
+    monkeypatch.setattr(application.state.engine, "dispose", lambda: events.append("dispose"))
 
     with TestClient(application):
-        pass
+        assert events == ["resume"]
 
-    assert captured["task_was_already_cancelled"] is True
+    assert events == ["resume", "stop", "dispose"]
+
+
+def test_the_driver_is_built_with_the_configured_generation_concurrency() -> None:
+    application = create_app(dataclasses.replace(LOCAL, generation_concurrency=3))
+
+    assert application.state.run_driver._generation._max_workers == 3
 
 
 # --- Ephemeris identity: asserted at import time, before anything is served --

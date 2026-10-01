@@ -2,7 +2,7 @@
 aloud on a call (Story 4.6, AD-6).
 
 The one and only place a ``GeneratedDraft``'s cited sentences are turned into
-continuous prose or a dated list -- ``shell/runner/driver.py``'s
+continuous prose or a dated list -- ``shell/runner/advance.py``'s
 ``draft_ready`` stage persists the raw, cited structure verbatim
 (``shell/adapters/postgres/report_draft.py``); rendering happens here, at
 view time, in ``shell/http/`` (mirrors ``shell/http/payload_view.py``'s own
@@ -83,7 +83,7 @@ SECTION_TITLES: dict[str, str] = {
 
 #: The date field that names "the day" for one day-list entry, keyed by the
 #: entry's own ``"kind"`` tag (``core/payload/freeze.py``'s ``_tag_event``,
-#: reused verbatim by ``shell/runner/driver.py``'s own event tagging): an
+#: reused verbatim by ``shell/runner/advance.py``'s own event tagging): an
 #: Aspect Perfection's ``perfected_at`` (the only kind ``project_day_lists()``
 #: admits with a non-``None`` one), a Lunation's ``occurred_at``, a
 #: Station's ``station_at``.
@@ -98,7 +98,7 @@ def deserialize_generated_draft(stored: dict[str, Any]) -> GeneratedDraft:
     """The reverse of ``shell/adapters/postgres/report_draft.py``'s own
     ``_json_safe`` encoding: ``ReportDraft.draft`` (JSON, verbatim) back into
     a real ``GeneratedDraft`` -- read back, never recomputed, mirroring
-    ``shell/runner/driver.py``'s own "read back" pattern for every other
+    ``shell/runner/advance.py``'s own "read back" pattern for every other
     stage's stored output.
     """
     return GeneratedDraft(

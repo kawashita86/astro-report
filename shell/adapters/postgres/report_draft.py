@@ -1,7 +1,7 @@
 """``ReportDraft``: the immutable, persisted form of one ``ReportRun``'s
 Generator output (Story 4.6, AD-3/AD-6).
 
-Written by ``store_report_draft()`` from ``shell/runner/driver.py``'s
+Written by ``store_report_draft()`` from ``shell/runner/advance.py``'s
 ``draft_ready`` stage -- never updated, never deleted except as part of the
 FR-29 Client-deletion cascade (``shell/adapters/postgres/client.py``).
 ``draft`` stores the raw ``GeneratedDraft`` verbatim (eight Sections of cited
@@ -75,8 +75,8 @@ class ReportDraft(SQLModel, table=True):
     report_run_id: UUID = Field(foreign_key="report_run.id", index=True)
     # Which regeneration attempt produced this row (Story 5.4) -- `0` for
     # the first, never-regenerated draft, incrementing by one each time
-    # `shell/runner/driver.py::advance()` regenerates after a Groundedness
-    # Gate failure. Tagged by `_run_draft_ready` with `run.regeneration_count`
+    # `shell/runner/advance.py::advance()` regenerates after a Groundedness
+    # Gate failure. Tagged by `assemble_draft` with `run.regeneration_count`
     # at persist time.
     attempt: int = Field(default=0)
     style_guide_version: int
@@ -134,7 +134,7 @@ def next_report_draft_attempt(session: Session, run_id: UUID) -> int:
     5.8 amendment).
 
     Replaces ``run.regeneration_count`` as the source both
-    ``shell/runner/driver.py``'s ``_run_draft_ready`` and
+    ``shell/runner/advance.py``'s ``assemble_draft`` and
     ``shell/http/routes/report_runs.py``'s hand-correction route agree on for
     "what attempt number comes next" -- the two coincide for the automatic
     path (a regeneration always mints exactly one new ``ReportDraft`` row per
@@ -166,7 +166,7 @@ def store_report_draft(
     ``attempt``, in one flush.
 
     ``attempt`` defaults to ``0`` (the first, never-regenerated draft);
-    ``shell/runner/driver.py``'s ``_run_draft_ready`` and
+    ``shell/runner/advance.py``'s ``assemble_draft`` and
     ``shell/http/routes/report_runs.py``'s hand-correction route both always
     pass ``next_report_draft_attempt(session, run.id)`` explicitly (Story
     5.4, amended by Story 5.8 to no longer read ``run.regeneration_count``
@@ -177,7 +177,7 @@ def store_report_draft(
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``store_report_theme()``
     (``shell/adapters/postgres/report_theme.py``), so it never decides the
-    caller's transaction boundary. ``shell/runner/driver.py::advance()``
+    caller's transaction boundary. ``shell/runner/advance.py::advance()``
     commits once this and the rest of the ``draft_ready`` stage have
     succeeded.
     """

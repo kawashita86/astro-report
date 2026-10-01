@@ -2,7 +2,7 @@
 purely-derived ``ReportTheme`` (Story 4.3, AD-14).
 
 Written exactly once per ``ReportRun``, by ``store_report_theme()`` from
-``shell/runner/driver.py``'s ``payload_ready`` stage, right after
+``shell/runner/advance.py``'s ``payload_ready`` stage, right after
 ``store_report_payload()`` -- never updated, never deleted except as part of
 the FR-29 Client-deletion cascade (``shell/adapters/postgres/client.py``).
 Mirrors ``ReportPayload``'s own shape and immutability guard: a Client's
@@ -49,7 +49,7 @@ class StoredReportTheme(SQLModel, table=True):
     # `unique=True` is this story's "exactly one StoredReportTheme per
     # ReportRun", enforced at the schema level -- not merely by
     # `store_report_theme()` only ever being called once per `ReportRun` in
-    # `shell/runner/driver.py`'s `payload_ready` stage.
+    # `shell/runner/advance.py`'s `payload_ready` stage.
     report_run_id: UUID = Field(foreign_key="report_run.id", unique=True, index=True)
     # `sa_column=Column(...)` bypasses SQLModel's usual inference of
     # `nullable` from the type annotation, so `nullable=False` must be given
@@ -83,7 +83,7 @@ def _json_safe(value: Any) -> Any:
     Recursive, like ``core/payload/freeze.py``'s own ``_json_safe`` (not
     imported -- that module lives in ``core/``; this small serializer lives
     here instead, matching how ``shell/adapters/postgres/client.py`` and
-    ``shell/runner/driver.py`` each already own a small ``_json_safe`` of
+    ``shell/runner/advance.py`` each already own a small ``_json_safe`` of
     their own rather than sharing one).
     """
     if isinstance(value, Decimal):
@@ -140,7 +140,7 @@ def store_report_theme(
     This function only ``add()``s and ``flush()``es -- it never commits or
     rolls back, exactly like ``store_report_payload()``
     (``shell/adapters/postgres/report_payload.py``), so it never decides the
-    caller's transaction boundary. ``shell/runner/driver.py::advance()``
+    caller's transaction boundary. ``shell/runner/advance.py::advance()``
     commits once this and the rest of the ``payload_ready`` stage have
     succeeded.
     """

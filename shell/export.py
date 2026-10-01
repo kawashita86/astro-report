@@ -6,7 +6,7 @@ The only function anywhere in this codebase that reads a persisted
 exportable result -- enforced by a static AST scan
 (``tests/test_export_boundary.py``), not merely by convention. A ``Report``
 row is written only on a passing Groundedness Gate result
-(``shell/runner/driver.py``'s ``gate_passed`` stage), so refusing when no row
+(``shell/runner/advance.py``'s ``gate_passed`` stage), so refusing when no row
 exists for ``report_id`` is also how "the Gate has not passed" refuses
 export -- there is no separate "gate not passed" check here, because the
 row's mere existence already encodes it.

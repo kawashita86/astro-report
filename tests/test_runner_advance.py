@@ -1,4 +1,4 @@
-"""``shell/runner/driver.py::drive()`` -- Story 3.5's own I/O & Edge-Case
+"""``shell/runner/advance.py::advance()`` -- Story 3.5's own I/O & Edge-Case
 Matrix rows for advancing a ``ReportRun``, extended by Story 3.8's own row
 for ``payload_ready``, Story 4.6's own row for ``draft_ready``, and
 ``_deserialize_transit_events``'s round trip.
@@ -12,10 +12,11 @@ of the five registered stages (``natal_ready``, ``transits_ready``,
 ``payload_ready``, ``gate_passed``) call real ``core/`` code -- only the
 *failure* scenarios below inject a fake stage function, mirroring the
 story's own Design Notes ("no live external call demonstrates the backoff").
-``draft_ready`` is the one stage with a genuine external call (the Generator
-port), so every test here drives it through ``_FakeGenerator`` rather than a
-real Gemini call -- ``tests/test_report_draft_store.py`` covers the
-persisted row's own shape, and the Gemini adapter has its own test module.
+``draft_ready`` has no stage function since Story 10.4: the ``RunDriver``
+writes the Sections and ``assemble_draft`` completes the stage. ``_drive`` below
+emulates that synchronously (``_write_draft``, one ``generate_section`` call per
+Section through ``_FakeGenerator``) so these tests still reach ``gate_passed``;
+``tests/test_run_driver.py`` covers the real, threaded driver.
 
 Five real stages are now registered (Story 5.3 added ``gate_passed``), so a
 fresh, fully-successful ``drive()`` call -- with the clean, non-Claim-bearing
@@ -41,7 +42,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, create_engine, select
 
-import shell.runner.driver as driver_module
+import shell.runner.advance as driver_module
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.errors import GateFailedError
@@ -54,6 +55,10 @@ from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
 from shell.adapters.postgres.report_draft import _json_safe as _draft_json_safe
+from shell.adapters.postgres.report_draft_section import (
+    section_rows,
+    sentences_to_json,
+)
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.postgres.report_theme import StoredReportTheme
@@ -62,7 +67,14 @@ from shell.adapters.postgres.style_guide import create_style_guide_version
 from shell.computation import load_computation_config
 from shell.gate import DEFAULT_VOCABULARY_PATH, load_gate_vocabulary
 from shell.ports.generator import Generator, StyleGuideVersion
-from shell.runner.driver import _STAGE_FUNCTIONS, _deserialize_transit_events, advance
+from shell.runner.advance import (
+    _STAGE_FUNCTIONS,
+    _deserialize_transit_events,
+    advance,
+    assemble_draft,
+    load_generation_inputs,
+    open_draft_attempt,
+)
 from shell.sections import load_sections_config
 
 _EPHEMERIS_IDENTITY = verify_ephemeris_identity()
@@ -131,7 +143,7 @@ def _create_client_and_chart(session: Session):
 
 
 def _a_generated_draft() -> GeneratedDraft:
-    """A minimal, valid ``GeneratedDraft`` (Story 4.5) -- ``_run_draft_ready``
+    """A minimal, valid ``GeneratedDraft`` (Story 4.5) -- ``assemble_draft``
     persists whatever the ``Generator`` returns verbatim, so its own content
     is arbitrary here; only ``_FakeGenerator``'s recorded call arguments and
     ``ReportDraft.draft``'s round trip matter to these tests."""
@@ -149,19 +161,21 @@ def _a_generated_draft() -> GeneratedDraft:
 
 class _FakeGenerator:
     """A ``Generator`` (``shell/ports/generator.py``) test double: records
-    every call it receives (``payload``, ``style_guide``, ``theme_previous``,
-    ``theme_current``) and returns a fixed ``GeneratedDraft`` -- proves
-    ``_run_draft_ready``'s own orchestration without a real Gemini call,
-    mirroring this story's own Design Notes ("no live external call
-    demonstrates the backoff")."""
+    every Section call it receives and returns that Section of a fixed
+    ``GeneratedDraft``. ``calls`` holds ``(payload, style_guide,
+    theme_previous, theme_current)`` per call; ``sections`` the Section names."""
 
     def __init__(self, draft: GeneratedDraft | None = None) -> None:
         self._draft = draft if draft is not None else _a_generated_draft()
         self.calls: list[tuple[dict, StyleGuideVersion, object, object]] = []
+        self.sections: list[str] = []
 
-    def generate(self, payload, style_guide, theme_previous, theme_current):
+    def generate_section(
+        self, section, payload, style_guide, theme_previous, theme_current, written_sections=None
+    ):
         self.calls.append((payload, style_guide, theme_previous, theme_current))
-        return self._draft
+        self.sections.append(section)
+        return getattr(self._draft, section)
 
 
 #: A generous ceiling on how many ``advance()`` calls ``_drive`` will chain
@@ -173,6 +187,30 @@ class _FakeGenerator:
 _DRAIN_CAP = 60
 
 
+def _write_draft(session: Session, run: ReportRun, generator: Generator) -> bool:
+    """What the ``RunDriver`` does at ``payload_ready``, synchronously and without
+    threads: open the attempt, write all eight Sections in order, assemble the
+    ``ReportDraft``. Whether the draft was assembled."""
+    attempt = open_draft_attempt(session, run)
+    inputs = load_generation_inputs(session, run)
+    written: dict[str, tuple[Sentence, ...]] = {}
+    for row in section_rows(session, run.id, attempt):
+        sentences = generator.generate_section(
+            row.name,
+            inputs.payload,
+            inputs.style_guide,
+            inputs.theme_previous,
+            inputs.theme_current,
+            dict(written) if row.ordinal == 8 else None,
+        )
+        written[row.name] = sentences
+        row.status = "complete"
+        row.sentences = sentences_to_json(sentences)
+        session.add(row)
+    session.commit()
+    return assemble_draft(session, run, attempt)
+
+
 def _advance(
     session: Session,
     run: ReportRun,
@@ -180,9 +218,14 @@ def _advance(
     generator: Generator | None = None,
     natal_chart_id: UUID = _NATAL_CHART_ID,
 ):
-    """One ``advance()`` call -- at most one stage transition (AD-20, Story
-    3.10). Tests asserting exactly-one-transition semantics use this
-    directly; ``_drive`` below chains it to a fixed point."""
+    """One driver step -- at most one stage transition (AD-20, Story 3.10): the
+    ``draft_ready`` stage is ``_write_draft`` (the ``RunDriver``'s work, which
+    ``advance()`` itself no longer does), every other stage is ``advance()``.
+    Tests asserting exactly-one-transition semantics use this directly;
+    ``_drive`` below chains it to a fixed point."""
+    if run.stage == "payload_ready" and run.failed_at is None:
+        _write_draft(session, run, generator if generator is not None else _FakeGenerator())
+        return run
     return advance(
         session,
         run,
@@ -191,7 +234,6 @@ def _advance(
         config=_COMPUTATION_CONFIG,
         ephemeris_identity=_EPHEMERIS_IDENTITY,
         sections_config=_SECTIONS_CONFIG,
-        generator=generator if generator is not None else _FakeGenerator(),
         vocabulary=_VOCABULARY,
     )
 
@@ -203,27 +245,16 @@ def _drive(
     generator: Generator | None = None,
     natal_chart_id: UUID = _NATAL_CHART_ID,
 ):
-    """Drain ``advance()`` to a fixed point -- the end-to-end "run this to
+    """Drain ``_advance`` to a fixed point -- the end-to-end "run this to
     completion" harness the full-pipeline tests here (and
     ``tests/test_restore.py`` / ``tests/test_storage_growth_record.py`` /
-    ``tests/test_latency_record.py``) still rely on. Under AD-20 (Story 3.10)
-    ``advance()`` only moves one stage per call, so this loops it until
-    ``run.stage`` stops changing or the run is marked terminally failed."""
+    ``tests/test_latency_record.py``) rely on. Loops until ``run.stage`` stops
+    changing or the run is marked terminally failed."""
     if generator is None:
         generator = _FakeGenerator()
     for _ in range(_DRAIN_CAP):
         stage_before = run.stage
-        advance(
-            session,
-            run,
-            natal_chart=natal_chart,
-            natal_chart_id=natal_chart_id,
-            config=_COMPUTATION_CONFIG,
-            ephemeris_identity=_EPHEMERIS_IDENTITY,
-            sections_config=_SECTIONS_CONFIG,
-            generator=generator,
-            vocabulary=_VOCABULARY,
-        )
+        _advance(session, run, natal_chart, generator=generator, natal_chart_id=natal_chart_id)
         if run.failed_at is not None:
             return run
         if run.stage == stage_before:
@@ -791,7 +822,7 @@ def test_deserialize_theme_round_trips_an_empty_theme() -> None:
 def test_draft_ready_calls_the_generator_with_the_persisted_payload_style_guide_and_theme(
     session: Session,
 ) -> None:
-    """Acceptance Criteria/Boundaries: ``_run_draft_ready`` reads
+    """Acceptance Criteria/Boundaries: ``assemble_draft`` reads
     ``payload``/``theme_current`` back from ``ReportPayload``/
     ``StoredReportTheme`` -- never recomputes them -- calls the Generator
     with the Style Guide currently in force, and passes
@@ -806,7 +837,17 @@ def test_draft_ready_calls_the_generator_with_the_persisted_payload_style_guide_
     result = _drive(session, run, natal_chart, generator=generator)
 
     assert result.stage == "gate_passed"
-    assert len(generator.calls) == 1, "the Generator must be called exactly once"
+    assert len(generator.calls) == 8, "the Generator must be called once per Section"
+    assert generator.sections == [
+        "energia_generale",
+        "amore",
+        "lavoro",
+        "denaro",
+        "benessere",
+        "giorni_favorevoli",
+        "giorni_di_attenzione",
+        "consiglio_finale",
+    ]
     called_payload, called_style_guide, theme_previous, theme_current = generator.calls[0]
 
     stored_payload = session.exec(
@@ -845,7 +886,7 @@ def test_draft_ready_passes_the_most_recent_prior_report_theme_for_a_returning_c
     result = _drive(session, second_run, natal_chart, generator=generator)
 
     assert result.stage == "gate_passed"
-    assert len(generator.calls) == 1
+    assert len(generator.calls) == 8
     _, _, theme_previous, _ = generator.calls[0]
     assert theme_previous == expected_theme_previous
 
@@ -1096,7 +1137,7 @@ def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
     a failing ``GateResult`` -- proven directly, not only through
     ``drive()``'s regeneration handling. The fixture calls every earlier
     stage function directly, in sequence, real ``core/`` code and all --
-    ending with ``_run_draft_ready`` against a violating draft -- to reach
+    ending with ``_write_draft`` against a violating draft -- to reach
     exactly the state ``_run_gate_passed`` needs (a persisted ``ReportDraft``
     and ``ReportPayload`` for ``run``, at ``draft_ready``) without going
     through ``drive()`` or touching ``_STAGE_FUNCTIONS`` at all."""
@@ -1111,7 +1152,6 @@ def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
         driver_module._run_natal_ready,
         driver_module._run_transits_ready,
         driver_module._run_payload_ready,
-        driver_module._run_draft_ready,
     ):
         stage_fn(
             session,
@@ -1120,13 +1160,13 @@ def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
             _COMPUTATION_CONFIG,
             _EPHEMERIS_IDENTITY,
             _SECTIONS_CONFIG,
-            generator,
             _VOCABULARY,
         )
         session.commit()
-    run.stage = "draft_ready"
+    run.stage = "payload_ready"
     session.add(run)
     session.commit()
+    assert _write_draft(session, run, generator)
     assert run.stage == "draft_ready", "fixture did not stop at draft_ready -- test is vacuous"
 
     with pytest.raises(GateFailedError) as caught:
@@ -1137,7 +1177,6 @@ def test_run_gate_passed_raises_gate_failed_error_on_a_failing_gate_result(
             _COMPUTATION_CONFIG,
             _EPHEMERIS_IDENTITY,
             _SECTIONS_CONFIG,
-            generator,
             _VOCABULARY,
         )
 
@@ -1202,9 +1241,11 @@ def test_gate_passed_regenerates_and_advances_once_a_later_attempt_passes(
         def __init__(self) -> None:
             self.calls = 0
 
-        def generate(self, payload, style_guide, theme_previous, theme_current):
-            self.calls += 1
-            return _a_two_violation_generated_draft() if self.calls == 1 else _a_generated_draft()
+        def generate_section(self, section, *args, **kwargs):
+            if section == "energia_generale":  # first Section of each draft
+                self.calls += 1
+            draft = _a_two_violation_generated_draft() if self.calls == 1 else _a_generated_draft()
+            return getattr(draft, section)
 
     generator = _ViolatesOnceThenCleanGenerator()
 
@@ -1452,11 +1493,12 @@ def test_gate_passed_low_violation_short_circuit_applies_after_a_prior_regenerat
         def __init__(self) -> None:
             self.calls = 0
 
-        def generate(self, payload, style_guide, theme_previous, theme_current):
-            self.calls += 1
+        def generate_section(self, section, *args, **kwargs):
+            if section == "energia_generale":  # first Section of each draft
+                self.calls += 1
             if self.calls == 1:
-                return _a_two_violation_generated_draft()
-            return _a_violating_generated_draft()
+                return getattr(_a_two_violation_generated_draft(), section)
+            return getattr(_a_violating_generated_draft(), section)
 
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
@@ -1541,8 +1583,7 @@ def test_gate_passed_pass_path_flush_failure_leaves_run_recoverable(
     # half-written survives.
     assert session.exec(select(Report).where(Report.report_run_id == run.id)).all() == []
     assert (
-        session.exec(select(StoredGateResult).where(StoredGateResult.report_run_id == run.id))
-        .all()
+        session.exec(select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)).all()
         == []
     )
 
@@ -1603,9 +1644,10 @@ def test_gate_failed_error_path_survives_a_gate_result_flush_failure(
     assert result.stage_failure_count == 0
     assert result.failed_at is None
     assert "failed to persist a failing gate_result" in caplog.text
-    assert session.exec(
-        select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)
-    ).all() == []
+    assert (
+        session.exec(select(StoredGateResult).where(StoredGateResult.report_run_id == run.id)).all()
+        == []
+    )
 
     monkeypatch.undo()
 
@@ -1761,71 +1803,36 @@ def test_a_pre_existing_report_payload_row_makes_payload_ready_a_completed_stage
     assert all(record.levelno < logging.ERROR for record in caplog.records)
 
 
-def test_a_pre_existing_report_draft_row_makes_draft_ready_a_completed_stage(
-    session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """retro-C items 26/44, ``draft_ready`` variant: a concurrent
-    ``advance()`` already wrote ``ReportDraft (run, attempt=0)``
-    (``ix_report_draft_report_run_id_attempt``). Our poll re-runs
-    ``draft_ready`` at the same attempt, hits the ``IntegrityError``, and
-    recognises the completed stage without a ``with_backoff`` retry -- and,
-    critically, without a second paid ``generator.generate()`` call. One
-    ``advance()`` call asserts exactly this.
-
-    Story 5.8 amendment: ``_run_draft_ready`` now tags the persisted
-    ``ReportDraft`` with ``next_report_draft_attempt(session, run.id)`` -- a
-    fresh count of existing rows read from the database at call time -- not
-    ``run.regeneration_count`` read from a possibly-stale in-memory ``run``.
-    That means the *count itself* self-heals across the race this test
-    exercises (our poll's own query would see the concurrent winner's
-    already-committed row and correctly compute attempt=1, never colliding).
-    The genuine race this test is about is two callers computing that count
-    from the database at the same instant, before either has committed --
-    simulated here by monkeypatching ``next_report_draft_attempt`` to always
-    return ``0``, exactly the value both concurrent callers would compute if
-    neither had committed yet, so this poll's own insert still collides with
-    the winner's already-committed ``attempt=0`` row."""
-    monkeypatch.setitem(
-        driver_module._STAGE_BACKOFF_OVERRIDES,
-        "draft_ready",
-        {"max_attempts": 3, "base_delay_seconds": 0.0},
-    )
+def test_assembling_a_draft_twice_changes_nothing_the_second_time(session: Session) -> None:
+    """Two callers racing to assemble one attempt (two drivers, or a restart): the
+    loser changes nothing -- not by the run having moved on, and not (the genuine
+    race) by colliding on the unique ``(run, attempt)`` index of ``ReportDraft``."""
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
     session.commit()
+    for _ in range(3):
+        _advance(session, run, natal_chart)
+    assert run.stage == "payload_ready"
 
-    # The concurrent winner: a full, clean drain that commits
-    # ReportDraft(attempt=0).
-    _drive(session, run, natal_chart)
-    assert run.stage == "gate_passed"
+    assert _write_draft(session, run, _FakeGenerator()) is True
+    assert run.stage == "draft_ready"
 
-    # Our own poll still sees the pre-race stage in memory, so it re-enters
-    # draft_ready -- and, simulating the race, still computes attempt 0 too
-    # (see the docstring above).
-    run.stage = "payload_ready"
-    monkeypatch.setattr(driver_module, "next_report_draft_attempt", lambda session, run_id: 0)
-    generator = _FakeGenerator()
+    # The run has moved on: the loser sees that and does nothing.
+    assert assemble_draft(session, run, 0) is False
+    assert run.stage == "draft_ready"
 
-    with caplog.at_level(logging.INFO, logger=driver_module._logger.name):
-        result = _advance(session, run, natal_chart, generator=generator)
-
-    assert len(generator.calls) == 1, "the stage calls the generator exactly once, before the flush"
-    assert result.stage == "gate_passed"
-    assert result.stage_failure_count == 0
-    assert result.regeneration_count == 0
-    assert result.failed_at is None
+    # The genuine race: the loser still believes the stage is `payload_ready`.
+    session.execute(text("UPDATE report_run SET stage = 'payload_ready'"))
+    session.commit()
+    assert assemble_draft(session, run, 0) is False
+    session.refresh(run)
+    assert run.stage == "payload_ready"
+    assert run.stage_failure_count == 0
+    assert run.failed_at is None
     assert (
         len(session.exec(select(ReportDraft).where(ReportDraft.report_run_id == run.id)).all()) == 1
     )
-    info_records = [
-        record
-        for record in caplog.records
-        if record.levelno == logging.INFO
-        and "already completed by a concurrent advance" in record.getMessage()
-    ]
-    assert len(info_records) == 1
-    assert all(record.levelno < logging.ERROR for record in caplog.records)
 
 
 def test_an_integrity_error_without_a_stage_advance_is_recorded_as_a_stage_failure(
@@ -2026,132 +2033,71 @@ def test_deserialize_generated_draft_round_trips_an_empty_draft() -> None:
     assert deserialized == draft
 
 
-# --- Story 4.8: persistent draft_ready failure marks the run terminally failed --
+# --- Story 4.8: a persistently failing stage marks the run terminally failed ---
+# (the draft_ready variants moved to tests/test_run_driver.py with Story 10.4:
+# a Section's failures are bounded by MAX_SECTION_ATTEMPTS in the RunDriver)
 
 
-class _AlwaysFailingGenerator:
-    """A ``Generator`` (``shell/ports/generator.py``) test double whose
-    ``generate()`` always raises -- proves Story 4.8's persistent-failure
-    path (a rate limit that never clears) without a real Gemini call."""
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def generate(self, payload, style_guide, theme_previous, theme_current):
-        self.calls += 1
-        raise RuntimeError("simulated persistent rate limit")
-
-
-def test_draft_ready_failing_max_stage_failures_drive_calls_marks_the_run_terminally_failed(
-    session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """I/O & Edge-Case Matrix: "Persistent draft_ready failure across many
-    polls" -- the Gemini call always raises; drive() is called
-    ``_MAX_STAGE_FAILURES`` times; the last call sets failed_at/failure_reason
-    and the run never advances past payload_ready.
-
-    ``draft_ready``'s real override (``base_delay_seconds=2.0``,
-    ``tests/test_runner_backoff.py`` proves the schedule mechanism itself) is
-    swapped for a zero-delay one here, so this behavioral test --
-    ``_MAX_STAGE_FAILURES`` consecutive ``drive()`` calls -- doesn't spend
-    the real ~6s/call ``with_backoff`` would otherwise sleep;
-    ``max_attempts`` (the thing this test's failure count depends on) is
-    left unchanged.
-    """
-    monkeypatch.setitem(
-        driver_module._STAGE_BACKOFF_OVERRIDES,
-        "draft_ready",
-        {"max_attempts": 3, "base_delay_seconds": 0.0},
-    )
-    client, natal_chart = _create_client_and_chart(session)
-    run = ReportRun(client_id=client.id, month="2026-01")
-    session.add(run)
-    session.commit()
-
-    generator = _AlwaysFailingGenerator()
-    for _ in range(driver_module._MAX_STAGE_FAILURES - 1):
-        _drive(session, run, natal_chart, generator=generator)
-        assert run.stage == "payload_ready"
-        assert run.failed_at is None
-
-    result = _drive(session, run, natal_chart, generator=generator)
-
-    assert result.stage == "payload_ready"
-    assert result.stage_failure_count == driver_module._MAX_STAGE_FAILURES
-    assert result.failed_at is not None
-    assert result.failure_reason is not None
-    assert "draft_ready" in result.failure_reason
-
-
-def test_a_failed_run_is_a_noop_on_drive(
-    session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_failed_run_is_a_noop_on_drive(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     """I/O & Edge-Case Matrix: "Polling a failed run" -- once
-    ``run.failed_at`` is set, ``drive()`` does nothing further: no stage
-    function runs, nothing about the run changes. A zero-delay draft_ready
-    override keeps the fixture's failing drive() calls fast, mirroring
-    the previous test's own reasoning."""
-    monkeypatch.setitem(
-        driver_module._STAGE_BACKOFF_OVERRIDES,
-        "draft_ready",
-        {"max_attempts": 3, "base_delay_seconds": 0.0},
-    )
-    client, natal_chart = _create_client_and_chart(session)
-    run = ReportRun(client_id=client.id, month="2026-01")
-    session.add(run)
-    session.commit()
-
-    generator = _AlwaysFailingGenerator()
-    for _ in range(driver_module._MAX_STAGE_FAILURES):
-        _drive(session, run, natal_chart, generator=generator)
-    assert run.failed_at is not None, "fixture did not fail the run -- test is vacuous"
-    failed_at_before = run.failed_at
-    failure_reason_before = run.failure_reason
-    calls_before = generator.calls
-
-    result = _drive(session, run, natal_chart, generator=generator)
-
-    assert result is run
-    assert result.failed_at == failed_at_before
-    assert result.failure_reason == failure_reason_before
-    assert result.stage == "payload_ready"
-    assert generator.calls == calls_before, "the Generator must not be called on a failed run"
-
-
-def test_draft_ready_failing_then_succeeding_resets_the_failure_counter(
-    session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """I/O & Edge-Case Matrix: "Transient draft_ready failure, then success"
-    -- a fail-once-then-succeed Generator still advances the run to
-    draft_ready within one drive() call (with_backoff's own retry), and
-    ``stage_failure_count`` resets to 0. A zero-delay draft_ready override
-    avoids the one real 2s sleep this fixture would otherwise wait through."""
-    monkeypatch.setitem(
-        driver_module._STAGE_BACKOFF_OVERRIDES,
-        "draft_ready",
-        {"max_attempts": 3, "base_delay_seconds": 0.0},
-    )
+    ``run.failed_at`` is set, nothing further happens: no stage function runs,
+    nothing about the run changes."""
     client, natal_chart = _create_client_and_chart(session)
     run = ReportRun(client_id=client.id, month="2026-01")
     session.add(run)
     session.commit()
 
     calls: list[int] = []
-    real_draft = _a_generated_draft()
 
-    class _FailsOnceThenSucceeds:
-        def generate(self, payload, style_guide, theme_previous, theme_current):
-            calls.append(1)
-            if len(calls) == 1:
-                raise RuntimeError("simulated transient failure")
-            return real_draft
+    def _always_fail(*args, **kwargs):
+        calls.append(1)
+        raise RuntimeError("simulated permanent failure")
 
-    result = _drive(session, run, natal_chart, generator=_FailsOnceThenSucceeds())
+    monkeypatch.setitem(_STAGE_FUNCTIONS, "natal_ready", _always_fail)
+    for _ in range(driver_module._MAX_STAGE_FAILURES):
+        _drive(session, run, natal_chart)
+    assert run.failed_at is not None, "fixture did not fail the run -- test is vacuous"
+    failed_at_before = run.failed_at
+    failure_reason_before = run.failure_reason
+    calls_before = len(calls)
 
-    assert len(calls) == 2, "the Generator must have been retried by with_backoff"
-    assert result.stage == "gate_passed"
-    assert result.stage_failure_count == 0
-    assert result.failed_at is None
+    result = _drive(session, run, natal_chart)
+
+    assert result is run
+    assert result.failed_at == failed_at_before
+    assert result.failure_reason == failure_reason_before
+    assert result.stage is None
+    assert len(calls) == calls_before, "no stage function may run on a failed run"
+
+
+def test_advance_stops_at_payload_ready_because_the_driver_owns_draft_ready(
+    session: Session,
+) -> None:
+    """Story 10.4: ``draft_ready`` has no stage function -- ``advance()`` on a run at
+    ``payload_ready`` returns it unchanged, committing nothing."""
+    client, natal_chart = _create_client_and_chart(session)
+    run = ReportRun(client_id=client.id, month="2026-01")
+    session.add(run)
+    session.commit()
+    for _ in range(3):
+        _advance(session, run, natal_chart)
+    assert run.stage == "payload_ready"
+    updated_at_before = run.updated_at
+
+    result = advance(
+        session,
+        run,
+        natal_chart=natal_chart,
+        natal_chart_id=_NATAL_CHART_ID,
+        config=_COMPUTATION_CONFIG,
+        ephemeris_identity=_EPHEMERIS_IDENTITY,
+        sections_config=_SECTIONS_CONFIG,
+        vocabulary=_VOCABULARY,
+    )
+
+    assert result.stage == "payload_ready"
+    assert result.updated_at == updated_at_before
+    assert "draft_ready" not in _STAGE_FUNCTIONS
 
 
 def test_a_stage_other_than_draft_ready_failing_persistently_also_reaches_terminal_failure(
@@ -2210,7 +2156,7 @@ def test_advance_moves_the_run_forward_exactly_one_stage_per_call(session: Sessi
         if stage_name in ("natal_ready", "transits_ready", "payload_ready"):
             assert generator.calls == [], "the Generator must not be touched before draft_ready"
 
-    assert len(generator.calls) == 1, "the Generator is called once, on the draft_ready poll"
+    assert len(generator.calls) == 8, "one Generator call per Section, on the draft_ready step"
 
     # A further call does not chain past gate_passed into exported (no
     # registered function) -- it returns the current stage unchanged.
@@ -2240,7 +2186,7 @@ def test_a_poll_that_runs_draft_ready_calls_the_generator_once_and_stops_there(
     result = _advance(session, run, natal_chart, generator=generator)
 
     assert result.stage == "draft_ready"
-    assert len(generator.calls) == 1
+    assert len(generator.calls) == 8
     # gate_passed did not also run in this call.
     assert session.exec(select(Report).where(Report.report_run_id == run.id)).all() == []
 

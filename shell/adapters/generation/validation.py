@@ -29,9 +29,6 @@ __all__ = [
     "_DATE_TOKEN_SECTIONS",
     "_SECTION_FIELD_NAMES",
     "_collect_known_entry_ids",
-    "_validate_citations",
-    "_validate_day_list_coverage",
-    "_validate_no_date_tokens",
     "_validate_section_citations",
     "_validate_section_day_list_coverage",
     "_validate_section_no_date_tokens",
@@ -142,11 +139,6 @@ def _validate_section_citations(
                 )
 
 
-def _validate_citations(draft: GeneratedDraft, payload: dict[str, Any]) -> None:
-    for field in dataclass_fields(draft):
-        _validate_section_citations(field.name, getattr(draft, field.name), payload)
-
-
 def _validate_section_no_date_tokens(section: str, sentences: tuple[Sentence, ...]) -> None:
     if section not in _DATE_TOKEN_SECTIONS:
         return
@@ -158,11 +150,6 @@ def _validate_section_no_date_tokens(section: str, sentences: tuple[Sentence, ..
                 "date-shaped token; dates in this Section are code-projected "
                 "upstream (Story 3.7) and must never be written by the model.",
             )
-
-
-def _validate_no_date_tokens(draft: GeneratedDraft) -> None:
-    for section in _DATE_TOKEN_SECTIONS:
-        _validate_section_no_date_tokens(section, getattr(draft, section))
 
 
 def _validate_section_day_list_coverage(
@@ -199,8 +186,3 @@ def _validate_section_day_list_coverage(
             "payload['day_lists'] must be described by at least one sentence in "
             "its own Section.",
         )
-
-
-def _validate_day_list_coverage(draft: GeneratedDraft, payload: dict[str, Any]) -> None:
-    for section in _DATE_TOKEN_SECTIONS:
-        _validate_section_day_list_coverage(section, getattr(draft, section), payload)

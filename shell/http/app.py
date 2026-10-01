@@ -25,6 +25,7 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from functools import cache
 from pathlib import Path
 from urllib.parse import parse_qsl
 
@@ -55,7 +56,8 @@ from shell.http.auth import (
     verify_password,
 )
 from shell.http.flash import FlashClearMiddleware
-from shell.runner.scheduler import start_scheduler, stop_scheduler
+from shell.runner.driver import RunDriver
+from shell.runner.generators import generator_for_settings
 from shell.sections import load_sections_config
 
 __all__ = [
@@ -88,13 +90,13 @@ _MAX_LOGIN_BODY_BYTES = 4096
 #: connection or a stuck statement can hold a pool slot. Without them a
 #: single uvicorn worker on Coolify exhausted the whole pool (SQLAlchemy's
 #: default 5 + 10 overflow): checkouts that never came back starved every
-#: request and every scheduler tick with ``QueuePool limit ... reached``.
+#: request and every driver loop with ``QueuePool limit ... reached``.
 #: ``pool_recycle`` only replaces aged connections at checkout, it does not
 #: free a stuck one. Operational tuning, not deployment facts, so they live
 #: here rather than in ``Settings``. ``statement_timeout`` bounds a single
 #: statement only -- deliberately no ``idle_in_transaction_session_timeout``:
-#: the ``draft_ready`` stage holds its transaction (and advisory lock) open
-#: across the Gemini call.
+#: the ``RunDriver`` ends its transactions before waiting on a Section's
+#: Gemini call.
 _DB_CONNECT_TIMEOUT_SECONDS = 10
 _DB_STATEMENT_TIMEOUT_MS = 30_000
 _DB_POOL_RECYCLE_SECONDS = 300
@@ -147,29 +149,22 @@ def get_session(request: Request) -> Iterator[Session]:
 
 @asynccontextmanager
 async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Start/stop the ``background``-mode scheduler around the request-serving
-    period, and dispose the app's engine on shutdown (Story 3.11).
+    """Resume the ``RunDriver`` around the request-serving period, and dispose the
+    app's engine on shutdown (AD-20).
 
-    Reads ``application.state.engine`` off ``application`` rather than closing
-    over a local variable. That attribute is assigned synchronously inside
-    ``create_app()`` before the app is ever handed to an ASGI server, so it is
-    already set by the time this lifespan is invoked at all -- both before
-    ``yield`` (startup) and after it (shutdown), not merely by the time this
-    generator resumes post-``yield``.
+    Reads ``application.state`` rather than closing over a local variable. Both
+    ``engine`` and ``run_driver`` are assigned synchronously inside ``create_app()``
+    before the app is ever handed to an ASGI server, so they are already set by the
+    time this lifespan is invoked.
 
-    ``start_scheduler(application)`` (``shell/runner/scheduler.py``) runs
-    before ``yield`` -- mirroring where ``application.state.engine`` is
-    already set, in ``create_app``, not here -- so a ``REPORT_RUN_MODE=background``
-    deployment begins ticking ``advance()`` for every incomplete
-    ``ReportRun`` as soon as the app starts serving. ``await
-    stop_scheduler(application)`` runs after ``yield``, before
-    ``application.state.engine.dispose()``: the scheduler task must be fully
-    cancelled and awaited before the engine it uses is disposed, or a tick in
-    flight could touch a disposed engine.
+    ``resume()`` runs before ``yield``: every run left incomplete by a previous
+    process is picked up again. ``stop()`` runs after ``yield``, before
+    ``application.state.engine.dispose()`` -- the driver must have stopped starting
+    work before the engine its loops use is disposed.
     """
-    start_scheduler(application)
+    application.state.run_driver.resume()
     yield
-    await stop_scheduler(application)
+    application.state.run_driver.stop()
     application.state.engine.dispose()
 
 
@@ -215,6 +210,15 @@ def create_app(settings: Settings) -> FastAPI:
     application.state.sections_config = sections_config
     application.state.ephemeris_identity = ephemeris_identity
     application.state.gate_vocabulary = gate_vocabulary
+    application.state.run_driver = RunDriver(
+        engine=application.state.engine,
+        config=computation_config,
+        ephemeris_identity=ephemeris_identity,
+        sections_config=sections_config,
+        vocabulary=gate_vocabulary,
+        generator=cache(lambda: generator_for_settings(settings)),
+        concurrency=settings.generation_concurrency,
+    )
     application.add_middleware(AuthMiddleware)
     application.add_middleware(FlashClearMiddleware)
     application.include_router(clients_router)
@@ -331,15 +335,15 @@ computation_config: ComputationConfig = load_computation_config()
 
 #: The declarative Section-to-Payload mapping (AD-13), loaded once at import
 #: time exactly like ``computation_config``. Story 3.8's ``payload_ready``
-#: stage (``shell/runner/driver.py``) is the first consumer, via
-#: ``shell/http/routes/report_runs.py``'s ``_advance_run``.
+#: stage (``shell/runner/advance.py``) is the first consumer, via the
+#: ``RunDriver`` built in ``create_app``.
 sections_config: SectionsConfig = load_sections_config()
 
 #: The versioned closed Italian vocabulary that decides what counts as a
 #: Claim (Story 5.1, AD-8), loaded once at import time exactly like
-#: ``computation_config``/``sections_config``. ``shell/runner/driver.py``'s
-#: ``gate_passed`` stage (via ``shell/http/routes/report_runs.py``'s
-#: ``_advance_run``) is the first consumer.
+#: ``computation_config``/``sections_config``. ``shell/runner/advance.py``'s
+#: ``gate_passed`` stage (via the ``RunDriver`` built in ``create_app``) is the
+#: first consumer.
 gate_vocabulary: GateVocabulary = load_gate_vocabulary()
 
 #: The instance the ASGI server imports (``shell.http.app:app``).

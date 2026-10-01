@@ -7,7 +7,6 @@ Edge-Case Matrix.
 from __future__ import annotations
 
 import json
-from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,7 +16,7 @@ from core.ephemeris.identity import verify_ephemeris_identity
 from core.errors import GenerationError
 from core.payload.freeze import freeze_payload
 from core.types.day_lists import DayLists
-from core.types.generation import GeneratedDraft, Sentence
+from core.types.generation import Sentence
 from core.types.memory import ReportTheme, ThemeAspect
 from core.types.payload import Payload, SectionPayload
 from core.types.transits import StandingRetrograde, TransitAspectEvent
@@ -27,7 +26,7 @@ from shell.adapters.gemini.generator import (
     _NOTHING_SIGNIFICANT_CHANGED_STATEMENT,
     GeminiGenerator,
     _build_id_aliases,
-    _build_response_schema,
+    _build_section_response_schema,
 )
 from shell.computation import load_computation_config
 from shell.ports.generator import StyleGuideVersion
@@ -118,10 +117,19 @@ def _payload_with_ids(*entry_ids: str) -> dict[str, Any]:
     }
 
 
-def _draft_response(**overrides: list[dict[str, Any]]) -> str:
-    data: dict[str, list[dict[str, Any]]] = {name: [] for name in _SECTION_NAMES}
-    data.update(overrides)
-    return json.dumps(data)
+#: What the model returns for a Section that has nothing to say.
+_EMPTY_SECTION_RESPONSE = json.dumps({"sentences": []})
+
+
+def _one(
+    generator: GeminiGenerator,
+    payload: dict[str, Any],
+    theme_previous: ReportTheme | None,
+    theme_current: ReportTheme,
+    section: str = "energia_generale",
+) -> tuple[Sentence, ...]:
+    """One Section through ``generate_section`` with the shared Style Guide."""
+    return generator.generate_section(section, payload, _STYLE_GUIDE, theme_previous, theme_current)
 
 
 class _FakeGeminiClient:
@@ -150,32 +158,6 @@ class _FakeGeminiClient:
 
 
 # --- Matrix row: happy path, returning Client --------------------------------
-
-
-def test_happy_path_returns_a_populated_draft_with_all_eight_fields() -> None:
-    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
-    response = _draft_response(
-        energia_generale=[
-            {"text": "Il mese si apre con energia stabile.", "entry_ids": [_KNOWN_ID]}
-        ],
-        giorni_favorevoli=[
-            {
-                "text": "Una buona giornata per iniziare progetti.",
-                "entry_ids": [_ANOTHER_KNOWN_ID],
-            }
-        ],
-    )
-    client = _FakeGeminiClient(response=response)
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
-
-    assert isinstance(draft, GeneratedDraft)
-    assert tuple(field.name for field in dataclass_fields(draft)) == _SECTION_NAMES
-    assert draft.energia_generale[0].text == "Il mese si apre con energia stabile."
-    assert draft.energia_generale[0].entry_ids == (_KNOWN_ID,)
-    assert draft.amore == ()
-    assert len(client.calls) == 1
 
 
 def test_a_populated_theme_with_real_dataclass_and_datetime_fields_renders_without_raising() -> (
@@ -210,12 +192,12 @@ def test_a_populated_theme_with_real_dataclass_and_datetime_fields_renders_witho
             ),
         ),
     )
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    draft = generator.generate(payload, _STYLE_GUIDE, theme, theme)
+    draft = _one(generator, payload, theme, theme)
 
-    assert isinstance(draft, GeneratedDraft)
+    assert draft == ()
     prompt = client.calls[0]["prompt"]
     assert "saturn" in prompt
     assert "mercury" in prompt
@@ -226,20 +208,20 @@ def test_a_populated_theme_with_real_dataclass_and_datetime_fields_renders_witho
 def test_system_instruction_carries_the_style_guide_and_response_schema_matches() -> None:
     """AC: the Style Guide version in force must be supplied with every
     request, and the model must be asked for exactly the module's own
-    ``_build_response_schema()`` output for this Payload -- not some ad-hoc
-    shape built inline."""
+    ``_build_section_response_schema()`` output for this Payload -- not some
+    ad-hoc shape built inline."""
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    _one(generator, payload, None, _EMPTY_THEME)
 
     call = client.calls[0]
     assert _STYLE_GUIDE.content in call["system_instruction"]
     assert str(_STYLE_GUIDE.version) in call["system_instruction"]
     aliases = _build_id_aliases(frozenset({_KNOWN_ID}))
-    assert call["response_schema"] == _build_response_schema(
-        frozenset(aliases.values()), favorevoli_count=0, attenzione_count=0
+    assert call["response_schema"] == _build_section_response_schema(
+        "energia_generale", frozenset(aliases.values()), day_list_count=0
     )
 
 
@@ -249,11 +231,13 @@ def test_system_instruction_carries_the_style_guide_and_response_schema_matches(
 #: one-id-per-voce contract -- so tests below that only care about what was
 #: *sent* to the client (``client.calls[0]``) don't also have to fight the
 #: day-list coverage check to get a non-raising call.
-_TWO_FAVOREVOLI_RESPONSE = _draft_response(
-    giorni_favorevoli=[
-        {"text": "Prima voce.", "entry_ids": [_ANOTHER_KNOWN_ID]},
-        {"text": "Seconda voce.", "entry_ids": ["aspect-known-3"]},
-    ]
+_TWO_FAVOREVOLI_RESPONSE = json.dumps(
+    {
+        "sentences": [
+            {"text": "Prima voce.", "entry_ids": [_ANOTHER_KNOWN_ID]},
+            {"text": "Seconda voce.", "entry_ids": ["aspect-known-3"]},
+        ]
+    }
 )
 
 
@@ -266,51 +250,16 @@ def test_response_schema_constrains_entry_ids_to_an_enum_of_short_aliases() -> N
     id is now impossible to request either way, never just caught after the
     fact by ``_validate_citations``."""
     payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
-    client = _FakeGeminiClient(
-        response=_draft_response(
-            giorni_favorevoli=[{"text": "Voce.", "entry_ids": [_ANOTHER_KNOWN_ID]}]
-        )
-    )
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    _one(generator, payload, None, _EMPTY_THEME)
 
     schema = client.calls[0]["response_schema"]
-    amore_entry_ids_schema = schema["properties"]["amore"]["items"]["properties"]["entry_ids"]
+    entry_ids_schema = schema["properties"]["sentences"]["items"]["properties"]["entry_ids"]
     expected_aliases = sorted(_build_id_aliases(frozenset({_KNOWN_ID, _ANOTHER_KNOWN_ID})).values())
-    assert amore_entry_ids_schema["items"]["enum"] == expected_aliases
-    assert _KNOWN_ID not in amore_entry_ids_schema["items"]["enum"]
-
-
-def test_response_schema_pins_day_list_sections_to_exactly_one_id_per_voce_and_the_true_count() -> (
-    None
-):
-    """sprint-change-proposal-2026-09-18: a Payload whose day lists overflow
-    the Style Guide's own referential voci count (real incident: 21
-    favorevoli / 12 attenzione entries in one month) must never be bundled
-    into fewer voci -- the schema now pins the array length to the Payload's
-    actual entry count and each voce to exactly one id, regardless of how
-    many entries that is. The six narrative Sections are untouched: they
-    keep the unconstrained, multi-id-per-sentence shape bundling is fine
-    for."""
-    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID, "aspect-known-3")
-    client = _FakeGeminiClient(response=_TWO_FAVOREVOLI_RESPONSE)
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    schema = client.calls[0]["response_schema"]
-    favorevoli_schema = schema["properties"]["giorni_favorevoli"]
-    assert favorevoli_schema["minItems"] == favorevoli_schema["maxItems"] == 2
-    favorevoli_entry_ids_schema = favorevoli_schema["items"]["properties"]["entry_ids"]
-    assert favorevoli_entry_ids_schema["minItems"] == favorevoli_entry_ids_schema["maxItems"] == 1
-
-    attenzione_schema = schema["properties"]["giorni_di_attenzione"]
-    assert attenzione_schema["minItems"] == attenzione_schema["maxItems"] == 0
-
-    amore_entry_ids_schema = schema["properties"]["amore"]["items"]["properties"]["entry_ids"]
-    assert "minItems" not in amore_entry_ids_schema
-    assert "maxItems" not in amore_entry_ids_schema
+    assert entry_ids_schema["items"]["enum"] == expected_aliases
+    assert _KNOWN_ID not in entry_ids_schema["items"]["enum"]
 
 
 def test_prompt_embeds_short_aliases_never_the_raw_long_payload_ids() -> None:
@@ -318,14 +267,10 @@ def test_prompt_embeds_short_aliases_never_the_raw_long_payload_ids() -> None:
     with the schema's alias enum -- the raw 64-char id must never appear in
     the prompt text at all, only its short alias."""
     payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
-    client = _FakeGeminiClient(
-        response=_draft_response(
-            giorni_favorevoli=[{"text": "Voce.", "entry_ids": [_ANOTHER_KNOWN_ID]}]
-        )
-    )
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    _one(generator, payload, None, _EMPTY_THEME)
 
     prompt = client.calls[0]["prompt"]
     assert _KNOWN_ID not in prompt
@@ -334,50 +279,17 @@ def test_prompt_embeds_short_aliases_never_the_raw_long_payload_ids() -> None:
     assert f'"{aliases[_KNOWN_ID]}"' in prompt
 
 
-def test_a_model_response_citing_an_alias_is_translated_back_to_the_real_id() -> None:
-    """The end-to-end alias round trip: the fake client here plays the part
-    of the real Gemini API and returns the *alias* it was constrained to
-    (not the real id, unlike every other test's canned response) --
-    ``GeminiGenerator`` must translate it back before returning the draft,
-    so every downstream consumer (validation, rendering, storage) still only
-    ever sees real Payload ids."""
-    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
-    aliases = _build_id_aliases(frozenset({_KNOWN_ID, _ANOTHER_KNOWN_ID}))
-    response = _draft_response(
-        energia_generale=[{"text": "Una frase.", "entry_ids": [aliases[_KNOWN_ID]]}],
-        giorni_favorevoli=[{"text": "Voce.", "entry_ids": [aliases[_ANOTHER_KNOWN_ID]]}],
-    )
-    client = _FakeGeminiClient(response=response)
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert draft.energia_generale[0].entry_ids == (_KNOWN_ID,)
-
-
 def test_prompt_states_the_exact_day_list_counts_and_forbids_bundling() -> None:
     payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID, "aspect-known-3")
     client = _FakeGeminiClient(response=_TWO_FAVOREVOLI_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    _one(generator, payload, None, _EMPTY_THEME, section="giorni_favorevoli")
 
     prompt = client.calls[0]["prompt"]
     assert "esattamente 2 eventi in payload['day_lists']['giorni_favorevoli']" in prompt
-    assert "scrivi esattamente 2 frasi in questa Sezione" in prompt
-    assert "esattamente 0 eventi" in prompt
+    assert "scrivi esattamente 2 frasi" in prompt
     assert "Non accorpare più eventi sotto la stessa frase" in prompt
-
-
-def test_generated_draft_is_never_a_string_keyed_dict() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert not isinstance(draft, dict)
-    assert isinstance(draft, GeneratedDraft)
 
 
 # --- Matrix row: first Report for a Client (theme_previous=None) ------------
@@ -388,12 +300,12 @@ def test_first_report_omits_prior_month_material_and_still_returns_a_draft() -> 
     statement, never the raw JSON dump this story removes, and never the
     continuity header (there is nothing prior to be continuous with)."""
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    draft = _one(generator, payload, None, _EMPTY_THEME)
 
-    assert isinstance(draft, GeneratedDraft)
+    assert draft == ()
     prompt = client.calls[0]["prompt"]
     assert _FIRST_REPORT_STATEMENT in prompt
     assert _CONTINUITY_HEADER not in prompt
@@ -409,10 +321,10 @@ def test_still_active_aspect_is_rendered_as_a_continuation_never_a_novelty() -> 
     theme_previous = _theme(aspects=(aspect,))
     theme_current = _theme(aspects=(aspect,))
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+    _one(generator, payload, theme_previous, theme_current)
 
     prompt = client.calls[0]["prompt"]
     assert _CONTINUITY_HEADER in prompt
@@ -429,10 +341,10 @@ def test_tightened_aspect_is_rendered_as_an_approach_not_a_sudden_event() -> Non
         aspects=(_theme_aspect(perfected_at=_T1, never_perfected=False, orb_exit_at=None),)
     )
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+    _one(generator, payload, theme_previous, theme_current)
 
     prompt = client.calls[0]["prompt"]
     assert _CONTINUITY_HEADER in prompt
@@ -447,10 +359,10 @@ def test_resolved_aspect_still_present_in_current_is_not_marked_uncitable() -> N
     resolved_current = _theme_aspect(orb_exit_at=_T2)
     theme_current = _theme(aspects=(resolved_current,))
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+    _one(generator, payload, theme_previous, theme_current)
 
     prompt = client.calls[0]["prompt"]
     assert "si è risolto" in prompt
@@ -465,10 +377,10 @@ def test_resolved_aspect_absent_from_current_instructs_no_citation() -> None:
     theme_previous = _theme(aspects=(_theme_aspect(),))
     theme_current = _theme(aspects=())
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+    _one(generator, payload, theme_previous, theme_current)
 
     prompt = client.calls[0]["prompt"]
     assert "si è risolto" in prompt
@@ -490,10 +402,10 @@ def test_combined_signals_a_tightened_aspect_and_a_resolved_retrograde_together(
     )
     theme_current = _theme(aspects=(tightened_current_aspect,), retrogrades=())
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+    _one(generator, payload, theme_previous, theme_current)
 
     prompt = client.calls[0]["prompt"]
     assert "mars" in prompt and "si è stretto" in prompt
@@ -506,10 +418,10 @@ def test_nothing_significant_changed_instructs_saying_so_plainly() -> None:
     theme_previous = _theme(aspects=(aspect,))
     theme_current = _theme(aspects=(aspect,))
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+    _one(generator, payload, theme_previous, theme_current)
 
     prompt = client.calls[0]["prompt"]
     assert _NOTHING_SIGNIFICANT_CHANGED_STATEMENT in prompt
@@ -519,10 +431,10 @@ def test_nothing_significant_changed_statement_is_absent_when_something_did_chan
     theme_previous = _theme(aspects=(_theme_aspect(orb_exit_at=None),))
     theme_current = _theme(aspects=(_theme_aspect(orb_exit_at=_T2),))
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+    _one(generator, payload, theme_previous, theme_current)
 
     prompt = client.calls[0]["prompt"]
     assert _NOTHING_SIGNIFICANT_CHANGED_STATEMENT not in prompt
@@ -536,10 +448,10 @@ def test_all_new_elements_omit_the_continuity_header_entirely() -> None:
     theme_previous = _theme(aspects=())
     theme_current = _theme(aspects=(_theme_aspect(),))
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    generator.generate(payload, _STYLE_GUIDE, theme_previous, theme_current)
+    _one(generator, payload, theme_previous, theme_current)
 
     prompt = client.calls[0]["prompt"]
     assert _CONTINUITY_HEADER not in prompt
@@ -549,69 +461,26 @@ def test_all_new_elements_omit_the_continuity_header_entirely() -> None:
 # --- sprint-change-proposal-2026-09-18: an id alias leaking into "text" -----
 
 
-def test_an_alias_token_leaking_into_reader_facing_text_raises() -> None:
-    """A real generation shipped "Le numerose retrogradazioni planetarie
-    (e49, e17, e55, e41, e26)" straight into a client-facing Report -- the
-    model is instructed to keep every id inside "entry_ids" alone, but this
-    is the defense-in-depth backstop for when it doesn't."""
-    payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(
-        energia_generale=[
-            {
-                "text": "Le numerose retrogradazioni planetarie (e49, e17) pesano sul mese.",
-                "entry_ids": [_KNOWN_ID],
-            }
-        ]
-    )
-    client = _FakeGeminiClient(response=response)
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "alias_token_in_text"
-    assert "e49" in str(caught.value)
-
-
 def test_the_italian_conjunction_e_alone_is_never_flagged_as_a_leaked_alias() -> None:
     """ "e" (the conjunction "and") is one of the most common words in
     Italian prose -- the pattern must require at least one trailing digit
     fused to it, never match the bare word."""
     payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(
-        energia_generale=[
-            {
-                "text": "Marte e Venere si oppongono, e questo richiede attenzione.",
-                "entry_ids": [_KNOWN_ID],
-            }
-        ]
+    response = _section_response(
+        {
+            "text": "Marte e Venere si oppongono, e questo richiede attenzione.",
+            "entry_ids": [_KNOWN_ID],
+        }
     )
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    draft = _one(generator, payload, None, _EMPTY_THEME)
 
-    assert draft.energia_generale[0].text == (
-        "Marte e Venere si oppongono, e questo richiede attenzione."
-    )
+    assert draft[0].text == ("Marte e Venere si oppongono, e questo richiede attenzione.")
 
 
 # --- Matrix row: model cites an unknown entry id -----------------------------
-
-
-def test_an_unknown_cited_entry_id_raises_at_the_citation_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(
-        amore=[{"text": "Una frase mal fondata.", "entry_ids": ["does-not-exist"]}]
-    )
-    client = _FakeGeminiClient(response=response)
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "citation_validation"
-    assert "does-not-exist" in str(caught.value)
 
 
 def test_citation_validation_finds_ids_in_a_real_freeze_payload_shaped_payload() -> None:
@@ -661,15 +530,13 @@ def test_citation_validation_finds_ids_in_a_real_freeze_payload_shaped_payload()
     )
     real_id = frozen["sections"]["energia_generale"]["aspects"][0]["id"]
 
-    response = _draft_response(
-        energia_generale=[{"text": "Marte in trigono a Venere.", "entry_ids": [real_id]}]
-    )
+    response = _section_response({"text": "Marte in trigono a Venere.", "entry_ids": [real_id]})
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    draft = generator.generate(frozen, _STYLE_GUIDE, None, _EMPTY_THEME)
+    draft = _one(generator, frozen, None, _EMPTY_THEME)
 
-    assert draft.energia_generale[0].entry_ids == (real_id,)
+    assert draft[0].entry_ids == (real_id,)
 
 
 # --- Matrix row: model writes a date in Section 6 or 7 -----------------------
@@ -692,12 +559,12 @@ def test_a_date_token_in_giorni_favorevoli_raises_at_the_date_token_step(
     sentence_text: str,
 ) -> None:
     payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(giorni_favorevoli=[{"text": sentence_text, "entry_ids": []}])
+    response = _section_response({"text": sentence_text, "entry_ids": []})
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)
 
     with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+        _one(generator, payload, None, _EMPTY_THEME, section="giorni_favorevoli")
 
     assert caught.value.step == "date_token_validation"
     assert sentence_text in str(caught.value)
@@ -705,14 +572,12 @@ def test_a_date_token_in_giorni_favorevoli_raises_at_the_date_token_step(
 
 def test_a_date_token_in_giorni_di_attenzione_raises_at_the_date_token_step() -> None:
     payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(
-        giorni_di_attenzione=[{"text": "Attenzione il 22 ottobre.", "entry_ids": []}]
-    )
+    response = _section_response({"text": "Attenzione il 22 ottobre.", "entry_ids": []})
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)
 
     with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+        _one(generator, payload, None, _EMPTY_THEME, section="giorni_di_attenzione")
 
     assert caught.value.step == "date_token_validation"
 
@@ -736,13 +601,13 @@ def test_a_non_date_lookalike_in_giorni_favorevoli_is_not_flagged(
     constraint also keeps clock times (``15.30``, ``9.45``) and decimals
     (``1.5``) from being flagged."""
     payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(giorni_favorevoli=[{"text": sentence_text, "entry_ids": []}])
+    response = _section_response({"text": sentence_text, "entry_ids": []})
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    draft = _one(generator, payload, None, _EMPTY_THEME, section="giorni_favorevoli")
 
-    assert draft.giorni_favorevoli[0].text == sentence_text
+    assert draft[0].text == sentence_text
 
 
 def test_a_date_shaped_word_elsewhere_is_not_flagged_as_a_date_token() -> None:
@@ -750,17 +615,15 @@ def test_a_date_shaped_word_elsewhere_is_not_flagged_as_a_date_token() -> None:
     a month name appearing in prose elsewhere (e.g. describing a transit in
     energia_generale) is not itself a violation of this story's rule."""
     payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(
-        energia_generale=[
-            {"text": "Un transito di gennaio continua a farsi sentire.", "entry_ids": [_KNOWN_ID]}
-        ],
+    response = _section_response(
+        {"text": "Un transito di gennaio continua a farsi sentire.", "entry_ids": [_KNOWN_ID]}
     )
     client = _FakeGeminiClient(response=response)
     generator = GeminiGenerator(api_key="unused", client=client)
 
-    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    draft = _one(generator, payload, None, _EMPTY_THEME)
 
-    assert draft.energia_generale[0].text == "Un transito di gennaio continua a farsi sentire."
+    assert draft[0].text == "Un transito di gennaio continua a farsi sentire."
 
 
 # --- epic-4-retro-item-31: prompt construction raises before the network call ---
@@ -773,11 +636,11 @@ def test_a_prompt_construction_failure_surfaces_as_a_typed_generation_error() ->
     cannot serialize) becomes ``GenerationError(step="prompt_construction")``
     ``from`` the original, never a raw ``TypeError`` -- and the provider is
     never reached."""
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
     with pytest.raises(GenerationError) as caught:
-        generator.generate({"unserializable": object()}, _STYLE_GUIDE, None, _EMPTY_THEME)
+        _one(generator, {"unserializable": object()}, None, _EMPTY_THEME)
 
     assert caught.value.step == "prompt_construction"
     assert isinstance(caught.value.__cause__, TypeError)
@@ -787,121 +650,21 @@ def test_a_prompt_construction_failure_surfaces_as_a_typed_generation_error() ->
 # --- Matrix row: Gemini call raises or times out -----------------------------
 
 
-def test_a_raising_client_wraps_the_original_error_at_the_request_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(error=TimeoutError("the provider timed out"))
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "request"
-    assert isinstance(caught.value.__cause__, TimeoutError)
-
-
 # --- Matrix row: malformed / non-JSON model response -------------------------
-
-
-def test_a_non_json_response_raises_at_the_parsing_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response="this is not json at all")
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "parsing"
-
-
-def test_a_none_response_raises_at_the_parsing_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=None)
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "parsing"
-
-
-def test_a_json_array_instead_of_object_raises_at_the_parsing_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response="[1, 2, 3]")
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "parsing"
-
-
-def test_a_response_missing_a_required_section_raises_at_the_parsing_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    incomplete = {name: [] for name in _SECTION_NAMES if name != "consiglio_finale"}
-    client = _FakeGeminiClient(response=json.dumps(incomplete))
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "parsing"
-    assert "consiglio_finale" in str(caught.value)
-
-
-def test_a_sentence_missing_text_raises_at_the_parsing_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(amore=[{"entry_ids": [_KNOWN_ID]}])
-    client = _FakeGeminiClient(response=response)
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "parsing"
-
-
-def test_a_sentence_with_non_list_entry_ids_raises_at_the_parsing_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    response = _draft_response(amore=[{"text": "Una frase.", "entry_ids": "not-a-list"}])
-    client = _FakeGeminiClient(response=response)
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "parsing"
-
-
-def test_a_section_that_is_not_a_list_raises_at_the_parsing_step() -> None:
-    payload = _payload_with_ids(_KNOWN_ID)
-    data = {name: [] for name in _SECTION_NAMES}
-    data["amore"] = "not-a-list"
-    client = _FakeGeminiClient(response=json.dumps(data))
-    generator = GeminiGenerator(api_key="unused", client=client)
-
-    with pytest.raises(GenerationError) as caught:
-        generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert caught.value.step == "parsing"
 
 
 # --- The Style Guide is a required argument, never optional ------------------
 
 
-def test_style_guide_has_no_default_and_cannot_be_omitted() -> None:
-    import inspect
-
-    signature = inspect.signature(GeminiGenerator.generate)
-    assert signature.parameters["style_guide"].default is inspect.Parameter.empty
-
-
-def test_calling_generate_without_a_style_guide_raises_type_error() -> None:
+def test_calling_generate_section_without_a_style_guide_raises_type_error() -> None:
     payload = _payload_with_ids(_KNOWN_ID)
-    client = _FakeGeminiClient(response=_draft_response())
+    client = _FakeGeminiClient(response=_EMPTY_SECTION_RESPONSE)
     generator = GeminiGenerator(api_key="unused", client=client)
 
     with pytest.raises(TypeError):
-        generator.generate(payload, theme_previous=None, theme_current=_EMPTY_THEME)  # type: ignore[call-arg]
+        generator.generate_section(  # type: ignore[call-arg]
+            "energia_generale", payload, theme_previous=None, theme_current=_EMPTY_THEME
+        )
 
 
 # --- _GoogleGenAIClient: the wrapper around the real google-genai SDK -------
@@ -1008,7 +771,7 @@ def test_generator_for_settings_passes_the_configured_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from shell.config import load_settings
-    from shell.runner import scheduler
+    from shell.runner import generators as scheduler
     from tests.test_config import environment_with
 
     seen: dict[str, object] = {}
@@ -1258,3 +1021,19 @@ def test_generate_section_unknown_section_is_rejected_before_any_call() -> None:
         )
 
     assert client.calls == []
+
+
+def test_style_guide_has_no_default_and_cannot_be_omitted() -> None:
+    import inspect
+
+    signature = inspect.signature(GeminiGenerator.generate_section)
+    assert signature.parameters["style_guide"].default is inspect.Parameter.empty
+
+
+def test_the_whole_report_generate_call_is_gone() -> None:
+    """Story 10.4: a Report is written Section by Section; no adapter offers a
+    one-call whole-report path any more."""
+    from shell.adapters.local.generator import RecordedResponseGenerator
+
+    assert not hasattr(GeminiGenerator, "generate")
+    assert not hasattr(RecordedResponseGenerator, "generate")

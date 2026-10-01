@@ -21,15 +21,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from core.types.generation import GeneratedDraft, Sentence
+from core.types.generation import Sentence
 from core.types.memory import ReportTheme
 from shell.adapters.generation.validation import (
     _DATE_TOKEN_SECTIONS,
     _SECTION_FIELD_NAMES,
     _collect_known_entry_ids,
-    _validate_citations,
-    _validate_day_list_coverage,
-    _validate_no_date_tokens,
     _validate_section_citations,
     _validate_section_day_list_coverage,
     _validate_section_no_date_tokens,
@@ -66,25 +63,6 @@ class RecordedResponseGenerator:
     against (Story 4.9). ``style_guide``/``theme_previous``/``theme_current``
     are accepted -- the port is fixed and exclusive (AD-3) -- but never read:
     every sentence is derived purely from ``payload``'s own entry ids."""
-
-    def generate(
-        self,
-        payload: dict,
-        style_guide: StyleGuideVersion,
-        theme_previous: ReportTheme | None,
-        theme_current: ReportTheme,
-    ) -> GeneratedDraft:
-        fields: dict[str, tuple[Sentence, ...]] = {}
-        for name in _SECTION_FIELD_NAMES:
-            subtree = _section_subtree(payload, name)
-            entry_ids = tuple(sorted(_collect_known_entry_ids(subtree)))
-            fields[name] = (Sentence(text=_PLACEHOLDER_TEXT, entry_ids=entry_ids),)
-
-        draft = GeneratedDraft(**fields)
-        _validate_citations(draft, payload)
-        _validate_no_date_tokens(draft)
-        _validate_day_list_coverage(draft, payload)
-        return draft
 
     def generate_section(
         self,

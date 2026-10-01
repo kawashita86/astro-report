@@ -2,7 +2,7 @@
 computation through AD-10's six named stages (Story 3.5).
 
 A row is created once, then advanced forward-only by
-``shell/runner/driver.py::advance()`` -- never re-created, never rewound.
+``shell/runner/advance.py::advance()`` -- never re-created, never rewound.
 Persisting each stage's output before the next begins (rather than holding
 run state only in memory) means a spin-down or redeploy never loses a whole
 run: the next poll calls ``advance()``, which resumes exactly where the row
@@ -46,7 +46,7 @@ class ReportRun(SQLModel, table=True):
     functions as one JSON list, each entry tagged ``"kind"``
     (``aspect``/``station``/``standing_retrograde``/``ingress``/``lunation``)
     since the four scan functions return different dataclasses -- see
-    ``shell/runner/driver.py``'s Design Notes for why this is one column
+    ``shell/runner/advance.py``'s Design Notes for why this is one column
     rather than four new tables.
 
     ``stage_failure_count``/``failed_at``/``failure_reason`` (Story 4.8)
@@ -60,7 +60,7 @@ class ReportRun(SQLModel, table=True):
     regeneration cycle -- distinct from ``stage_failure_count``, which a
     successful ``draft_ready`` re-run resets to 0 every cycle and so cannot
     also track a persistent Gate problem. See
-    ``shell/runner/driver.py``'s Design Notes.
+    ``shell/runner/advance.py``'s Design Notes.
     """
 
     __tablename__ = "report_run"
@@ -68,7 +68,7 @@ class ReportRun(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid7, primary_key=True)
     client_id: UUID = Field(foreign_key="client.id", index=True)
     # Set exactly once, inside `advance()`'s existing per-stage success path
-    # (`shell/runner/driver.py`), the first time `stage_name == "natal_ready"`
+    # (`shell/runner/advance.py`), the first time `stage_name == "natal_ready"`
     # succeeds -- mirrors `month_start_utc`/`month_end_utc`'s own
     # forward-only assignment (Story 6.4). `NULL` for any `ReportRun` row
     # created before this column existed, and for one that never reached
@@ -95,13 +95,13 @@ class ReportRun(SQLModel, table=True):
     # Consecutive `with_backoff` exhaustions on the current stage (Story
     # 4.8) -- reset to 0 by a successful stage advance, incremented on each
     # exhaustion, compared against `_MAX_STAGE_FAILURES`
-    # (`shell/runner/driver.py`) to decide when a run is terminally failed
+    # (`shell/runner/advance.py`) to decide when a run is terminally failed
     # rather than retried forever.
     stage_failure_count: int = Field(default=0)
     # Gate failures absorbed across the run's current regeneration cycle
     # (Story 5.4) -- incremented on every `GateFailedError` that actually
     # regenerates, compared against `_MAX_REGENERATIONS`
-    # (`shell/runner/driver.py`) to decide when a run is terminally failed
+    # (`shell/runner/advance.py`) to decide when a run is terminally failed
     # rather than regenerated forever. Amended 2026-09-17, correct-course:
     # NOT incremented when a `GateFailedError` names fewer than
     # `_MIN_VIOLATIONS_FOR_AUTO_REGENERATION` violations -- that check fails
@@ -124,7 +124,7 @@ class ReportRun(SQLModel, table=True):
     # that one-to-one correspondence no longer holds; the next attempt number
     # is instead a plain count of existing `ReportDraft` rows for the run
     # (`shell/adapters/postgres/report_draft.py::next_report_draft_attempt`),
-    # which both the automatic path (`shell/runner/driver.py::_run_draft_ready`)
+    # which both the automatic path (`shell/runner/advance.py::open_draft_attempt`)
     # and the hand-correction route (`shell/http/routes/report_runs.py`) read
     # instead of this field.
     regeneration_count: int = Field(default=0)

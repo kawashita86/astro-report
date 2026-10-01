@@ -1,1098 +1,544 @@
-"""``advance()``: moves one ``ReportRun`` forward by **at most one** of
-AD-10's six named stages per call, persisting that stage's output before it
-returns (Story 3.5, reshaped for AD-20 by Story 3.10, amended by Story 3.11
-for a second, ``background``-mode caller).
+"""The RunDriver: the one place the server moves a report run on its own (AD-20, AD-21).
 
-**Why one stage per call, from the poll GET -- and, since Story 3.11, the
-``background``-mode scheduler tick.** AD-20 requires the start ``POST`` to
-return instantly and each caller to move the run forward exactly one stage.
-So ``POST /clients/{client_id}/report-runs`` only creates the row and
-redirects, and in ``poll`` mode (the default) ``advance()`` is called *only*
-from ``GET /report-runs/{run_id}``: the first stage runs on the first poll,
-and a poll may take as long as its one stage (one external Generator call
-plus bounded backoff, at ``draft_ready``) but never chains into a second --
-so closing the tab can never abandon work mid-pipeline. BUILD-ORDER.md's E5
-ruled out an in-process background task ("run state lives only in memory,
-lost silently on restart") and a queue ("no queue infrastructure needed") at
-the time; AD-20's Story 3.11 amendment revisits the first of those two for a
-deployment-wide opt-in ``background`` mode (``REPORT_RUN_MODE=background``,
-``shell/runner/scheduler.py``): an in-process ``asyncio.Task`` ticks this
-same ``advance()`` for every incomplete ``ReportRun`` on a fixed cadence, and
-the poll route becomes read-only in that mode instead. Within one running
-instance, only one caller ever advances a given run for a given transition --
-the poll route in ``poll`` mode, the scheduler tick in ``background`` mode
-(``shell/http/routes/report_runs.py::poll_report_run`` gates its own
-``advance()`` call on ``report_run_mode is ReportRunMode.POLL``). A brief
-window where instances on different modes or config values overlap (e.g. a
-rolling deploy, or a live ``REPORT_RUN_MODE`` change) is made safe by the
-same mechanism that already protects two concurrent pollers, below --
-review-loop 2 -- not by a structural guarantee that only one caller ever
-exists at all. Concurrent callers for one run are single-flighted by a
-Postgres transaction-scoped
-advisory lock on the run id (``shell/runner/advisory_lock.py``) -- the caller
-that takes the lock advances one stage; the other returns the current stage
-untouched. See ``shell/http/routes/report_runs.py`` and
-``shell/runner/scheduler.py``.
+A run advances with no page open. ``start(run_id)`` returns at once; a loop per run
+calls the idempotent, one-stage-per-call ``advance()`` (``shell/runner/advance.py``)
+until the run reaches ``gate_passed`` or ``failed_at``. At ``draft_ready`` the loop
+reads the run's Section rows, asks ``core/draft_state.py`` what is claimable, and
+submits one job per claimable Section to a generation executor capped at
+``GENERATION_CONCURRENCY`` -- the process-wide brake across every run. When all eight
+Sections are complete it assembles the one ``ReportDraft`` and carries on to the Gate.
 
-**Why only five of the six stages get real stage functions (so far).**
-BUILD-ORDER.md: "the runner introduced once two real stages exist."
-`natal_ready`/`transits_ready` arrived in Story 3.5; `payload_ready` in
-Story 3.8, once ``core/payload/`` (Stories 3.6-3.8) existed to call;
-`draft_ready` in Story 4.6, once the Generator port and its Gemini adapter
-(Story 4.5) existed to call; `gate_passed` in Story 5.3, once
-``core/gate/run.py::run_gate()`` (Story 5.2) existed to call. Registering a
-stage before its implementation exists would mean stubbing a lie.
-`_STAGE_SEQUENCE` names all six stages for display/ordering;
-`_STAGE_FUNCTIONS` only the ones actually implemented -- `advance()` stops
-the moment the next stage name has no registered function (today,
-`exported`).
+This module is the only place in the codebase allowed to create a thread or an
+executor (a guard test enforces it): a loop's work and a generation job are the two
+kinds of background work there are. The driver keeps no state the database does not
+already hold, so a stop loses nothing -- ``resume()`` restarts every incomplete run
+and a lease left by a dead process expires and is reclaimed.
 
-**`draft_ready` is the first stage with a live external call.** The three
-earlier stages read only local state (the already-persisted chart, the
-local ephemeris); `draft_ready` calls the injected `Generator`
-(``shell/ports/generator.py``) over the network. It runs through the same
-uniform ``with_backoff`` wrapper every other stage already does -- no
-special-casing here for "this one talks to a rate-limited API" -- so a
-transient Generator failure retries exactly like a transient local one
-would. A dedicated request-rate ceiling for the Generator adapter itself
-(rather than `with_backoff`'s own retry-on-failure) is Story 4.8's own
-deliverable; nothing here anticipates it.
-
-**`transit_events` as one JSON column, not four new tables.** Story 3.6 will
-read these events to assemble the Payload and may reshape how they're
-consumed; committing to per-kind tables now risks a schema this story can't
-justify. Serialized the same way ``shell/adapters/postgres/client.py``'s
-``_serialize``/``_json_safe`` already serialize a stored chart
-(``Decimal`` -> ``str``), extended for ``datetime`` -- these dataclasses
-carry both -- and each entry tagged ``"kind"`` since the four scan functions
-return five different dataclasses.
+Each loop thread binds the verified ephemeris path before it advances (the Swiss
+Ephemeris path is thread-local C state); generation jobs reach no chart code. Every
+step opens a fresh ``Session``, never one shared across threads. Logs carry ids only.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
-from dataclasses import asdict, is_dataclass
-from datetime import UTC, datetime
-from decimal import Decimal
-from typing import Any
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import Engine, update
 from sqlmodel import Session, select
 
-from core.domains.profiles import assemble_domain_profiles
-from core.domains.rulers import resolve_house_rulers
-from core.ephemeris.identity import EphemerisIdentity
-from core.errors import GateFailedError
-from core.gate.run import run_gate
-from core.memory.derive import derive_theme
-from core.payload.assemble import assemble_payload
-from core.payload.day_lists import project_day_lists
-from core.payload.freeze import freeze_payload
-from core.transits.aspects import find_transit_aspects
-from core.transits.ingresses import find_ingresses
-from core.transits.lunations import find_lunations
-from core.transits.stations import find_stations
-from core.types.chart import NatalChart
+from core.draft_state import (
+    CLOSING_ORDINAL,
+    SECTION_NAMES,
+    STATUS_COMPLETE,
+    STATUS_FAILED,
+    STATUS_PENDING,
+    claimable_sections,
+    is_draft_complete,
+    is_exhausted,
+    live_lease_expiries,
+)
+from core.ephemeris.identity import (
+    EphemerisIdentity,
+    bind_verified_ephemeris_path_to_current_thread,
+)
 from core.types.computation import ComputationConfig
 from core.types.gate import GateVocabulary
-from core.types.generation import GeneratedDraft, Sentence
-from core.types.memory import ReportTheme, ThemeAspect, ThemeLunation
+from core.types.generation import Sentence
 from core.types.sections import SectionsConfig
-from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
-from shell.adapters.postgres.client import Client
-from shell.adapters.postgres.gate_result import store_gate_result
-from shell.adapters.postgres.report import store_report
-from shell.adapters.postgres.report_draft import (
-    ReportDraft,
-    next_report_draft_attempt,
-    store_report_draft,
+from shell.adapters.postgres.client import current_chart_for_client, deserialize_natal_chart
+from shell.adapters.postgres.report_draft_section import (
+    ReportDraftSection,
+    section_rows,
+    section_state,
+    sentences_from_json,
+    sentences_to_json,
 )
-from shell.adapters.postgres.report_payload import ReportPayload, store_report_payload
 from shell.adapters.postgres.report_run import ReportRun
-from shell.adapters.postgres.report_theme import (
-    StoredReportTheme,
-    most_recent_prior_report_theme,
-    store_report_theme,
+from shell.config import MAX_SECTION_ATTEMPTS
+from shell.ports.generator import Generator
+from shell.runner.advance import (
+    advance,
+    assemble_draft,
+    load_generation_inputs,
+    open_draft_attempt,
 )
-from shell.adapters.postgres.style_guide import current_style_guide
-from shell.ports.generator import Generator, StyleGuideVersion
-from shell.runner.advisory_lock import try_acquire_advance_lock
-from shell.runner.backoff import with_backoff
-from shell.runner.month import client_month_interval_utc
+from shell.runner.lease import LEASE_TTL, section_claim
 
-__all__ = ["advance"]
+__all__ = ["RunDriver"]
 
 _logger = logging.getLogger(__name__)
 
-#: All six AD-10 stage names, in the order a ``ReportRun`` advances through --
-#: named for display/ordering regardless of whether a function is registered
-#: for them yet (see the module's Design Notes).
-_STAGE_SEQUENCE: tuple[str, ...] = (
-    "natal_ready",
-    "transits_ready",
-    "payload_ready",
-    "draft_ready",
-    "gate_passed",
-    "exported",
-)
-
-#: Per-stage overrides for `with_backoff`'s keyword arguments, keyed by
-#: stage name. `draft_ready` is the only stage with a real rate-limited
-#: network call (the module's own Design Notes): 3 attempts, 2-second base
-#: delay, doubling to a second retry at 4s -- three Gemini attempts inside
-#: one `advance()` call span 0s/2s/6s. That is 3 requests in ~6s, so a
-#: single `advance()` call stays brief, and the short base delay favours a
-#: faster draft stage over spacing the attempts out.
-#:
-#: `gate_passed` (`_run_gate_passed`) is capped at a single attempt. Its
-#: dominant failure mode is a deterministic `GateFailedError`: the stage
-#: re-checks the *same* already-persisted draft with the pure `run_gate()`
-#: (`core/gate/run.py`), so an in-process `with_backoff` retry only re-runs
-#: an identical failing check -- wasted work that delays the real recovery,
-#: `advance()`'s `except GateFailedError` regeneration path, which produces a
-#: genuinely new draft on the *next* `advance()` call. `max_attempts=1` lets
-#: that `GateFailedError` propagate on the first attempt.
-#:
-#: Tradeoff: `_run_gate_passed` also reads `ReportDraft`/`ReportPayload`
-#: back and, on a pass, writes `Report` + `StoredGateResult`. A *transient*
-#: DB error in any of those is no longer retried within one `advance()` call;
-#: it surfaces through `advance()`'s generic `except Exception` branch, which
-#: increments `stage_failure_count` from its first occurrence, so a flaky
-#: database now recovers across poll cycles (`_MAX_STAGE_FAILURES`) rather
-#: than inside a single call. A stage absent from this mapping keeps
-#: `with_backoff`'s plain defaults (`max_attempts=3`, `shell/runner/backoff.py`).
-_STAGE_BACKOFF_OVERRIDES: dict[str, dict[str, object]] = {
-    "draft_ready": {"max_attempts": 3, "base_delay_seconds": 2.0},
-    "gate_passed": {"max_attempts": 1},
-}
-
-#: Consecutive `with_backoff` exhaustions on a run's current stage, across
-#: separate `advance()` calls, before that run is marked terminally failed
-#: (Story 4.8). Each `advance()` call already spends up to 3 Gemini attempts
-#: (~6s) when stuck at `draft_ready`; 3 such exhausted `advance()` calls is
-#: ~9 real attempts -- a genuinely exhausted run, not a blip (the module's
-#: own Design Notes).
-_MAX_STAGE_FAILURES = 3
-
-#: Regeneration attempts a run's current cycle may spend on a `GateFailedError`
-#: before it is marked terminally failed instead of regenerated forever
-#: (Story 5.4). Separate from `_MAX_STAGE_FAILURES`: a `GateFailedError` never
-#: touches `stage_failure_count` (the module's own Design Notes explain why a
-#: shared counter can't work -- a regeneration's `draft_ready` re-run succeeds
-#: by definition, resetting `stage_failure_count` before `gate_passed` even
-#: runs again). No planning artifact states a number (FR-21/AD-10 only
-#: require "bounded"); `2` keeps a failing run from spending more than two
-#: paid regenerations (three Generator calls in total) before it reaches
-#: Francesco's review surface.
-_MAX_REGENERATIONS = 2
-
-#: A `GateFailedError` naming fewer than this many violations is not worth
-#: spending a paid regeneration on (sprint-change-proposal-2026-09-17,
-#: correct-course, amending FR-21/AD-10): it is routed straight to Francesco's
-#: existing review surface (Stories 5.7/5.8) instead of silently burning a
-#: `generator.generate()` call first. The correct-course proposal set this to
-#: 2 (a single flagged sentence skips regeneration); it is deliberately `1`
-#: now, which turns the short-circuit off in practice -- a `GateFailedError`
-#: always names at least one violation, so every failing check regenerates up
-#: to `_MAX_REGENERATIONS`. The branch in `advance()` is kept so raising this
-#: value re-enables it. Plain, non-runtime-configurable module constant,
-#: mirroring `_MAX_REGENERATIONS` just above.
-_MIN_VIOLATIONS_FOR_AUTO_REGENERATION = 1
-
-#: A stage function's uniform signature: every registered stage receives the
-#: same context, whether or not it needs all of it, so the registry stays a
-#: plain ``{name: function}`` mapping rather than growing per-stage plumbing
-#: in ``advance()`` itself as more stages register. ``generator`` joined the
-#: signature in Story 4.6 for ``draft_ready``; ``vocabulary`` joined it in
-#: Story 5.3 for ``gate_passed`` -- every other registered stage still
-#: receives both, unused, rather than the registry growing a second,
-#: narrower signature.
-StageFn = Callable[
-    [
-        Session,
-        ReportRun,
-        NatalChart,
-        ComputationConfig,
-        EphemerisIdentity,
-        SectionsConfig,
-        Generator,
-        GateVocabulary,
-    ],
-    None,
-]
+#: The stages after which a run needs no more driving.
+_FINISHED_STAGES = ("gate_passed", "exported")
+#: How long a loop waits when a round changed nothing though something looked
+#: claimable (another process took it first): never a spin.
+_IDLE_RETRY_SECONDS = 1.0
+#: Slack after a lease's expiry before the loop looks again.
+_EXPIRY_SLACK_SECONDS = 0.05
+#: Run loops are few (one operator); they mostly wait on their jobs.
+_LOOP_WORKERS = 16
+#: Consecutive errors reading a run's rows before its driving is given up.
+_MAX_CONSECUTIVE_ERRORS = 5
+#: Consecutive rounds that changed nothing before driving is given up (a restart's
+#: ``resume()`` picks the run up again): an ``advance`` that is single-flighted away by
+#: another caller's advisory lock, or a lease that never frees, must not spin forever.
+_MAX_UNCHANGED_ROUNDS = 10
+#: ``last_error`` is a diagnostic, not a transcript.
+_MAX_ERROR_LENGTH = 500
+#: Seconds a Section is held off after its first failed attempt; doubles per further failure.
+_RETRY_BASE_DELAY_SECONDS = 2.0
 
 
-def _run_natal_ready(
-    session: Session,
-    run: ReportRun,
-    natal_chart: NatalChart,
-    config: ComputationConfig,
-    ephemeris_identity: EphemerisIdentity,
-    sections_config: SectionsConfig,
-    generator: Generator,
-    vocabulary: GateVocabulary,
-) -> None:
-    """``natal_ready``: resolve ``run.month`` against ``run.client_id``'s
-    local calendar into ``[month_start_utc, month_end_utc)``.
-
-    The Natal Chart itself needs no computation here -- it is already
-    stored and already deserialized into ``natal_chart`` by the caller
-    (``shell/http/routes/report_runs.py``); this stage's whole job is the
-    month-boundary resolution Stories 3.1-3.4 deferred. ``generator``/
-    ``vocabulary`` are part of :data:`StageFn`'s uniform signature (Stories
-    4.6/5.3); this stage does not use either.
-    """
-    client = session.get(Client, run.client_id)
-    if client is None:
-        raise RuntimeError(f"ReportRun {run.id} references a missing Client.")
-    month_start_utc, month_end_utc = client_month_interval_utc(client, run.month)
-    run.month_start_utc = month_start_utc
-    run.month_end_utc = month_end_utc
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
-def _run_transits_ready(
-    session: Session,
-    run: ReportRun,
-    natal_chart: NatalChart,
-    config: ComputationConfig,
-    ephemeris_identity: EphemerisIdentity,
-    sections_config: SectionsConfig,
-    generator: Generator,
-    vocabulary: GateVocabulary,
-) -> None:
-    """``transits_ready``: call the four Story 3.1-3.4 scan functions across
-    ``[run.month_start_utc, run.month_end_utc)`` -- read back from the row,
-    never recomputed, so a process restart between stages loses nothing --
-    and record every result, tagged by kind, into ``run.transit_events``.
-    ``generator``/``vocabulary`` are part of :data:`StageFn`'s uniform
-    signature (Stories 4.6/5.3); this stage does not use either.
-    """
-    assert run.month_start_utc is not None and run.month_end_utc is not None, (
-        f"ReportRun {run.id} reached transits_ready without a resolved month interval."
-    )
-    month_start_utc, month_end_utc = run.month_start_utc, run.month_end_utc
+@dataclass(slots=True)
+class _Loop:
+    """One run's driving. ``recheck`` is set by a ``start`` that arrives while it runs."""
 
-    events: list[dict[str, Any]] = [
-        _serialize_event("aspect", event)
-        for event in find_transit_aspects(natal_chart, month_start_utc, month_end_utc, config)
-    ]
-    events.extend(
-        _serialize_event(
-            "standing_retrograde" if isinstance(record, StandingRetrograde) else "station",
-            record,
+    recheck: bool = False
+
+
+class RunDriver:
+    """Moves report runs forward in the background; Sections are written in parallel."""
+
+    def __init__(
+        self,
+        *,
+        engine: Engine,
+        config: ComputationConfig,
+        ephemeris_identity: EphemerisIdentity,
+        sections_config: SectionsConfig,
+        vocabulary: GateVocabulary,
+        generator: Callable[[], Generator],
+        concurrency: int,
+        now: Callable[[], datetime] = _utc_now,
+        max_attempts: int = MAX_SECTION_ATTEMPTS,
+        lease_ttl: timedelta = LEASE_TTL,
+        retry_base_delay: float = _RETRY_BASE_DELAY_SECONDS,
+    ) -> None:
+        self._engine = engine
+        self._config = config
+        self._ephemeris_identity = ephemeris_identity
+        self._sections_config = sections_config
+        self._vocabulary = vocabulary
+        self._generator = generator
+        self._now = now
+        self._max_attempts = max_attempts
+        self._lease_ttl = lease_ttl
+        self._retry_base_delay = retry_base_delay
+        self._cond = threading.Condition()
+        self._loops: dict[UUID, _Loop] = {}
+        self._resuming = False
+        self._stopped = False
+        self._generation = ThreadPoolExecutor(
+            max_workers=max(1, concurrency), thread_name_prefix="ar-generate"
         )
-        for record in find_stations(month_start_utc, month_end_utc, config)
-    )
-    events.extend(
-        _serialize_event("ingress", ingress)
-        for ingress in find_ingresses(natal_chart, month_start_utc, month_end_utc, config)
-    )
-    events.extend(
-        _serialize_event("lunation", lunation)
-        for lunation in find_lunations(natal_chart, month_start_utc, month_end_utc)
-    )
-    run.transit_events = events
+        self._runs = ThreadPoolExecutor(max_workers=_LOOP_WORKERS, thread_name_prefix="ar-run")
 
+    # -- the public surface --------------------------------------------------------
 
-def _stage_index(stage: str | None) -> int:
-    """``-1`` for ``None`` (nothing completed yet), otherwise ``stage``'s
-    position in ``_STAGE_SEQUENCE``."""
-    if stage is None:
-        return -1
-    return _STAGE_SEQUENCE.index(stage)
+    def start(self, run_id: UUID) -> None:
+        """Make sure ``run_id`` is being driven; returns at once, changes nothing if it is.
 
+        A loop already running is told to look again before it stops, so a ``start``
+        that lands while it decides to stop is never lost."""
+        with self._cond:
+            if self._stopped:
+                return
+            running = self._loops.get(run_id)
+            if running is not None:
+                running.recheck = True
+                self._cond.notify_all()
+                return
+            loop = self._loops[run_id] = _Loop()
+        try:
+            self._runs.submit(self._drive, run_id, loop)
+        except RuntimeError:
+            # The executor was shut down between the check and the submit.
+            with self._cond:
+                self._loops.pop(run_id, None)
+                self._cond.notify_all()
 
-def _json_safe(value: Any) -> Any:
-    """``Decimal`` -> ``str``, ``datetime`` -> ISO 8601 -- everything else
-    passes through unchanged. Extends
-    ``shell/adapters/postgres/client.py``'s ``_json_safe`` (``Decimal``
-    only): the transit-event dataclasses carry both types, unlike
-    ``StoredNatalChart``'s JSON payloads."""
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
+    def resume(self) -> None:
+        """After a restart, start every run that is not finished or failed; returns at once.
 
+        A run whose Section lease a dead process left behind is picked up too: its loop
+        waits for the lease to expire (``LEASE_TTL``) and then reclaims the Section."""
+        with self._cond:
+            if self._stopped or self._resuming:
+                return
+            self._resuming = True
+        try:
+            self._runs.submit(self._resume)
+        except RuntimeError:
+            with self._cond:
+                self._resuming = False
+                self._cond.notify_all()
 
-def _serialize_event(kind: str, event: Any) -> dict[str, Any]:
-    """One transit-event dataclass -> a JSON-safe dict tagged ``"kind"``
-    (``aspect``/``station``/``standing_retrograde``/``ingress``/``lunation``).
+    def stop(self) -> None:
+        """Stop starting work and drop the queued jobs; never waits for the model.
 
-    :class:`core.types.transits.Lunation` carries its own ``kind`` field
-    (``"new_moon"``/``"full_moon"``) -- a genuine name collision with this
-    wrapper's own outer ``"kind"`` tag, not the same value under two names.
-    Renamed to ``"lunation_kind"`` before the outer tag is applied, so
-    neither is silently lost: the outer ``"kind"`` always identifies which
-    of the five event shapes this is, and a Lunation's own new/full
-    distinction survives under its own key.
-    """
-    assert is_dataclass(event)
-    fields = {key: _json_safe(value) for key, value in asdict(event).items()}
-    if "kind" in fields:
-        fields[f"{kind}_kind"] = fields.pop("kind")
-    return {"kind": kind, **fields}
+        A running job finishes or is cut off with the process; its lease expires and the
+        Section stays as the rows say."""
+        with self._cond:
+            self._stopped = True
+            # Queued loops cancelled below never run `_drive`'s cleanup.
+            self._loops.clear()
+            self._cond.notify_all()
+        self._generation.shutdown(wait=False, cancel_futures=True)
+        self._runs.shutdown(wait=False, cancel_futures=True)
 
+    def wait_idle(self, timeout: float | None = None) -> bool:
+        """Block until no run is being driven and no resume is under way; for tests.
+        Whether it got there in time."""
+        with self._cond:
+            return self._cond.wait_for(lambda: not self._loops and not self._resuming, timeout)
 
-def _parse_datetime(value: str | None) -> datetime | None:
-    return None if value is None else datetime.fromisoformat(value)
+    def is_driving(self, run_id: UUID) -> bool:
+        with self._cond:
+            return run_id in self._loops
 
+    # -- resume ------------------------------------------------------------------------
 
-def _deserialize_transit_events(
-    events: list[dict[str, Any]],
-) -> tuple[
-    tuple[TransitAspectEvent, ...],
-    tuple[Station | StandingRetrograde, ...],
-    tuple[Ingress, ...],
-    tuple[Lunation, ...],
-]:
-    """The reverse of ``_serialize_event``: split ``run.transit_events`` back
-    into the four tuples ``core/payload/assemble.py::assemble_payload()``
-    takes -- ``stations`` mixed ``Station | StandingRetrograde``, matching
-    ``find_stations()``'s own return shape (``_run_transits_ready``'s
-    ``isinstance`` split, done here in reverse only at the dataclass-choice
-    step, never re-splitting the two kinds apart into separate tuples).
-    """
-    aspects: list[TransitAspectEvent] = []
-    stations: list[Station | StandingRetrograde] = []
-    ingresses: list[Ingress] = []
-    lunations: list[Lunation] = []
+    def _resume(self) -> None:
+        try:
+            with Session(self._engine) as session:
+                run_ids = [
+                    run.id
+                    for run in session.exec(
+                        select(ReportRun).where(ReportRun.failed_at.is_(None))  # type: ignore[union-attr]
+                    ).all()
+                    if run.stage not in _FINISHED_STAGES
+                ]
+            for run_id in run_ids:
+                self.start(run_id)
+            _logger.info("driver_resumed runs=%d", len(run_ids))
+        except Exception as error:  # noqa: BLE001 -- resuming must never raise
+            _logger.warning("driver_resume_error error=%s", type(error).__name__)
+        finally:
+            with self._cond:
+                self._resuming = False
+                self._cond.notify_all()
 
-    for event in events:
-        kind = event["kind"]
-        fields = {key: value for key, value in event.items() if key != "kind"}
-        if kind == "aspect":
-            aspects.append(
-                TransitAspectEvent(
-                    transiting_body=fields["transiting_body"],
-                    natal_point=fields["natal_point"],
-                    aspect=fields["aspect"],
-                    perfected_at=_parse_datetime(fields["perfected_at"]),
-                    never_perfected=fields["never_perfected"],
-                    orb_entry_at=_parse_datetime(fields["orb_entry_at"]),
-                    orb_exit_at=_parse_datetime(fields["orb_exit_at"]),
+    # -- one run's loop ------------------------------------------------------------------
+
+    def _drive(self, run_id: UUID, loop: _Loop) -> None:
+        _logger.info("driver_started run=%s", run_id)
+        try:
+            # The Swiss Ephemeris path is thread-local; bind it before any chart stage.
+            bind_verified_ephemeris_path_to_current_thread()
+            self._loop(run_id, loop)
+        except Exception as error:  # noqa: BLE001 -- driving must end quietly, never raise
+            _logger.warning("driver_error run=%s error=%s", run_id, type(error).__name__)
+        finally:
+            with self._cond:
+                # Fallback only (error, stop, gone): the normal end already removed this
+                # loop under the lock; never remove a newer loop a `start` made since.
+                if self._loops.get(run_id) is loop:
+                    self._loops.pop(run_id, None)
+                self._cond.notify_all()
+            _logger.info("driver_stopped run=%s", run_id)
+
+    def _loop(self, run_id: UUID, loop: _Loop) -> None:
+        errors = 0
+        unchanged = 0
+        while True:
+            with self._cond:
+                if self._stopped:
+                    return
+                loop.recheck = False
+            try:
+                step = self._step(run_id)
+            except Exception as error:  # noqa: BLE001 -- a transient store error
+                errors += 1
+                _logger.warning(
+                    "driver_error run=%s error=%s consecutive=%d",
+                    run_id,
+                    type(error).__name__,
+                    errors,
                 )
-            )
-        elif kind == "station":
-            stations.append(
-                Station(
-                    body=fields["body"],
-                    direction=fields["direction"],
-                    station_at=_parse_datetime(fields["station_at"]),
-                    longitude=Decimal(fields["longitude"]),
-                )
-            )
-        elif kind == "standing_retrograde":
-            stations.append(
-                StandingRetrograde(
-                    body=fields["body"],
-                    retrograde_start_utc=_parse_datetime(fields["retrograde_start_utc"]),
-                    retrograde_end_utc=_parse_datetime(fields["retrograde_end_utc"]),
-                )
-            )
-        elif kind == "ingress":
-            ingresses.append(
-                Ingress(
-                    body=fields["body"],
-                    house_departed=fields["house_departed"],
-                    house_entered=fields["house_entered"],
-                    crossed_at=_parse_datetime(fields["crossed_at"]),
-                )
-            )
-        elif kind == "lunation":
-            lunations.append(
-                Lunation(
-                    kind=fields["lunation_kind"],
-                    occurred_at=_parse_datetime(fields["occurred_at"]),
-                    longitude=Decimal(fields["longitude"]),
-                    natal_house=fields["natal_house"],
-                )
-            )
-        else:
-            raise ValueError(f"unrecognized transit event kind: {kind!r}")
+                if errors >= _MAX_CONSECUTIVE_ERRORS:
+                    _logger.warning("driver_gave_up run=%s reason=errors", run_id)
+                    return
+                self._pause(loop, _IDLE_RETRY_SECONDS)
+                continue
+            errors = 0
+            if step == "end":
+                with self._cond:
+                    if self._stopped:
+                        return
+                    if loop.recheck:
+                        continue
+                    # Decided, and the entry removed, under the lock a `start` takes: it
+                    # either set `recheck` before this, or finds no loop and makes a new one.
+                    if self._loops.get(run_id) is loop:
+                        self._loops.pop(run_id, None)
+                    self._cond.notify_all()
+                return
+            unchanged = unchanged + 1 if step == "unchanged" else 0
+            if unchanged >= _MAX_UNCHANGED_ROUNDS:
+                _logger.warning("driver_gave_up run=%s reason=no_progress", run_id)
+                return
+            if step == "unchanged":
+                self._pause(loop, _IDLE_RETRY_SECONDS)
 
-    return tuple(aspects), tuple(stations), tuple(ingresses), tuple(lunations)
+    def _step(self, run_id: UUID) -> str:
+        """One evaluation: ``end`` (nothing more to drive), ``changed``, ``unchanged``
+        (a round changed nothing) or ``idle`` (waited for a lease)."""
+        with Session(self._engine) as session:
+            run = session.get(ReportRun, run_id)
+            if run is None:
+                _logger.info("driver_run_gone run=%s", run_id)
+                return "end"
+            if run.failed_at is not None or run.stage in _FINISHED_STAGES:
+                return "end"
+            if run.stage == "payload_ready":
+                return self._draft_step(session, run)
+            return self._advance_step(session, run)
 
-
-def _run_payload_ready(
-    session: Session,
-    run: ReportRun,
-    natal_chart: NatalChart,
-    config: ComputationConfig,
-    ephemeris_identity: EphemerisIdentity,
-    sections_config: SectionsConfig,
-    generator: Generator,
-    vocabulary: GateVocabulary,
-) -> None:
-    """``payload_ready``: assemble this month's ``Payload`` (Story 3.6),
-    project its two day lists (Story 3.7), freeze both into canonical JSON
-    (Story 3.8) and persist a ``ReportPayload`` row for ``run`` -- then
-    derive and persist this month's ``ReportTheme`` from that same
-    ``Payload`` (Story 4.3, AD-14), reusing ``payload``/``config`` already in
-    scope rather than a new AD-10 stage.
-
-    ``run.transit_events`` is read back and split by
-    ``_deserialize_transit_events`` -- never recomputed, mirroring how
-    ``_run_natal_ready``'s month interval is read back rather than
-    recomputed once ``transits_ready`` has already run. ``DomainProfiles``
-    are recomputed fresh from ``natal_chart``/``config`` instead: cheap and
-    pure, with no stored column to read back from (see Story 3.8's Design
-    Notes).
-    """
-    assert run.transit_events is not None, (
-        f"ReportRun {run.id} reached payload_ready without transit events."
-    )
-
-    aspects, stations, ingresses, lunations = _deserialize_transit_events(run.transit_events)
-    rulers = resolve_house_rulers(natal_chart, config)
-    profiles = assemble_domain_profiles(natal_chart, rulers)
-    payload = assemble_payload(
-        natal_chart, profiles, aspects, stations, ingresses, lunations, config, sections_config
-    )
-    day_lists = project_day_lists(payload, natal_chart, config)
-    frozen = freeze_payload(
-        payload,
-        day_lists,
-        config=config,
-        sections_config=sections_config,
-        ephemeris_identity=ephemeris_identity,
-    )
-    store_report_payload(session, run=run, frozen=frozen)
-
-    theme = derive_theme(payload, config)
-    store_report_theme(session, run=run, theme=theme)
-
-
-def _deserialize_theme(theme: dict[str, Any]) -> ReportTheme:
-    """The reverse of ``StoredReportTheme.theme``'s JSON encoding
-    (``shell/adapters/postgres/report_theme.py``'s own ``_json_safe``) back
-    into a real ``ReportTheme`` -- read back, never recomputed, mirroring
-    ``_deserialize_transit_events``'s own round trip for ``run.transit_events``.
-
-    ``ThemeAspect.orb_entry_at`` and ``StandingRetrograde``'s two fields are
-    always set (non-``Optional`` on those dataclasses), but are parsed via
-    the same ``_parse_datetime`` used for every possibly-``None`` field here
-    -- mirroring how ``_deserialize_transit_events`` already parses
-    ``TransitAspectEvent.orb_entry_at`` (also non-``Optional``) the same way,
-    rather than a second, narrower datetime parser.
-    """
-    return ReportTheme(
-        dominant_aspects=tuple(
-            ThemeAspect(
-                transiting_body=aspect["transiting_body"],
-                natal_point=aspect["natal_point"],
-                aspect=aspect["aspect"],
-                perfected_at=_parse_datetime(aspect["perfected_at"]),
-                never_perfected=aspect["never_perfected"],
-                orb_entry_at=_parse_datetime(aspect["orb_entry_at"]),
-                orb_exit_at=_parse_datetime(aspect["orb_exit_at"]),
-            )
-            for aspect in theme["dominant_aspects"]
-        ),
-        lunations=tuple(
-            ThemeLunation(kind=lunation["kind"], natal_house=lunation["natal_house"])
-            for lunation in theme["lunations"]
-        ),
-        standing_retrogrades=tuple(
-            StandingRetrograde(
-                body=retrograde["body"],
-                retrograde_start_utc=_parse_datetime(retrograde["retrograde_start_utc"]),
-                retrograde_end_utc=_parse_datetime(retrograde["retrograde_end_utc"]),
-            )
-            for retrograde in theme["standing_retrogrades"]
-        ),
-    )
-
-
-def _deserialize_generated_draft(draft: dict[str, Any]) -> GeneratedDraft:
-    """The reverse of ``ReportDraft.draft``'s JSON encoding
-    (``shell/adapters/postgres/report_draft.py``'s own ``_json_safe``) back
-    into a real ``GeneratedDraft`` -- read back, never recomputed, mirroring
-    ``_deserialize_theme``'s own round trip for ``StoredReportTheme.theme``.
-
-    ``draft`` is a dict of eight keys (``GeneratedDraft``'s own field
-    names), each a list of ``{"text": ..., "entry_ids": [...]}`` objects;
-    each is rebuilt as a ``tuple[Sentence, ...]`` before
-    ``GeneratedDraft(**fields)`` reassembles the whole value -- key order
-    does not matter, since every one of ``GeneratedDraft``'s eight fields is
-    passed by name.
-    """
-    fields = {
-        section: tuple(
-            Sentence(text=sentence["text"], entry_ids=tuple(sentence["entry_ids"]))
-            for sentence in sentences
+    def _advance_step(self, session: Session, run: ReportRun) -> str:
+        """One ``advance()`` call; a missing Client or chart fails the run for good."""
+        stored_chart = current_chart_for_client(session, run.client_id)
+        if stored_chart is None:
+            self._fail(session, run, f"ReportRun {run.id} has no Client or no stored chart.")
+            return "end"
+        before = (run.stage, run.stage_failure_count, run.failed_at)
+        advance(
+            session,
+            run,
+            natal_chart=deserialize_natal_chart(stored_chart),
+            natal_chart_id=stored_chart.id,
+            config=self._config,
+            ephemeris_identity=self._ephemeris_identity,
+            sections_config=self._sections_config,
+            vocabulary=self._vocabulary,
         )
-        for section, sentences in draft.items()
-    }
-    return GeneratedDraft(**fields)
+        after = (run.stage, run.stage_failure_count, run.failed_at)
+        return "changed" if after != before else "unchanged"
 
-
-def _run_draft_ready(
-    session: Session,
-    run: ReportRun,
-    natal_chart: NatalChart,
-    config: ComputationConfig,
-    ephemeris_identity: EphemerisIdentity,
-    sections_config: SectionsConfig,
-    generator: Generator,
-    vocabulary: GateVocabulary,
-) -> None:
-    """``draft_ready``: call the ``Generator`` port (Story 4.5, AD-3) with
-    this run's already-persisted ``Payload``, the Style Guide currently in
-    force, this month's already-persisted ``ReportTheme`` as
-    ``theme_current`` and this Client's most recent prior month's
-    ``ReportTheme`` (if any) as ``theme_previous`` (Story 4.7) -- then
-    persist the returned ``GeneratedDraft`` verbatim.
-
-    ``payload``/``theme_current``/``theme_previous`` are all read back --
-    from ``ReportPayload``/``StoredReportTheme``/
-    ``most_recent_prior_report_theme()`` respectively -- never recomputed,
-    mirroring every other stage function's own "read back, never recomputed"
-    pattern (this story's Boundaries). ``vocabulary`` is part of
-    :data:`StageFn`'s uniform signature (Story 5.3); this stage does not use
-    it -- the Groundedness Gate it feeds runs one stage later, at
-    ``gate_passed``.
-
-    The persisted ``ReportDraft`` is tagged
-    ``attempt=next_report_draft_attempt(session, run.id)`` (Story 5.4,
-    amended by Story 5.8): a count of existing ``ReportDraft`` rows for
-    ``run``, not ``run.regeneration_count`` directly -- the two still
-    coincide on this automatic path (``0`` the first time this stage runs,
-    incrementing by one each regeneration), but only the count stays correct
-    once Story 5.8's hand-correction route can also mint a row for this run
-    without ever touching ``regeneration_count``. So a second (or third)
-    draft for the same run is a new, distinctly-tagged row, never a conflict
-    with the first, regardless of which route minted the prior one.
-    """
-    stored_payload = session.exec(
-        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
-    ).one()
-    stored_theme = session.exec(
-        select(StoredReportTheme).where(StoredReportTheme.report_run_id == run.id)
-    ).one()
-    style_guide = current_style_guide(session)
-
-    theme_current = _deserialize_theme(stored_theme.theme)
-    stored_prior_theme = most_recent_prior_report_theme(
-        session, run.client_id, before_month=run.month
-    )
-    theme_previous = (
-        None if stored_prior_theme is None else _deserialize_theme(stored_prior_theme.theme)
-    )
-    draft = generator.generate(
-        stored_payload.payload,
-        StyleGuideVersion(version=style_guide.version, content=style_guide.content),
-        theme_previous,
-        theme_current,
-    )
-    store_report_draft(
-        session,
-        run=run,
-        style_guide_version=style_guide.version,
-        sections_config_version=stored_payload.sections_config_version,
-        draft=draft,
-        attempt=next_report_draft_attempt(session, run.id),
-    )
-
-
-def _run_gate_passed(
-    session: Session,
-    run: ReportRun,
-    natal_chart: NatalChart,
-    config: ComputationConfig,
-    ephemeris_identity: EphemerisIdentity,
-    sections_config: SectionsConfig,
-    generator: Generator,
-    vocabulary: GateVocabulary,
-) -> None:
-    """``gate_passed``: re-derive this run's already-persisted
-    ``GeneratedDraft`` and ``Payload``, run the Groundedness Gate
-    (Story 5.2, ``core/gate/run.py::run_gate()``) against them, and on a
-    pass persist a new immutable ``Report`` row -- never on failure
-    (Story 5.3) -- alongside a ``StoredGateResult`` row recording the pass
-    (Story 5.6). The mirror write for a *failing* check lives in ``advance()``'s
-    ``except GateFailedError`` block instead, not here: this stage's
-    ``with_backoff`` wrapper is capped at ``max_attempts=1``
-    (:data:`_STAGE_BACKOFF_OVERRIDES`), so a raised ``GateFailedError``
-    propagates on the first attempt straight to that handler, which owns the
-    failing ``StoredGateResult`` write and the regeneration bookkeeping (this
-    story's Design Notes, as amended by epic-6-retro item 43).
-
-    ``stored_draft``/``stored_payload`` are both read back -- from
-    ``ReportDraft``/``ReportPayload`` respectively, via
-    ``_deserialize_generated_draft`` for the former -- never recomputed,
-    mirroring every other stage function's own "read back, never
-    recomputed" pattern (this story's Boundaries). On
-    ``GateResult.passed is False``, raises :class:`core.errors.GateFailedError`
-    so ``advance()``'s ``GateFailedError``-specific handling (Story 5.4)
-    rewinds ``run.stage`` to ``payload_ready`` for a bounded regeneration --
-    no ``Report`` row is ever written on a failing pass. ``natal_chart``/
-    ``ephemeris_identity`` are part of :data:`StageFn`'s uniform signature;
-    this stage does not use either.
-
-    ``stored_draft`` is the *latest* ``ReportDraft`` for ``run`` -- highest
-    ``attempt`` -- never ``.one()`` (Story 5.4): more than one row is now
-    expected once a run has regenerated at least once, and the Gate must
-    always check the most recently generated draft, not an arbitrary or the
-    very first one.
-    """
-    stored_draft = session.exec(
-        select(ReportDraft)
-        .where(ReportDraft.report_run_id == run.id)
-        .order_by(ReportDraft.attempt.desc())
-    ).first()
-    assert stored_draft is not None, (
-        f"ReportRun {run.id} reached gate_passed without a persisted ReportDraft."
-    )
-    stored_payload = session.exec(
-        select(ReportPayload).where(ReportPayload.report_run_id == run.id)
-    ).one()
-
-    draft = _deserialize_generated_draft(stored_draft.draft)
-    result = run_gate(draft, stored_payload.payload, vocabulary)
-
-    if not result.passed:
-        raise GateFailedError(result.violations)
-
-    store_report(
-        session,
-        run=run,
-        style_guide_version=stored_draft.style_guide_version,
-        payload_schema_version=stored_payload.schema_version,
-        gate_vocabulary_version=result.vocabulary_version,
-        gate_vocabulary_content_hash=result.vocabulary_content_hash,
-    )
-    store_gate_result(
-        session,
-        run=run,
-        passed=True,
-        regeneration_count=run.regeneration_count,
-        vocabulary_version=result.vocabulary_version,
-        vocabulary_content_hash=result.vocabulary_content_hash,
-        violations=result.violations,
-    )
-
-
-#: Only the stages implemented so far -- Story 3.9+ registers the rest,
-#: unchanged (see the module's Design Notes).
-_STAGE_FUNCTIONS: dict[str, StageFn] = {
-    "natal_ready": _run_natal_ready,
-    "transits_ready": _run_transits_ready,
-    "payload_ready": _run_payload_ready,
-    "draft_ready": _run_draft_ready,
-    "gate_passed": _run_gate_passed,
-}
-
-
-def advance(
-    session: Session,
-    run: ReportRun,
-    *,
-    natal_chart: NatalChart,
-    natal_chart_id: UUID,
-    config: ComputationConfig,
-    ephemeris_identity: EphemerisIdentity,
-    sections_config: SectionsConfig,
-    generator: Generator,
-    vocabulary: GateVocabulary,
-) -> ReportRun:
-    """Advance ``run`` by **at most one** stage: run the single next stage
-    after ``run.stage`` in ``_STAGE_SEQUENCE`` that has a registered function
-    in ``_STAGE_FUNCTIONS``, commit, and return (AD-20, Story 3.10, amended
-    by Story 3.11).
-
-    Called from ``poll_report_run`` (``shell/http/routes/report_runs.py``) in
-    ``poll`` mode (the default), and, since Story 3.11's AD-20 amendment,
-    from ``shell/runner/scheduler.py``'s in-process ``background``-mode
-    scheduler tick -- never from the start ``POST``. Within one running
-    instance only one of the two callers is ever active (``poll_report_run``
-    gates its own call on ``report_run_mode is ReportRunMode.POLL``; the
-    scheduler only runs when ``report_run_mode is ReportRunMode.BACKGROUND``);
-    a transition window where both exist at once (a rolling deploy, a live
-    config change) is made safe by the advisory lock below, like any other
-    concurrent caller, not ruled out structurally (review-loop 2). Each call
-    moves the run forward exactly one stage; the start route just creates the
-    row and redirects, so the first stage runs on the first call from
-    whichever caller applies. A call landing on ``draft_ready`` runs
-    ``gate_passed`` (one ``generator``-free Gate call) and returns -- it
-    never also chains into a later stage in the same call. If ``run.stage``
-    is ``None``, this runs ``natal_ready`` only. If ``run.stage`` is
-    ``gate_passed`` (or the next stage name has no registered function yet,
-    e.g. ``exported``), this returns ``run`` unchanged with no commit.
-
-    Concurrent polls for the same run are single-flighted by a Postgres
-    transaction-scoped advisory lock on ``run.id``
-    (``shell/runner/advisory_lock.py::try_acquire_advance_lock``), taken
-    right after the ``failed_at`` short-circuit: the poll that gets the lock
-    advances one stage and commits (Postgres releases the lock on that
-    ``commit()`` / ``rollback()``, or if the connection drops -- no explicit
-    unlock), while a poll that does not get the lock rolls back, refreshes
-    ``run`` and returns its current stage without running any stage. On a
-    non-Postgres backend (SQLite, in tests) the lock is a no-op that always
-    grants -- there is no cross-connection concurrency there to guard, and
-    the concurrent-``advance()`` ``IntegrityError`` classification below
-    still stands as defense-in-depth.
-
-    ``natal_chart_id`` (Story 6.4) is recorded onto ``run.natal_chart_id``
-    exactly once, on the call that advances ``run`` through ``natal_ready``
-    -- never touched again by any later stage or regeneration, mirroring
-    ``month_start_utc``/``month_end_utc``'s own forward-only assignment
-    inside that same stage. It is set here, in the generic per-stage success
-    block, rather than added to :data:`StageFn`'s shared signature, so
-    ``_run_natal_ready`` and the other four stage functions stay
-    byte-for-byte unchanged.
-
-    ``generator``/``vocabulary`` are threaded through to the stage function
-    uniformly (Stories 4.6/5.3, :data:`StageFn`) -- only ``draft_ready``
-    calls ``generator`` and only ``gate_passed`` calls ``vocabulary``, but
-    the registry stays a plain ``{name: function}`` mapping rather than
-    growing per-stage plumbing here.
-
-    Idempotent by construction, not by re-checking output equality: a stage
-    at or before ``run.stage`` in ``_STAGE_SEQUENCE`` is never called again,
-    so polling a completed run is a no-op regardless of what
-    ``natal_chart``/``config`` are passed. Resume-after-interruption still
-    works because each stage persists before the next begins: the next poll
-    picks up at the first incomplete stage and recomputes nothing already
-    stored (AD-10). The stage's ``with_backoff`` call uses that stage's own
-    override from :data:`_STAGE_BACKOFF_OVERRIDES` when one exists (Story
-    4.8) -- ``draft_ready``'s short Gemini retry schedule -- and the plain
-    defaults otherwise.
-
-    The ``with_backoff`` attempt runs the stage function inside its own
-    ``session.begin_nested()`` SAVEPOINT (epic-4-retro item 23): a two-write
-    stage (``_run_payload_ready``, ``_run_gate_passed``) that partially
-    flushes and then fails has that partial flush rolled back to the
-    savepoint, so the *next* ``with_backoff`` attempt -- and, after
-    exhaustion, this function's own ``except`` handlers -- run on a clean
-    session instead of dying on ``PendingRollbackError``. A transient
-    second-write failure now gets a real retry within the same call.
-
-    A unique-constraint ``IntegrityError`` from a concurrent ``advance()``
-    for the same run (SQLite has no advisory lock; a future non-poll caller
-    could reappear -- items 26/44) is handled separately from every other
-    stage exception. It is intercepted *inside* the retried callable so
-    ``with_backoff`` never retries it (a unique-constraint conflict never
-    clears on retry, and on ``draft_ready`` a retry would spend another paid
-    ``generator.generate()`` call plus ``with_backoff``'s 2 s / 4 s
-    sleeps); this function then rolls back, ``session.refresh(run)``, and if
-    ``run.stage`` has advanced past the current stage treats it as a
-    completed stage (``return run``, no counter change, INFO log). Otherwise
-    -- a genuine integrity bug, no concurrent advance -- it falls through to
-    the same stage-failure path as any other exception (``stage_failure_count``
-    increment, terminal at :data:`_MAX_STAGE_FAILURES`), still without a
-    retry.
-
-    A successful stage advance resets ``run.stage_failure_count`` to 0.
-    When a stage's ``with_backoff`` call exhausts every attempt,
-    ``run.stage`` is left unchanged (as before) but
-    ``run.stage_failure_count`` is incremented; once it reaches
-    :data:`_MAX_STAGE_FAILURES` *consecutive* exhaustions (across separate
-    polls), ``run`` is marked terminally failed
-    (``failed_at``/``failure_reason`` set) instead of being retried on every
-    future poll forever -- a persistent rate limit or error now reaches a
-    terminal state Francesco is shown, rather than an indefinite,
-    ever-hammering silent stall. Either way ``run`` is returned exactly as
-    far as it got.
-
-    A run already marked ``failed_at`` short-circuits immediately: no lock is
-    acquired, no stage function runs, no ``with_backoff`` call is made,
-    ``run`` is returned unchanged.
-
-    A :class:`core.errors.GateFailedError` from ``gate_passed`` is handled
-    separately from every other stage exception (Story 5.4): it persists a
-    failing ``StoredGateResult`` row (Story 5.6, ``regeneration_count`` at
-    its pre-increment value, ``error.violations``, ``vocabulary.version``)
-    first. (Amended 2026-09-17, correct-course:) if ``error.violations``
-    names fewer than :data:`_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`, ``run``
-    is marked terminally failed immediately on that same check --
-    ``run.regeneration_count`` is left unchanged and ``run.stage`` is not
-    rewound -- routing straight to the existing review surface (Stories
-    5.7/5.8) instead of spending a paid regeneration. (The shipped threshold
-    is 1, so this branch is inactive today; see the constant's comment.)
-    Otherwise, before incrementing ``run.regeneration_count``
-    (never ``stage_failure_count``, left untouched) and, while that count is
-    at or below :data:`_MAX_REGENERATIONS`, rewinds ``run.stage`` to
-    ``payload_ready`` so the *next* poll re-runs ``draft_ready`` -- a
-    genuinely new ``GeneratedDraft`` from the same stored Payload -- and then
-    ``gate_passed`` again on the poll after that. Once
-    ``run.regeneration_count`` exceeds :data:`_MAX_REGENERATIONS`, ``run`` is
-    marked terminally failed the same way a :data:`_MAX_STAGE_FAILURES`
-    exhaustion is, except ``run.stage`` is left at ``draft_ready`` (never
-    rewound) so the last, still-failing draft stays reachable rather than
-    discarded. Every branch commits and returns immediately -- regeneration
-    itself always happens on a subsequent poll, never within the same call
-    that caught the failure.
-    """
-    if run.failed_at is not None:
-        return run
-
-    # Resolve the single next stage from the in-memory `run` *before* taking
-    # the advisory lock: a poll on a completed run (`run.stage` is the last
-    # named stage) or one whose next stage has no registered function yet
-    # (`exported`, today) has nothing to do, so it must acquire no lock --
-    # matching the `failed_at` fast-path above.
-    next_index = _stage_index(run.stage) + 1
-    if next_index >= len(_STAGE_SEQUENCE):
-        # `run.stage` is already the last named stage (`gate_passed`) --
-        # there is no next stage to run.
-        return run
-
-    stage_name = _STAGE_SEQUENCE[next_index]
-    stage_fn = _STAGE_FUNCTIONS.get(stage_name)
-    if stage_fn is None:
-        # The next stage name has no registered function yet (`exported`,
-        # today) -- stop cleanly, no commit.
-        return run
-
-    if not try_acquire_advance_lock(session, run.id):
-        # A concurrent poll holds the transaction-scoped advisory lock and
-        # is advancing this run one stage. Non-blocking by design (AD-20,
-        # this module's Design Notes): roll our own empty transaction back,
-        # re-read the row so the caller renders the freshest stage, and
-        # return without running anything. Postgres releases the lock on the
-        # winner's own commit/rollback.
+    def _draft_step(self, session: Session, run: ReportRun) -> str:
+        """The ``draft_ready`` work: open the attempt, write what is claimable,
+        assemble when complete, fail the run when a Section is out of attempts."""
+        run_id = run.id
+        attempt = open_draft_attempt(session, run)
+        states = [section_state(row) for row in section_rows(session, run.id, attempt)]
+        now = self._now()
+        if is_draft_complete(states):
+            return "changed" if assemble_draft(session, run, attempt) else "unchanged"
+        if is_exhausted(states, max_attempts=self._max_attempts):
+            self._fail_exhausted(session, run, attempt)
+            return "end"
+        claimable = claimable_sections(states, max_attempts=self._max_attempts, now=now)
+        if claimable:
+            # End the transaction first: the wait below can take a minute, and a
+            # connection held across it is one the generation jobs cannot use.
+            session.rollback()
+            return self._round(run_id, attempt, claimable)
+        # Another writer's live lease is the only obstacle: look again once it expires.
+        expiries = live_lease_expiries(states, now)
         session.rollback()
+        self._pause_until(expiries, now)
+        return "idle" if expiries else "unchanged"
+
+    def _round(self, run_id: UUID, attempt: int, ordinals: tuple[int, ...]) -> str:
+        """One job per claimable Section, at most the cap in flight."""
+        futures: list[Future[bool]] = []
+        for ordinal in ordinals:
+            try:
+                futures.append(
+                    self._generation.submit(self._write_section, run_id, attempt, ordinal)
+                )
+            except RuntimeError:
+                break  # the executor was shut down by `stop`
+        # `result()`, not `wait()`: a future the executor cancels on stop is never
+        # "notified", so `wait` would block forever on it.
+        wrote = False
+        for future in futures:
+            try:
+                wrote = future.result() or wrote
+            except CancelledError:
+                continue
+        _logger.info("driver_round run=%s attempt=%d sections=%d", run_id, attempt, len(ordinals))
+        return "changed" if wrote else "unchanged"
+
+    # -- one Section's job -----------------------------------------------------------
+
+    def _write_section(self, run_id: UUID, attempt: int, ordinal: int) -> bool:
+        """Claim one Section, generate it, record the outcome. Whether this call wrote
+        anything; never raises. Reaches no chart code -- only storage and the Generator."""
+        try:
+            with Session(self._engine) as session:
+                row = session.exec(
+                    select(ReportDraftSection)
+                    .where(ReportDraftSection.report_run_id == run_id)
+                    .where(ReportDraftSection.attempt == attempt)
+                    .where(ReportDraftSection.ordinal == ordinal)
+                ).one()
+                section_id, name = row.id, row.name
+            with section_claim(
+                self._engine, section_id, now=self._now, ttl=self._lease_ttl
+            ) as claim:
+                if claim is None:
+                    return False
+                try:
+                    sentences = self._generate(run_id, attempt, ordinal, name)
+                except Exception as error:  # noqa: BLE001 -- any failure costs one attempt
+                    self._record_failure(section_id, claim, error)
+                    _logger.warning(
+                        "driver_section_failed run=%s section=%s error=%s",
+                        run_id,
+                        name,
+                        type(error).__name__,
+                    )
+                    return True
+                self._record_success(section_id, claim, sentences)
+                return True
+        except Exception as error:  # noqa: BLE001 -- a job must never raise into its loop
+            _logger.warning(
+                "driver_section_error run=%s ordinal=%d error=%s",
+                run_id,
+                ordinal,
+                type(error).__name__,
+            )
+            return False
+
+    def _generate(
+        self, run_id: UUID, attempt: int, ordinal: int, name: str
+    ) -> tuple[Sentence, ...]:
+        with Session(self._engine) as session:
+            run = session.get(ReportRun, run_id)
+            if run is None:
+                raise LookupError(f"ReportRun {run_id} is gone.")
+            inputs = load_generation_inputs(session, run)
+            written: dict[str, tuple[Sentence, ...]] | None = None
+            if ordinal == CLOSING_ORDINAL:
+                written = {
+                    row.name: sentences_from_json(row.sentences or [])
+                    for row in section_rows(session, run_id, attempt)
+                    if row.ordinal < CLOSING_ORDINAL and row.status == STATUS_COMPLETE
+                }
+        return self._generator().generate_section(
+            name,
+            inputs.payload,
+            inputs.style_guide,
+            inputs.theme_previous,
+            inputs.theme_current,
+            written,
+        )
+
+    def _record_success(
+        self, section_id: UUID, claim: datetime, sentences: tuple[Sentence, ...]
+    ) -> None:
+        """Write the Section, but only while the row still carries ``claim``: a writer
+        whose lease expired and was reclaimed (or whose Section another writer
+        completed) changes nothing."""
+        with Session(self._engine) as session:
+            session.execute(
+                update(ReportDraftSection)
+                .where(ReportDraftSection.id == section_id)  # type: ignore[arg-type]
+                .where(ReportDraftSection.status == STATUS_PENDING)  # type: ignore[arg-type]
+                .where(ReportDraftSection.claimed_at == claim)  # type: ignore[arg-type]
+                .values(
+                    status=STATUS_COMPLETE,
+                    sentences=sentences_to_json(sentences),
+                    last_error=None,
+                    claimed_at=None,
+                    claim_expires_at=None,
+                )
+            )
+            session.commit()
+
+    def _record_failure(self, section_id: UUID, claim: datetime, error: Exception) -> None:
+        """One failed attempt, applied only while the row still carries ``claim``:
+        ``attempts + 1``, ``last_error`` set, ``failed`` once every attempt is spent.
+        Otherwise the Section is held off for ``retry_base_delay * 2**(attempts - 1)``
+        seconds by turning the claim into a plain expiry (``claimed_at`` cleared,
+        ``claim_expires_at`` pushed out) -- so a rate limit cannot burn every attempt
+        in milliseconds, and the claim's own release leaves the hold-off in place."""
+        message = f"{type(error).__name__}: {error}"[:_MAX_ERROR_LENGTH]
+        with Session(self._engine) as session:
+            row = session.exec(
+                select(ReportDraftSection)
+                .where(ReportDraftSection.id == section_id)
+                .where(ReportDraftSection.status == STATUS_PENDING)
+                .where(ReportDraftSection.claimed_at == claim)
+            ).first()
+            if row is None:
+                return
+            attempts = row.attempts + 1
+            exhausted = attempts >= self._max_attempts
+            hold_off = None
+            if not exhausted:
+                delay = self._retry_base_delay * 2 ** (attempts - 1)
+                hold_off = self._now() + timedelta(seconds=delay)
+            session.execute(
+                update(ReportDraftSection)
+                .where(ReportDraftSection.id == section_id)  # type: ignore[arg-type]
+                .where(ReportDraftSection.status == STATUS_PENDING)  # type: ignore[arg-type]
+                .where(ReportDraftSection.claimed_at == claim)  # type: ignore[arg-type]
+                .values(
+                    attempts=attempts,
+                    last_error=message,
+                    status=STATUS_FAILED if exhausted else STATUS_PENDING,
+                    claimed_at=None,
+                    claim_expires_at=hold_off,
+                )
+            )
+            session.commit()
+
+    # -- failing a run ----------------------------------------------------------------
+
+    def _fail_exhausted(self, session: Session, run: ReportRun, attempt: int) -> None:
+        """Mark the run terminally failed, naming the Section that ran out of attempts."""
+        rows = section_rows(session, run.id, attempt)
+        culprit = next(
+            row
+            for row in rows
+            if row.status == STATUS_FAILED
+            or (row.status == STATUS_PENDING and row.attempts >= self._max_attempts)
+        )
+        name = SECTION_NAMES[culprit.ordinal - 1]
+        self._fail(
+            session,
+            run,
+            f"Section {name!r} failed {culprit.attempts} times: {culprit.last_error}",
+        )
+
+    def _fail(self, session: Session, run: ReportRun, reason: str) -> None:
         session.refresh(run)
-        _logger.info(
-            "advance lock held by a concurrent poll; returning current stage "
-            "%s without advancing: %s",
-            run.stage,
-            run.id,
-        )
-        return run
-
-    backoff_kwargs = _STAGE_BACKOFF_OVERRIDES.get(stage_name, {})
-
-    #: Set by `_attempt` below when the stage's own flush raised a
-    #: unique-constraint `IntegrityError` -- the fingerprint of a concurrent
-    #: `advance()` (SQLite has no advisory lock; a future non-poll caller;
-    #: items 26/44) having already written this stage's row. Holds the
-    #: caught exception so the genuine-bug path can still log it.
-    integrity_error: IntegrityError | None = None
-
-    def _attempt(stage_fn: StageFn = stage_fn) -> None:
-        # NOT a straight mirror of `place_cache.store_resolved_place`:
-        # that helper wraps `begin_nested()` in `try/except
-        # IntegrityError: pass` and swallows the conflict in place. Here
-        # the SAVEPOINT shape is the same (item 23: a partial flush rolls
-        # back to the savepoint, so the next `with_backoff` attempt runs
-        # on a clean session), but a caught `IntegrityError` is surfaced
-        # to `advance()`'s body via `integrity_error` for a benign-vs-
-        # genuine classification -- it is deliberately NOT re-raised into
-        # `with_backoff`'s retry: a unique-constraint conflict from a
-        # concurrent `advance()` never clears on a retry, and letting it
-        # ride `with_backoff` would burn up to `max_attempts` doomed
-        # attempts -- for `draft_ready` that is three real
-        # `generator.generate()` (Gemini) calls plus `time.sleep(6)` +
-        # `time.sleep(12)` before the conflict is even classified. (The
-        # "next attempt runs clean" reasoning for the SAVEPOINT itself
-        # does not apply to `gate_passed`, which is `max_attempts=1`.)
-        nonlocal integrity_error
-        # Defensive reset: if a future change ever lets `with_backoff`
-        # re-enter `_attempt` after a transient failure, a stale caught
-        # conflict from an earlier attempt must not leak into the `else`
-        # branch's benign-vs-genuine check.
-        integrity_error = None
-        try:
-            with session.begin_nested():
-                stage_fn(
-                    session,
-                    run,
-                    natal_chart,
-                    config,
-                    ephemeris_identity,
-                    sections_config,
-                    generator,
-                    vocabulary,
-                )
-        except IntegrityError as conflict:
-            integrity_error = conflict
-
-    try:
-        with_backoff(_attempt, **backoff_kwargs)
-    except GateFailedError as error:
-        # `_run_gate_passed`'s pass-path attempt (`store_report` then
-        # `store_gate_result`, each its own flush) may have partially
-        # flushed and then failed before raising whatever exception
-        # `with_backoff` ultimately exhausted on -- on a real database
-        # that failed flush aborts the underlying transaction, so any
-        # further statement on this session -- even reading `run.id`
-        # back for the log line below -- would fail too, masking the
-        # actual cause (epic-5-retro-item-39, re-prioritizing
-        # epic-4-retro-item-23). Rolling back first, before touching
-        # `run` at all, guarantees a clean transaction regardless of
-        # what came before.
-        session.rollback()
-        # A pure Gate re-checking the same already-persisted draft fails
-        # identically forever -- the generic stage-failure path below
-        # would just retry that same draft until _MAX_STAGE_FAILURES,
-        # never actually regenerating anything. Regeneration is a
-        # distinct counter/path (Story 5.4): stage_failure_count is left
-        # untouched here, exactly as the module's own Design Notes
-        # require.
-        _logger.exception(
-            "gate_passed rejected the draft, regenerating: %s", run.id
-        )
-        try:
-            store_gate_result(
-                session,
-                run=run,
-                passed=False,
-                regeneration_count=run.regeneration_count,
-                vocabulary_version=vocabulary.version,
-                vocabulary_content_hash=vocabulary.content_hash,
-                violations=error.violations,
-            )
-        except Exception:
-            # This write sits outside `with_backoff` by design (Story
-            # 5.6, to avoid a duplicate row) -- so nothing else retries
-            # it. Losing one gate_result row must never crash `advance()`
-            # itself: the regeneration bookkeeping below still has to
-            # run so the run keeps making progress. Roll back first --
-            # mirroring both blocks above -- before touching `run` again
-            # (even for this log line), so a real partial flush here
-            # doesn't poison the commit that follows or the log call
-            # itself.
-            session.rollback()
-            _logger.exception(
-                "failed to persist a failing gate_result, continuing "
-                "regeneration bookkeeping without it: %s",
-                run.id,
-            )
-        if len(error.violations) < _MIN_VIOLATIONS_FOR_AUTO_REGENERATION:
-            run.updated_at = datetime.now(UTC)
-            run.failed_at = run.updated_at
-            run.failure_reason = (
-                f"too few violations ({len(error.violations)}) to warrant "
-                f"automatic regeneration: {error}"
-            )
-            _logger.error(
-                "report run marked terminally failed: too few violations to "
-                "warrant automatic regeneration: %s",
-                run.id,
-            )
-            session.add(run)
-            session.commit()
-            return run
-        run.regeneration_count += 1
-        run.updated_at = datetime.now(UTC)
-        if run.regeneration_count <= _MAX_REGENERATIONS:
-            run.stage = "payload_ready"
-            _logger.info(
-                "report run rewound to payload_ready for regeneration "
-                "attempt %s: %s",
-                run.regeneration_count,
-                run.id,
-            )
-        else:
-            run.failed_at = run.updated_at
-            run.failure_reason = (
-                f"regeneration bound exhausted after {run.regeneration_count} "
-                f"attempts: {error}"
-            )
-            _logger.error(
-                "report run marked terminally failed: regeneration bound "
-                "exhausted: %s",
-                run.id,
-            )
+        if run.failed_at is not None:
+            return
+        run.failed_at = run.updated_at = self._now()
+        run.failure_reason = reason
         session.add(run)
         session.commit()
-        return run
-    except Exception as error:
-        # Mirrors the `GateFailedError` branch above: a stage function
-        # that partially flushed before failing (e.g. `_run_gate_passed`'s
-        # `store_report`+`store_gate_result` pair) can leave this
-        # session's transaction aborted, which would make even reading
-        # `run.id` back for the log line below fail too, taking the
-        # whole `advance()` call down uncaught instead of leaving the run
-        # simply un-advanced (epic-5-retro-item-39). Rolling back first,
-        # before touching `run` at all, avoids that.
-        session.rollback()
-        _logger.exception("report run stage failed, left un-advanced: %s", run.id)
-        run.stage_failure_count += 1
-        run.updated_at = datetime.now(UTC)
-        if run.stage_failure_count >= _MAX_STAGE_FAILURES:
-            run.failed_at = run.updated_at
-            run.failure_reason = (
-                f"stage {stage_name!r} failed {run.stage_failure_count} consecutive "
-                f"times: {error}"
-            )
-            _logger.error(
-                "report run marked terminally failed at %s after %s consecutive "
-                "failures: %s",
-                stage_name,
-                run.stage_failure_count,
-                run.id,
-            )
-        session.add(run)
-        session.commit()
-        return run
-    else:
-        if integrity_error is not None:
-            # `_attempt` caught a unique-constraint `IntegrityError` and
-            # returned normally so `with_backoff` did not retry it. The
-            # stage's `begin_nested()` already rolled its partial flush
-            # back to the savepoint; roll the *outer* transaction back
-            # too, before re-reading `run`, so the refresh below runs in
-            # a fresh transaction and sees a concurrent commit under
-            # READ COMMITTED or REPEATABLE READ alike.
-            session.rollback()
-            session.refresh(run)
-            if _stage_index(run.stage) >= next_index:
-                # A concurrent `advance()` already completed this stage and
-                # advanced `run.stage`. Benign -- not a stage failure:
-                # `stage_failure_count`/`regeneration_count`/`failed_at`
-                # are all left exactly as the concurrent winner's
-                # committed row (just refreshed) has them.
-                _logger.info(
-                    "stage %s already completed by a concurrent advance(); "
-                    "run.stage is now %s: %s",
-                    stage_name,
-                    run.stage,
-                    run.id,
-                )
-                return run
-            # `run.stage` did not advance: this is a genuine integrity
-            # bug, not a concurrent-stage race. Record it as a stage
-            # failure exactly like the `except Exception` path above --
-            # but still without a `with_backoff` retry (it never clears).
-            # `_logger.error` (not `.exception`): this runs in the `else`
-            # clause with no active exception handler; `exc_info` carries
-            # the conflict caught back inside `_attempt`.
-            _logger.error(
-                "report run stage failed on a non-concurrent IntegrityError, "
-                "left un-advanced: %s",
-                run.id,
-                exc_info=integrity_error,
-            )
-            run.stage_failure_count += 1
-            run.updated_at = datetime.now(UTC)
-            if run.stage_failure_count >= _MAX_STAGE_FAILURES:
-                run.failed_at = run.updated_at
-                run.failure_reason = (
-                    f"stage {stage_name!r} failed {run.stage_failure_count} consecutive "
-                    f"times: {integrity_error}"
-                )
-                _logger.error(
-                    "report run marked terminally failed at %s after %s consecutive "
-                    "failures: %s",
-                    stage_name,
-                    run.stage_failure_count,
-                    run.id,
-                )
-            session.add(run)
-            session.commit()
-            return run
+        _logger.error("report run marked terminally failed: %s", run.id)
 
-    if stage_name == "natal_ready":
-        run.natal_chart_id = natal_chart_id
-    run.stage = stage_name
-    run.stage_failure_count = 0
-    run.updated_at = datetime.now(UTC)
-    session.add(run)
-    session.commit()
-    _logger.info("report run advanced to %s: %s", stage_name, run.id)
-    return run
+    # -- waiting ------------------------------------------------------------------------
+
+    def _pause_until(self, expiries: list[datetime], now: datetime) -> None:
+        """Sleep until the earliest live lease expires, but never longer than the idle
+        retry: the writer holding it may be another process, which releases the lease
+        (success or failure) without telling this one, so the loop looks again soon.
+        Wakes early on a ``start`` or ``stop``."""
+        seconds = _IDLE_RETRY_SECONDS
+        if expiries:
+            wait_for = (min(expiries) - now).total_seconds() + _EXPIRY_SLACK_SECONDS
+            seconds = min(max(wait_for, _EXPIRY_SLACK_SECONDS), _IDLE_RETRY_SECONDS)
+        with self._cond:
+            if not self._stopped:
+                self._cond.wait(timeout=seconds)
+
+    def _pause(self, loop: _Loop, seconds: float) -> None:
+        """Sleep up to ``seconds``, waking early on a ``start`` or ``stop``."""
+        with self._cond:
+            if not (loop.recheck or self._stopped):
+                self._cond.wait(timeout=seconds)

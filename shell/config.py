@@ -30,9 +30,9 @@ __all__ = [
     "DEFAULT_GEMINI_MODEL",
     "DEFAULT_GENERATION_CONCURRENCY",
     "MAX_GENERATION_CONCURRENCY",
+    "MAX_SECTION_ATTEMPTS",
     "ConfigError",
     "Environment",
-    "ReportRunMode",
     "Settings",
     "load_settings",
     "settings",
@@ -54,21 +54,6 @@ class Environment(StrEnum):
     PRODUCTION = "production"
 
 
-class ReportRunMode(StrEnum):
-    """How forward progress happens for every ``ReportRun`` in this
-    deployment (AD-20, amended for Story 3.11) -- never configurable per run.
-
-    ``POLL`` is AD-20's original rule: ``advance()`` runs only from
-    ``GET /report-runs/{run_id}``, one stage per poll. ``BACKGROUND`` adds an
-    in-process scheduler task (``shell/runner/scheduler.py``) that ticks the
-    same ``advance()`` for every incomplete run on a fixed cadence, and the
-    poll handler becomes read-only.
-    """
-
-    POLL = "poll"
-    BACKGROUND = "background"
-
-
 #: URL schemes accepted for ``DATABASE_URL``. All durable state lives in Postgres
 #: (AD-11), so a non-Postgres URL is a configuration error rather than a choice.
 _POSTGRES_SCHEMES: tuple[str, ...] = (
@@ -88,6 +73,11 @@ DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 #: ``GENERATION_CONCURRENCY`` is unset or blank, and the largest value accepted.
 DEFAULT_GENERATION_CONCURRENCY = 11
 MAX_GENERATION_CONCURRENCY = 32
+
+#: Generation attempts one Section of a draft gets before the run is marked failed
+#: (AD-21). A constant, not an environment variable: it is a correctness bound, not a
+#: deployment fact.
+MAX_SECTION_ATTEMPTS = 3
 
 _MIN_PORT = 1
 _MAX_PORT = 65535
@@ -120,19 +110,15 @@ class Settings:
     session_secret_key: str
     gemini_api_key: str
     gemini_data_terms_verified_at: str
-    # A dataclass-level default (not just in `_read_report_run_mode`), unlike
-    # every other field here: 14 test files construct `Settings(...)`
-    # directly without this field and must keep working unmodified (Story
-    # 3.11's Boundaries).
-    report_run_mode: ReportRunMode = ReportRunMode.POLL
-    # Mirrors `report_run_mode`'s own optional-with-dataclass-default shape.
+    # Optional, with dataclass-level defaults, unlike the fields above: many test
+    # files construct `Settings(...)` directly without them.
     # `Environment.LOCAL` normally forces `RecordedResponseGenerator` (Story
     # 4.9) so a local run never spends real Gemini quota by accident; this is
     # the explicit, single opt-out a developer sets deliberately (never a
     # deployment default -- `compose.yaml` leaves it unset) to exercise the
     # real `GeminiGenerator` against a local Postgres.
     use_real_gemini_locally: bool = False
-    # Optional like the two above, with dataclass defaults so tests that build
+    # Optional like the one above, with dataclass defaults so tests that build
     # `Settings(...)` directly keep working (Story 10.2).
     gemini_model: str = DEFAULT_GEMINI_MODEL
     generation_concurrency: int = DEFAULT_GENERATION_CONCURRENCY
@@ -145,7 +131,6 @@ class Settings:
             f"session_secret_key={self.redacted_session_secret_key!r}, "
             f"gemini_api_key={self.redacted_gemini_api_key!r}, "
             f"gemini_data_terms_verified_at={self.gemini_data_terms_verified_at!r}, "
-            f"report_run_mode={self.report_run_mode!r}, "
             f"use_real_gemini_locally={self.use_real_gemini_locally!r}, "
             f"gemini_model={self.gemini_model!r}, "
             f"generation_concurrency={self.generation_concurrency!r})"
@@ -355,30 +340,10 @@ def _read_gemini_data_terms_verified_at(
     return raw, None
 
 
-def _read_report_run_mode(
-    environ: Mapping[str, str],
-) -> tuple[ReportRunMode | None, str | None]:
-    """Follow every other reader's ``(value, error)`` shape but, uniquely
-    among this file's readers, is optional (Story 3.11's Boundaries): unset
-    or blank means ``ReportRunMode.POLL``, never a missing-variable error.
-    """
-    permitted = ", ".join(member.value for member in ReportRunMode)
-    raw = environ.get("REPORT_RUN_MODE")
-    if raw is None or not raw.strip():
-        return ReportRunMode.POLL, None
-    try:
-        return ReportRunMode(raw.strip()), None
-    except ValueError:
-        return None, (
-            f"REPORT_RUN_MODE is invalid: {raw!r} is not a recognized mode. "
-            f"Permitted values: {permitted}."
-        )
-
-
 def _read_use_real_gemini_locally(
     environ: Mapping[str, str],
 ) -> tuple[bool | None, str | None]:
-    """Follows ``_read_report_run_mode``'s own optional shape: unset or
+    """Optional: unset or
     blank means ``False``, never a missing-variable error. ``"true"``/
     ``"false"`` (case-insensitive) are the only accepted explicit values --
     anything else is named as invalid rather than guessed at."""
@@ -437,7 +402,6 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     gemini_data_terms_verified_at, gemini_data_terms_verified_at_error = (
         _read_gemini_data_terms_verified_at(source)
     )
-    report_run_mode, report_run_mode_error = _read_report_run_mode(source)
     use_real_gemini_locally, use_real_gemini_locally_error = _read_use_real_gemini_locally(source)
     gemini_model, gemini_model_error = _read_gemini_model(source)
     generation_concurrency, generation_concurrency_error = _read_generation_concurrency(source)
@@ -452,7 +416,6 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             session_secret_key_error,
             gemini_api_key_error,
             gemini_data_terms_verified_at_error,
-            report_run_mode_error,
             use_real_gemini_locally_error,
             gemini_model_error,
             generation_concurrency_error,
@@ -473,7 +436,6 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         and session_secret_key is not None
         and gemini_api_key is not None
         and gemini_data_terms_verified_at is not None
-        and report_run_mode is not None
         and use_real_gemini_locally is not None
         and gemini_model is not None
         and generation_concurrency is not None
@@ -486,7 +448,6 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         session_secret_key=session_secret_key,
         gemini_api_key=gemini_api_key,
         gemini_data_terms_verified_at=gemini_data_terms_verified_at,
-        report_run_mode=report_run_mode,
         use_real_gemini_locally=use_real_gemini_locally,
         gemini_model=gemini_model,
         generation_concurrency=generation_concurrency,

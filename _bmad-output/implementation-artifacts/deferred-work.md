@@ -950,3 +950,16 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-10-3-generate-one-section-at-a-time.md`
   summary: Day-list coverage validation does not enforce one-id-per-sentence; the recorded generator cites every id in a single sentence.
   evidence: Pre-existing in `generate()`; the Gemini schema pins it, other adapters are not checked.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-4-section-rows-and-the-rundriver.md`
+  summary: A process that dies mid-Section-call never costs an attempt, so a Section that kills the process is reclaimed forever.
+  evidence: `attempts` increments only in `_record_failure`; consider counting at claim time.
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-4-section-rows-and-the-rundriver.md`
+  summary: GeminiGenerator sets no request timeout, and one client is shared across up to 32 generation threads (thread-safety unverified).
+  evidence: a hung call outlives its 3-minute lease and another loop reclaims the Section.
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-4-section-rows-and-the-rundriver.md`
+  summary: DB pool (default 15) is not reconciled with GENERATION_CONCURRENCY up to 32 plus run loops.
+  evidence: concurrency above ~12 can exhaust the pool; see the earlier pool-exhaustion fix 7f8a0e1.
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-4-section-rows-and-the-rundriver.md`
+  summary: Client deletion does not tell the driver to stop loops for the deleted run's Sections; the 2 s gate-result correlation window comment in report_runs.py assumed a slower failure path.
+  evidence: jobs fail quietly via LookupError today; a non-Gate failure within 2 s of a regenerate could be misread as a Gate failure.

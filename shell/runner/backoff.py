@@ -1,5 +1,5 @@
 """``with_backoff``: the one bounded-retry wrapper every stage function in
-``shell/runner/driver.py`` is called through (Story 3.5, AD-10).
+``shell/runner/advance.py`` is called through (Story 3.5, AD-10).
 
 Generic on purpose -- AD-10 rules against "two builders inventing
 incompatible retry semantics" (see the story's Design Notes). Nothing here
@@ -37,7 +37,7 @@ def with_backoff[T](
 
     Re-raises the final attempt's exception once every attempt is exhausted
     -- this function never swallows a persistent failure. The caller
-    (``shell/runner/driver.py::advance()``) decides what "still failing"
+    (``shell/runner/advance.py::advance()``) decides what "still failing"
     means for a ``ReportRun``: leaving ``run.stage`` at its last successful
     value rather than marking the run failed.
 

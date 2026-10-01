@@ -53,7 +53,7 @@ _RECENT_LIMIT = 20
 #: Fixed, total map from a run's ``stage`` to ``(badge text, badge variant)``
 #: -- the Italian "what happens next" phrasing from EXPERIENCE.md's stage
 #: labels. ``stage`` is written only by
-#: ``shell/runner/driver.py::_STAGE_SEQUENCE`` (``natal_ready -> ... ->
+#: ``shell/runner/advance.py::_STAGE_SEQUENCE`` (``natal_ready -> ... ->
 #: exported``) plus the ``None`` "not advanced yet" state, so this covers
 #: every persisted value. A terminally-failed run (``failed_at`` set) wins
 #: over ``stage`` -- see :func:`_badge_for`. Kept local to this module:

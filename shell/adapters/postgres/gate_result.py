@@ -3,7 +3,7 @@ Gate check (Story 5.6) -- pass or fail, unlike ``Report`` (Story 5.3), which
 only ever records a pass.
 
 Written exactly once per Gate check, by ``store_gate_result()`` from
-``shell/runner/driver.py``: on a pass, inside ``_run_gate_passed`` alongside
+``shell/runner/advance.py``: on a pass, inside ``_run_gate_passed`` alongside
 the existing ``store_report(...)`` call; on a failure, inside ``advance()``'s
 ``except GateFailedError`` block, before ``run.regeneration_count`` is
 incremented. Never updated, never deleted except as part of the FR-29
@@ -140,7 +140,7 @@ def store_gate_result(
 
     ``regeneration_count`` is always passed explicitly by the caller, never
     read from ``run.regeneration_count`` here: the fail-path caller
-    (``shell/runner/driver.py::advance()``'s ``except GateFailedError`` block)
+    (``shell/runner/advance.py::advance()``'s ``except GateFailedError`` block)
     must record the count in force *before* its own subsequent
     ``run.regeneration_count += 1``, so this function trusts whatever value
     it is given rather than reading the row itself.

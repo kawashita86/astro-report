@@ -208,7 +208,7 @@ def test_a_second_report_theme_for_the_same_report_run_id_raises_integrity_error
     """Exactly one ``StoredReportTheme`` per ``ReportRun``, enforced by a
     unique index on ``report_run_id`` -- not merely by ``store_report_theme()``
     only ever being called once per ``ReportRun`` in
-    ``shell/runner/driver.py``'s ``payload_ready`` stage."""
+    ``shell/runner/advance.py``'s ``payload_ready`` stage."""
     client = _create_client(session)
     run = _create_run(session, client)
 

@@ -139,11 +139,29 @@ def _multi_section_payload() -> dict[str, Any]:
 # --- Matrix row: a realistic multi-Section, multi-day-list payload ----------
 
 
+def _draft(
+    generator: RecordedResponseGenerator,
+    payload: dict[str, Any],
+    theme_previous: ReportTheme | None,
+    theme_current: ReportTheme,
+) -> GeneratedDraft:
+    """All eight Sections, one ``generate_section`` call each -- the whole-report
+    call is gone (Story 10.4), so this assembles what the driver does."""
+    return GeneratedDraft(
+        **{
+            name: generator.generate_section(
+                name, payload, _STYLE_GUIDE, theme_previous, theme_current
+            )
+            for name in _SECTION_NAMES
+        }
+    )
+
+
 def test_every_sentence_entry_id_is_present_in_the_payload() -> None:
     payload = _multi_section_payload()
     generator = RecordedResponseGenerator()
 
-    draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
+    draft = _draft(generator, payload, _EMPTY_THEME, _EMPTY_THEME)
 
     assert isinstance(draft, GeneratedDraft)
     assert tuple(field.name for field in dataclass_fields(draft)) == _SECTION_NAMES
@@ -168,7 +186,7 @@ def test_each_section_cites_exactly_the_ids_present_in_its_own_subtree() -> None
     payload = _multi_section_payload()
     generator = RecordedResponseGenerator()
 
-    draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
+    draft = _draft(generator, payload, _EMPTY_THEME, _EMPTY_THEME)
 
     assert set(draft.energia_generale[0].entry_ids) == {"aspect-energia-1", "lunation-energia-1"}
     assert set(draft.amore[0].entry_ids) == {"profile-amore-1", "aspect-amore-1"}
@@ -184,7 +202,7 @@ def test_giorni_sections_contain_no_date_shaped_token() -> None:
     payload = _multi_section_payload()
     generator = RecordedResponseGenerator()
 
-    draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
+    draft = _draft(generator, payload, _EMPTY_THEME, _EMPTY_THEME)
 
     for sentence in draft.giorni_favorevoli:
         assert "2026" not in sentence.text
@@ -199,7 +217,7 @@ def test_a_section_with_zero_entries_still_returns_a_sentence_with_no_citations(
     payload = _empty_payload()
     generator = RecordedResponseGenerator()
 
-    draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
+    draft = _draft(generator, payload, _EMPTY_THEME, _EMPTY_THEME)
 
     for field in dataclass_fields(draft):
         sentences = getattr(draft, field.name)
@@ -216,7 +234,7 @@ def test_an_absent_day_list_key_is_treated_like_an_empty_one() -> None:
     }
     generator = RecordedResponseGenerator()
 
-    draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
+    draft = _draft(generator, payload, _EMPTY_THEME, _EMPTY_THEME)
 
     assert draft.giorni_favorevoli[0].entry_ids == ()
     assert draft.giorni_di_attenzione[0].entry_ids == ()
@@ -333,7 +351,7 @@ def test_generate_against_a_real_frozen_payload_returns_a_valid_cited_draft() ->
     payload = _real_frozen_payload()
     generator = RecordedResponseGenerator()
 
-    draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
+    draft = _draft(generator, payload, _EMPTY_THEME, _EMPTY_THEME)
 
     assert isinstance(draft, GeneratedDraft)
     assert tuple(field.name for field in dataclass_fields(draft)) == _SECTION_NAMES
@@ -350,7 +368,7 @@ def test_each_section_cites_exactly_the_ids_in_its_own_real_subtree() -> None:
     payload = _real_frozen_payload()
     generator = RecordedResponseGenerator()
 
-    draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
+    draft = _draft(generator, payload, _EMPTY_THEME, _EMPTY_THEME)
 
     energia_ids = {entry["id"] for entry in payload["sections"]["energia_generale"]["aspects"]}
     favorevoli_ids = {entry["id"] for entry in payload["day_lists"]["giorni_favorevoli"]}
@@ -387,7 +405,7 @@ def test_generate_opens_no_socket_and_no_file_against_a_real_payload(
     """epic-4-retro-item-30: ``test_never_imports_google_genai`` only
     inspects the module namespace. This proves it at runtime -- ``socket.socket``
     and ``builtins.open`` are made to raise for the duration of the
-    ``generate()`` call (against a real frozen payload) and it still
+    eight ``generate_section()`` calls (against a real frozen payload) and it still
     succeeds, so the "never a network call, a model call or a filesystem
     read" guarantee is checked for the code path that actually runs under
     ``compose.yaml``."""
@@ -405,7 +423,7 @@ def test_generate_opens_no_socket_and_no_file_against_a_real_payload(
         patched.setattr(socket, "create_connection", _no_network)
         patched.setattr(socket, "getaddrinfo", _no_network)
         patched.setattr("builtins.open", _no_open)
-        draft = generator.generate(payload, _STYLE_GUIDE, _EMPTY_THEME, _EMPTY_THEME)
+        draft = _draft(generator, payload, _EMPTY_THEME, _EMPTY_THEME)
 
     assert isinstance(draft, GeneratedDraft)
 
@@ -447,23 +465,12 @@ def test_never_imports_google_genai() -> None:
     ), f"local.generator still reaches into the Gemini adapter: {local_imports}"
 
     validation_imports = _imported_module_names("shell/adapters/generation/validation.py")
-    assert not any(
-        name == "google" or name.startswith("google.") for name in validation_imports
-    ), f"generation/validation.py imports a google root: {validation_imports}"
+    assert not any(name == "google" or name.startswith("google.") for name in validation_imports), (
+        f"generation/validation.py imports a google root: {validation_imports}"
+    )
 
 
 # --- Story 10.3: generate_section ---------------------------------------------
-
-
-@pytest.mark.parametrize("name", _SECTION_NAMES)
-def test_generate_section_matches_the_whole_draft_section(name: str) -> None:
-    payload = _multi_section_payload()
-    generator = RecordedResponseGenerator()
-
-    sentences = generator.generate_section(name, payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
-
-    assert sentences == getattr(draft, name)
 
 
 def test_generate_section_covers_every_day_list_entry() -> None:

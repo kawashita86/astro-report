@@ -221,7 +221,7 @@ def test_a_second_report_for_the_same_report_run_id_raises_integrity_error(
 ) -> None:
     """Exactly one ``Report`` per ``ReportRun``, enforced by a unique index
     on ``report_run_id`` -- not merely by ``store_report()`` only ever being
-    called once per ``ReportRun`` in ``shell/runner/driver.py``'s
+    called once per ``ReportRun`` in ``shell/runner/advance.py``'s
     ``gate_passed`` stage."""
     client = _create_client(session)
     run = _create_run(session, client)

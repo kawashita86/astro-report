@@ -193,7 +193,7 @@ def test_store_gate_result_persists_the_vocabulary_content_hash_on_a_fail_row(
 ) -> None:
     """The digest threaded from ``GateVocabulary.content_hash`` is written on
     a failing row too (the fail path sources it straight off ``vocabulary``
-    in ``shell/runner/driver.py``) and survives a write/read round-trip
+    in ``shell/runner/advance.py``) and survives a write/read round-trip
     (epic-5-retro item 45)."""
     client = _create_client(session)
     run = _create_run(session, client)

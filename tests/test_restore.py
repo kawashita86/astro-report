@@ -1,11 +1,11 @@
 """Story 8.5 -- restore a ``GET /backup`` export into an empty database.
 
 Two halves, mirroring the read-the-file style of ``tests/test_data_terms_record.py``
-and the in-process round-trip style of ``tests/test_runner_driver.py`` /
+and the in-process round-trip style of ``tests/test_runner_advance.py`` /
 ``tests/test_http_backup.py`` -- in-memory SQLite, no network, no Docker:
 
 * **Round trip.** Populate a source DB with a real ``gate_passed`` run (reusing
-  ``tests/test_runner_driver.py``'s ``_create_client_and_chart`` / ``_drive``
+  ``tests/test_runner_advance.py``'s ``_create_client_and_chart`` / ``_drive``
   helpers) plus a ``CorpusEntry``, an ``ExportRecord`` and a second
   ``StyleGuide`` version; serialize it exactly as ``download_backup`` does;
   ``restore_backup`` it into a second, empty, FK-enforcing engine
@@ -67,7 +67,7 @@ from tests._release_validation import (
     assert_record_not_stale,
     load_record_meta,
 )
-from tests.test_runner_driver import _create_client_and_chart, _drive
+from tests.test_runner_advance import _create_client_and_chart, _drive
 
 RECORD_FILE = REPO_ROOT / "docs" / "release-validation" / "restore-rehearsal.md"
 
@@ -107,7 +107,7 @@ _TABLE_NAMES = tuple(model.__tablename__ for model in _BACKUP_MODELS)
 
 def _plain_engine():
     """An in-memory SQLite engine with a shared connection -- the source DB,
-    mirroring ``tests/test_runner_driver.py``'s own engine (no FK pragma, so
+    mirroring ``tests/test_runner_advance.py``'s own engine (no FK pragma, so
     ``_drive``'s helpers behave exactly as they do there)."""
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool

@@ -30,7 +30,7 @@ from shell.http.stage_view import (
     stage_caption,
     violation_kind_label,
 )
-from shell.runner.driver import _STAGE_SEQUENCE
+from shell.runner.advance import _STAGE_SEQUENCE
 from shell.sections import load_sections_config
 
 _CONFIG = load_computation_config()

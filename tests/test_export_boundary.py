@@ -151,7 +151,7 @@ def test_export_report_refuses_story_5_4s_exact_bound_exhausted_run_shape(
     ``ReportRun`` shaped exactly like Story 5.4's regeneration-bound-
     exhausted terminal state -- ``stage`` stays ``"draft_ready"`` (never
     rewound back), ``failed_at``/``failure_reason`` are set, and the last
-    ``ReportDraft`` stays reachable (``shell/runner/driver.py``'s ``except
+    ``ReportDraft`` stays reachable (``shell/runner/advance.py``'s ``except
     GateFailedError`` branch) -- yet critically no ``Report`` row exists,
     since a ``Report`` is written only on a Gate pass (Story 5.3). This
     closes AC3 against the real bound-exhaustion shape, not just the

@@ -55,6 +55,9 @@ imperative and imports `core/`, never the reverse. The canonical build contract 
 - Only `shell/config.py` reads the environment; every other module takes a `Settings`
   object. No module or package is named `utils`, `helpers`, or `common` anywhere. Both
   enforced by the boundary tests.
+- `shell/runner/driver.py` (the `RunDriver`) is the only module that may create a thread,
+  an executor or an async task, and no HTTP handler advances a run — handlers only call
+  `driver.start(run_id)` and read. Enforced by `tests/test_concurrency_boundary.py`.
 - Every module opens with a prose docstring explaining why it exists, not what it does.
 - Every function and method is fully type-hinted.
 - Every syntactic-guard test ships negative tests proving the guard can fail
@@ -67,7 +70,8 @@ imperative and imports `core/`, never the reverse. The canonical build contract 
 
 - The Swiss Ephemeris path (`swe.set_ephe_path`) is process-global C state, not per-module
   or per-thread. Any new code path that computes a chart must set the verified vendored
-  path for its own thread (see `core/ephemeris/identity.py`; tests re-pin it via an autouse
+  path for its own thread (the `RunDriver`'s loop threads bind it before `advance()`; see
+  `core/ephemeris/identity.py`; tests re-pin it via an autouse
   fixture in `tests/conftest.py`). Missed twice — epic-3 retro item 22 and commit `ce6767b`.
 
 <!-- /bmad:context -->

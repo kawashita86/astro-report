@@ -315,7 +315,7 @@ def test_measure_latency(capsys: pytest.CaptureFixture[str]) -> None:
     from shell.adapters.postgres.report_run import ReportRun
     from shell.adapters.postgres.style_guide import create_style_guide_version
     from shell.runner.month import client_month_interval_utc
-    from tests.test_runner_driver import (
+    from tests.test_runner_advance import (
         _COMPUTATION_CONFIG,
         _EPHEMERIS_IDENTITY,
         _RESOLVED_PLACE,
@@ -351,7 +351,7 @@ def test_measure_latency(capsys: pytest.CaptureFixture[str]) -> None:
 
             started = time.perf_counter()
             # AD-20 (Story 3.10): advance() moves one stage per call, so the
-            # end-to-end timing spans a full drain of it (tests.test_runner_driver._drive).
+            # end-to-end timing spans a full drain of it (tests.test_runner_advance._drive).
             result = _drive(session, run, natal_chart, generator=generator)
             elapsed = time.perf_counter() - started
             run_seconds.append(elapsed)

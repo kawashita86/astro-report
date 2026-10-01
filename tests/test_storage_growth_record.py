@@ -466,12 +466,12 @@ def test_measure_payload_size(capsys: pytest.CaptureFixture[str]) -> None:
     from shell.adapters.postgres.report_run import ReportRun
     from shell.adapters.postgres.report_theme import StoredReportTheme
 
-    # `tests/test_runner_driver.py` is this story's Code Map "copy source": its
+    # `tests/test_runner_advance.py` is this story's Code Map "copy source": its
     # Fort Worth fixture wiring, the clean-draft `_FakeGenerator`, the
     # Client+chart+Style-Guide seed and the `drive()` wrapper are reused here
     # verbatim rather than re-implemented.
-    from tests.test_runner_driver import _create_client_and_chart, _drive
-    from tests.test_runner_driver import _FakeGenerator as _CleanDraftGenerator
+    from tests.test_runner_advance import _create_client_and_chart, _drive
+    from tests.test_runner_advance import _FakeGenerator as _CleanDraftGenerator
 
     engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(engine)

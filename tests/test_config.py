@@ -14,7 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from shell.config import ConfigError, Environment, ReportRunMode, Settings, load_settings
+from shell.config import (
+    MAX_SECTION_ATTEMPTS,
+    ConfigError,
+    Environment,
+    Settings,
+    load_settings,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -288,73 +294,31 @@ def test_the_environment_enum_holds_exactly_two_members() -> None:
     assert {member.value for member in Environment} == {"local", "production"}
 
 
-# --- Matrix row: REPORT_RUN_MODE (Story 3.11) ---------------------------------
+# --- REPORT_RUN_MODE is gone (Story 10.4, AD-20) --------------------------------
 
 
-def test_report_run_mode_unset_defaults_to_poll() -> None:
-    """Unique among this file's readers: unset/blank is not a missing-variable
-    error -- it means ``ReportRunMode.POLL`` (this story's Boundaries)."""
-    settings = load_settings(VALID_ENVIRONMENT)
-
-    assert settings.report_run_mode is ReportRunMode.POLL
-
-
-@pytest.mark.parametrize("blank", ["", "   "])
-def test_report_run_mode_blank_also_defaults_to_poll(blank: str) -> None:
-    settings = load_settings(environment_with(REPORT_RUN_MODE=blank))
-
-    assert settings.report_run_mode is ReportRunMode.POLL
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"), [("poll", ReportRunMode.POLL), ("background", ReportRunMode.BACKGROUND)]
-)
-def test_report_run_mode_explicit_valid_values(raw: str, expected: ReportRunMode) -> None:
+@pytest.mark.parametrize("raw", ["poll", "background", "bogus"])
+def test_a_leftover_report_run_mode_variable_is_ignored(raw: str) -> None:
+    """The RunDriver replaced both modes; a deployment still setting the variable
+    must start, not abort -- and no setting carries it any more."""
     settings = load_settings(environment_with(REPORT_RUN_MODE=raw))
 
-    assert settings.report_run_mode is expected
+    assert not hasattr(settings, "report_run_mode")
+    assert "report_run_mode" not in repr(settings)
 
 
-def test_report_run_mode_invalid_value_aborts_and_names_permitted_values() -> None:
-    with pytest.raises(ConfigError) as raised:
-        load_settings(environment_with(REPORT_RUN_MODE="bogus"))
+def test_max_section_attempts_is_a_constant_not_an_environment_variable() -> None:
+    assert MAX_SECTION_ATTEMPTS == 3
+    settings = load_settings(environment_with(MAX_SECTION_ATTEMPTS="9"))
 
-    message = str(raised.value)
-    assert "REPORT_RUN_MODE" in message
-    assert "bogus" in message
-    assert "poll" in message
-    assert "background" in message
-
-
-def test_report_run_mode_appears_in_repr() -> None:
-    rendered = repr(load_settings(environment_with(REPORT_RUN_MODE="background")))
-
-    assert "report_run_mode=" in rendered
-    assert "background" in rendered
-
-
-def test_report_run_mode_has_a_dataclass_level_default() -> None:
-    """The 14 test files constructing ``Settings(...)`` directly (without
-    ``report_run_mode``) must keep working unmodified -- the default lives on
-    the dataclass itself, not only inside the reader."""
-    settings = Settings(
-        environment=Environment.LOCAL,
-        database_url="postgresql://astro:astro@localhost:5432/astro_report",
-        port=8000,
-        auth_password_hash=VALID_AUTH_PASSWORD_HASH,
-        session_secret_key="test-session-secret-key-at-least-32-chars-long",
-        gemini_api_key="test-gemini-api-key",
-        gemini_data_terms_verified_at="2026-01-15",
-    )
-
-    assert settings.report_run_mode is ReportRunMode.POLL
+    assert not hasattr(settings, "max_section_attempts")
 
 
 # --- Matrix row: USE_REAL_GEMINI_LOCALLY (Story 4.9's opt-out) --------------
 
 
 def test_use_real_gemini_locally_unset_defaults_to_false() -> None:
-    """Mirrors ``REPORT_RUN_MODE``'s own shape: unset/blank is not a
+    """Optional: unset/blank is not a
     missing-variable error -- it means ``False``."""
     settings = load_settings(VALID_ENVIRONMENT)
 
@@ -394,7 +358,7 @@ def test_use_real_gemini_locally_appears_in_repr() -> None:
 
 
 def test_use_real_gemini_locally_has_a_dataclass_level_default() -> None:
-    """Same reasoning as ``report_run_mode``'s own dataclass-level default
+    """Same reasoning as the other dataclass-level defaults
     test just above: existing direct ``Settings(...)`` construction must
     keep working unmodified."""
     settings = Settings(

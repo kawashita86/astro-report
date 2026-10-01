@@ -1,25 +1,12 @@
 """``POST /clients/{client_id}/report-runs`` (start) and
 ``GET /report-runs/{run_id}`` (HTMX poll) -- Francesco starts a month's
-computation and watches it advance one stage at a time (Story 3.5, reshaped
-for AD-20 by Story 3.10, amended by Story 3.11 for ``background`` mode).
+computation and watches it progress (Story 3.5; AD-20 as amended by Story 10.4).
 
-The start route only creates the ``ReportRun`` row, commits and redirects to
-the poll view -- it runs no stage, so it returns immediately. In ``poll``
-mode (``Settings.report_run_mode``, the default), every stage is driven from
-the poll route: each ``GET`` calls ``shell/runner/driver.py::advance()``
-once, which moves the run forward by at most one stage and returns, so the
-first stage runs on the first poll and a poll never blocks on more than its
-own single stage (one external Generator call plus bounded backoff, at
-``draft_ready``). Concurrent polls for one run are single-flighted by a
-Postgres advisory lock inside ``advance()``.
-
-In ``background`` mode, an in-process scheduler task
-(``shell/runner/scheduler.py``, started/stopped by ``shell/http/app.py``'s
-lifespan) ticks the same ``advance()`` for every incomplete ``ReportRun`` on
-a fixed cadence, and this poll route becomes read-only: it renders ``run``'s
-current state without ever calling ``advance()`` itself, so a run is never
-advanced twice for the same transition. See ``shell/runner/driver.py``'s and
-``shell/runner/scheduler.py``'s own Design Notes.
+The start route creates the ``ReportRun`` row, commits, hands the id to the
+app's ``RunDriver`` (``shell/runner/driver.py``) and redirects to the poll
+view at once. The driver moves the run forward in the background with no page
+open; every handler here -- the poll included -- is read-only with respect to
+run progress: it renders ``run``'s current state and never advances it.
 
 Authenticated by default: nothing here is named in
 ``shell.http.auth.ALLOWLIST``, so ``AuthMiddleware`` guards both routes
@@ -61,7 +48,6 @@ from shell.adapters.postgres.client import (
     Client,
     StoredNatalChart,
     current_chart_for_client,
-    deserialize_natal_chart,
 )
 from shell.adapters.postgres.export_record import (
     ExportRecord,
@@ -83,7 +69,6 @@ from shell.adapters.postgres.report_draft import (
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.weasyprint.render import html_to_pdf
-from shell.config import ReportRunMode
 from shell.http import chart_wheel
 from shell.http.app import get_session
 from shell.http.draft_view import (
@@ -103,11 +88,8 @@ from shell.http.stage_view import (
     stage_caption,
     violation_kind_label,
 )
-from shell.ports.generator import Generator
-from shell.runner.driver import advance
-from shell.runner.scheduler import generator_for_settings
 
-__all__ = ["get_generator", "router"]
+__all__ = ["router"]
 
 router = APIRouter()
 
@@ -324,27 +306,20 @@ _DISPOSITION_VALUES = {value for value, _label in DISPOSITION_CHOICES}
 #: produced *this* failure, rather than a stale row from an earlier,
 #: ``/regenerate``-superseded cycle. A real Gate check and the terminal
 #: ``failed_at`` it produces are written inside the same ``advance()`` call
-#: (``shell/runner/driver.py``'s ``except GateFailedError`` block writes the
+#: (``shell/runner/advance.py``'s ``except GateFailedError`` block writes the
 #: ``StoredGateResult`` row first, then sets ``failed_at`` -- either once
 #: ``regeneration_count`` exceeds the bound, or, amended 2026-09-17
 #: correct-course, immediately when the failing check names fewer than
 #: ``_MIN_VIOLATIONS_FOR_AUTO_REGENERATION`` violations) -- a sub-second gap,
 #: well inside this window; the absolute value admits that same sub-second gap
 #: when a caller instead constructs ``failed_at`` before the row (as this
-#: module's own tests do). A stale row is always separated from a *later* terminal
-#: ``failed_at`` by well over this window: ``regenerate_report_run``'s ``303``
-#: redirects to ``/report-runs/{run_id}`` (``poll_report_run``), so the first
-#: ``advance()`` after a rewind fires immediately on that redirect's own page
-#: load, not after a 2s poll wait -- but a fresh non-Gate terminal failure
-#: still cannot land inside this window, because ``_MAX_STAGE_FAILURES``
-#: (``shell/runner/driver.py``, 3) requires 3 *consecutive* stage-failure
-#: exhaustions across separate ``advance()`` calls -- each one only reached on
-#: a subsequent, ~2s-apart poll -- before a run is marked terminally failed
-#: for a generic reason. The real minimum margin is therefore two poll
-#: intervals (~4s, plus each call's own backoff sleeps), still over 2s but
-#: thinner than the original five-poll margin: lowering
-#: ``_MAX_STAGE_FAILURES`` to 2 or less would break this reasoning (this
-#: story's Design Notes, review-loop 1; corrected by review-loop 2).
+#: module's own tests do). A stale row is separated from a *later* terminal
+#: ``failed_at`` by the time a whole new cycle takes -- ``regenerate_report_run``
+#: rewinds the run and the ``RunDriver`` (``shell/runner/driver.py``) must write
+#: or fail at least one Section, or spend ``_MAX_STAGE_FAILURES`` consecutive
+#: stage failures (``shell/runner/advance.py``), before a fresh non-Gate failure
+#: lands -- well over this window in practice (Story 9.5 design notes; re-read
+#: for the RunDriver in Story 10.4).
 _GATE_RESULT_CORRELATION_WINDOW = timedelta(seconds=2)
 
 
@@ -507,50 +482,6 @@ def _load_run_natal_chart(session: Session, bundle: _PassedReportBundle) -> Stor
     return chart
 
 
-def get_generator(request: Request) -> Generator:
-    """The ``Generator`` this route calls at the ``draft_ready`` stage.
-
-    A one-line delegate to ``shell/runner/scheduler.py::generator_for_settings``
-    (Story 3.11) -- the ``Environment.LOCAL`` -> ``RecordedResponseGenerator()``
-    branch moved there so both this route and the ``background``-mode
-    scheduler tick share one decision rather than risking the two call sites
-    drifting.
-
-    No longer wired in as a FastAPI ``Depends(...)`` on ``poll_report_run``
-    (review-loop 1): that would construct a real ``Generator`` on *every*
-    poll, including a ``background``-mode poll that never calls ``advance()``
-    and so never uses it, for the deployment's whole lifetime. Kept as its
-    own function -- called directly, only inside ``poll_report_run``'s
-    ``poll``-mode branch -- purely so tests can still exercise this exact
-    ``Environment.LOCAL``/production branch in isolation (mirrors
-    ``get_geocoder()``, ``shell/http/routes/clients.py``).
-    """
-    return generator_for_settings(request.app.state.settings)
-
-
-def _advance_run(
-    request: Request, session: Session, run: ReportRun, client: Client, generator: Generator
-) -> ReportRun:
-    """Deserialize ``client``'s current stored chart and call ``advance()``
-    once -- used only by ``poll_report_run`` (AD-20), so each poll moves the
-    run forward by at most one stage."""
-    stored_chart = _current_chart(session, client.id)
-    if stored_chart is None:
-        raise HTTPException(status_code=404)
-    natal_chart = deserialize_natal_chart(stored_chart)
-    return advance(
-        session,
-        run,
-        natal_chart=natal_chart,
-        natal_chart_id=stored_chart.id,
-        config=request.app.state.computation_config,
-        ephemeris_identity=request.app.state.ephemeris_identity,
-        sections_config=request.app.state.sections_config,
-        generator=generator,
-        vocabulary=request.app.state.gate_vocabulary,
-    )
-
-
 @router.post("/clients/{client_id}/report-runs", include_in_schema=False)
 def start_report_run(
     client_id: UUID,
@@ -565,11 +496,10 @@ def start_report_run(
     if not _MONTH_PATTERN.match(month):
         raise HTTPException(status_code=422, detail="month must be 'YYYY-MM'.")
 
-    # AD-20 (Story 3.10): the start route runs no stage -- it only creates
-    # the row, commits and redirects, so it returns immediately; the first
-    # stage runs on the first poll. The stored chart is still checked here so
-    # starting a run for a Client with no chart is a plain 404 at submission
-    # time, not a failure the operator only discovers on the first poll.
+    # AD-20: the start route runs no stage -- it creates the row, commits, hands
+    # the id to the RunDriver and redirects, so it returns immediately. The stored
+    # chart is still checked here so starting a run for a Client with no chart is a
+    # plain 404 at submission time, not a failure the operator only discovers later.
     if _current_chart(session, client_id) is None:
         raise HTTPException(status_code=404)
 
@@ -577,6 +507,7 @@ def start_report_run(
     run = ReportRun(client_id=client_id, month=month, created_at=now, updated_at=now)
     session.add(run)
     session.commit()
+    request.app.state.run_driver.start(run.id)
 
     response = RedirectResponse(f"/report-runs/{run.id}", status_code=303)
     set_flash(
@@ -602,18 +533,7 @@ def poll_report_run(
     if client is None:
         raise RuntimeError(f"ReportRun {run.id} references a missing Client.")
 
-    # AD-20, amended for Story 3.11: in `background` mode the scheduler
-    # (`shell/runner/scheduler.py`) is the only caller of `advance()` -- this
-    # poll only reads and renders `run`'s current state, so a run is never
-    # advanced twice for the same transition. The `Generator` itself is only
-    # constructed inside this branch (review-loop 1), not via a
-    # `Depends(get_generator)` parameter on every call -- a background-mode
-    # poll never uses one, so building it unconditionally on every single
-    # request would be pure waste for the deployment's whole lifetime.
-    if request.app.state.settings.report_run_mode is ReportRunMode.POLL:
-        generator = generator_for_settings(request.app.state.settings)
-        _advance_run(request, session, run, client, generator)
-
+    # AD-20: read-only. The RunDriver moves the run; this only renders where it is.
     failed = run.failed_at is not None
     gate_failed = _current_cycle_gate_failure(session, run) is not None
     context = {
@@ -638,15 +558,11 @@ def regenerate_report_run(
 ) -> Response:
     """Rewind a Gate-failed run to ``payload_ready`` for one more real
     regeneration attempt (Story 9.5) -- a shell-only recovery route, not a
-    stage advance: it never calls ``advance()`` itself, mirroring
-    ``start_report_run``'s own "returns immediately without advancing" shape.
-    Unlike ``start_report_run`` (whose redirect target, the Client's Reports
-    tab, does not poll), this route's ``303`` redirects straight to
-    ``/report-runs/{run_id}`` -- ``poll_report_run`` -- so the first
-    ``advance()`` for the rewound run actually fires immediately, on that
-    redirect's own page load, not on some later timed poll.
+    stage advance: it never calls ``advance()`` itself. It hands the run to the
+    ``RunDriver`` (Story 10.4), which opens a new draft attempt in the background,
+    and its ``303`` redirects to ``/report-runs/{run_id}`` -- the read-only poll.
     ``run.regeneration_count`` is left untouched -- the driver's own
-    ``except GateFailedError`` branch (``shell/runner/driver.py::advance()``)
+    ``except GateFailedError`` branch (``shell/runner/advance.py::advance()``)
     is still the only place that counter ever moves, on the *next* Gate check
     this rewind lets run.
 
@@ -673,6 +589,7 @@ def regenerate_report_run(
     run.updated_at = datetime.now(UTC)
     session.add(run)
     session.commit()
+    request.app.state.run_driver.start(run.id)
 
     response = RedirectResponse(f"/report-runs/{run_id}", status_code=303)
     set_flash(
@@ -726,7 +643,7 @@ def _close_run_via_accepted_violations(
     has them (``stored_draft``/``stored_payload``, an optimization
     ``correct_gate_violation`` uses to avoid re-querying rows it just fetched
     itself) -- and writes the closing ``Report`` row exactly like
-    ``driver.py::_run_gate_passed`` does on a clean pass -- ``style_guide_version``/
+    ``advance.py::_run_gate_passed`` does on a clean pass -- ``style_guide_version``/
     ``payload_schema_version`` read off the latest ``ReportDraft``/
     ``ReportPayload``, no new Gate check ever run (``run_gate()``/
     ``GateResult``/``StoredGateResult`` stay untouched). ``run.failed_at``/
@@ -968,8 +885,8 @@ def correct_gate_violation(
     Never touches or is bounded by ``run.regeneration_count`` (this story's
     Boundaries, mirroring Story 5.7's accept route): the new ``ReportDraft``
     is tagged via ``next_report_draft_attempt(session, run.id)`` -- a plain
-    count of existing rows, the same source ``shell/runner/driver.py``'s
-    ``_run_draft_ready`` now uses -- not ``run.regeneration_count``, and
+    count of existing rows, the same source ``shell/runner/advance.py``'s
+    ``open_draft_attempt`` uses -- not ``run.regeneration_count``, and
     ``store_gate_result`` below still records ``run.regeneration_count`` at
     its current, un-incremented value purely for traceability (mirroring
     every other ``store_gate_result`` call site), never advancing it.

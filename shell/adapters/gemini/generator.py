@@ -3,15 +3,16 @@ application runs against (Story 4.5, AD-9) -- exactly one adapter, no
 runtime failover to a second provider, ever.
 
 Holds no database handle, no filesystem access and no tool definitions
-(AD-3): it is a pure function of ``generate()``'s four arguments plus one
-network call to Gemini. The Style Guide and both ``ReportTheme``s are turned
-into a prompt asking for cited structure, never free prose (AD-6); the
-response is parsed against the exact eight-Section shape and validated --
-every cited ``entry_id`` must be present somewhere in ``payload``, neither
-``giorni_favorevoli`` nor ``giorni_di_attenzione`` may contain a date-shaped
-token (dates there are code-projected upstream, Story 3.7), and every entry
-in ``payload["day_lists"]`` must be cited by at least one sentence in its
-own Section -- before a ``GeneratedDraft`` is ever returned.
+(AD-3): it is a pure function of ``generate_section()``'s arguments plus one
+network call to Gemini per Section (Stories 10.3/10.4: a Report is written one
+Section at a time, in parallel, by the ``RunDriver``). The Style Guide and both
+``ReportTheme``s are turned into a prompt asking for cited structure, never
+free prose (AD-6); the response is parsed against the one-Section shape and
+validated -- every cited ``entry_id`` must be present somewhere in ``payload``,
+neither ``giorni_favorevoli`` nor ``giorni_di_attenzione`` may contain a
+date-shaped token (dates there are code-projected upstream, Story 3.7), and
+every entry in ``payload["day_lists"]`` must be cited by at least one sentence
+in its own Section -- before the Section's sentences are ever returned.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import fields as dataclass_fields
 from typing import Any, Protocol
 
 from google import genai
@@ -28,15 +28,12 @@ from google.genai import types
 from core.errors import GenerationError
 from core.memory.diff import diff_themes
 from core.payload.freeze import canonical_json_bytes
-from core.types.generation import GeneratedDraft, Sentence
+from core.types.generation import Sentence
 from core.types.memory import AspectChange, ReportTheme, RetrogradeChange, ThemeAspect, ThemeDiff
 from shell.adapters.generation.validation import (
     _DATE_TOKEN_SECTIONS,
     _SECTION_FIELD_NAMES,
     _collect_known_entry_ids,
-    _validate_citations,
-    _validate_day_list_coverage,
-    _validate_no_date_tokens,
     _validate_section_citations,
     _validate_section_day_list_coverage,
     _validate_section_no_date_tokens,
@@ -82,31 +79,6 @@ def _aliased_payload_json(payload: dict[str, Any], aliases: dict[str, str]) -> s
     return text
 
 
-def _translate_aliases_to_real_ids(
-    draft: GeneratedDraft, alias_to_id: dict[str, str]
-) -> GeneratedDraft:
-    """The reverse of ``_build_id_aliases``: every ``entry_id`` the model
-    returned is an alias (enforced by the response schema's ``enum``) --
-    translate each back to its real Payload id before
-    ``_validate_citations``/``_validate_day_list_coverage`` (both of which
-    compare against the real, untranslated Payload) ever see it. An alias
-    absent from ``alias_to_id`` (should be unreachable given the schema
-    constraint) passes through unchanged, so it still surfaces as an unknown
-    id at the citation-validation step rather than silently vanishing.
-    """
-    fields = {
-        field.name: tuple(
-            Sentence(
-                text=sentence.text,
-                entry_ids=tuple(alias_to_id.get(alias, alias) for alias in sentence.entry_ids),
-            )
-            for sentence in getattr(draft, field.name)
-        )
-        for field in dataclass_fields(draft)
-    }
-    return GeneratedDraft(**fields)
-
-
 #: An alias token (``"e12"``, ``"e7"``, ...) appearing inside a sentence's
 #: own ``"text"`` -- the model is instructed to put every id only in
 #: ``entry_ids``, never in the reader-facing prose, but occasionally does
@@ -131,75 +103,6 @@ def _validate_section_no_alias_tokens_in_text(
                 f"internal id alias {match.group()!r} into reader-facing prose -- "
                 'ids belong only in "entry_ids", never in "text".',
             )
-
-
-def _validate_no_alias_tokens_in_text(draft: GeneratedDraft) -> None:
-    for field in dataclass_fields(draft):
-        _validate_section_no_alias_tokens_in_text(field.name, getattr(draft, field.name))
-
-
-def _build_response_schema(
-    known_ids: frozenset[str], *, favorevoli_count: int, attenzione_count: int
-) -> dict[str, Any]:
-    """Per-call ``_RESPONSE_SCHEMA``: the same eight-Section shape as
-    before, but tightened two ways (sprint-change-proposal-2026-09-18) so the
-    model structurally cannot reproduce the two failure classes a real
-    generation hit:
-
-    1. ``entry_ids`` is constrained to an ``enum`` of this run's actual
-       Payload ids, so an unknown/mistyped id can never be emitted --
-       eliminates ``citation_validation`` failures by construction rather
-       than only detecting them after the fact.
-    2. ``giorni_favorevoli``/``giorni_di_attenzione`` get their own sentence
-       shape (``entry_ids`` pinned to exactly one id per sentence) and their
-       own array length (pinned to the Payload's actual day-list count) --
-       one voce per event, never bundled, so ``day_list_coverage_validation``
-       and the renderer's one-row-per-id fan-out (``draft_view.py``) can
-       never produce the same voce duplicated across several dates. The six
-       narrative Sections keep the original unconstrained-length,
-       multi-id-per-sentence shape -- bundling several events into one
-       flowing sentence is exactly what the Style Guide's prose sections ask
-       for.
-    """
-    entry_id_schema: dict[str, Any] = {"type": "string", "enum": sorted(known_ids)}
-    narrative_sentence_schema: dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "text": {"type": "string"},
-            "entry_ids": {"type": "array", "items": entry_id_schema},
-        },
-        "required": ["text", "entry_ids"],
-    }
-    day_list_sentence_schema: dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "text": {"type": "string"},
-            "entry_ids": {
-                "type": "array",
-                "items": entry_id_schema,
-                "minItems": 1,
-                "maxItems": 1,
-            },
-        },
-        "required": ["text", "entry_ids"],
-    }
-    day_list_counts = {
-        "giorni_favorevoli": favorevoli_count,
-        "giorni_di_attenzione": attenzione_count,
-    }
-    properties: dict[str, Any] = {}
-    for name in _SECTION_FIELD_NAMES:
-        if name in _DATE_TOKEN_SECTIONS:
-            count = day_list_counts[name]
-            properties[name] = {
-                "type": "array",
-                "items": day_list_sentence_schema,
-                "minItems": count,
-                "maxItems": count,
-            }
-        else:
-            properties[name] = {"type": "array", "items": narrative_sentence_schema}
-    return {"type": "object", "properties": properties, "required": list(_SECTION_FIELD_NAMES)}
 
 
 def _build_section_response_schema(
@@ -291,51 +194,6 @@ class GeminiGenerator:
         client: _GeminiClient | None = None,
     ) -> None:
         self._client = client or _GoogleGenAIClient(api_key, model)
-
-    def generate(
-        self,
-        payload: dict,
-        style_guide: StyleGuideVersion,
-        theme_previous: ReportTheme | None,
-        theme_current: ReportTheme,
-    ) -> GeneratedDraft:
-        aliases = _build_id_aliases(_collect_known_entry_ids(payload))
-        alias_to_id = {alias: real_id for real_id, alias in aliases.items()}
-
-        try:
-            system_instruction = _build_system_instruction(style_guide)
-            prompt = _build_prompt(payload, theme_previous, theme_current, aliases)
-        except GenerationError:
-            raise
-        except Exception as error:
-            raise GenerationError(
-                "prompt_construction",
-                f"building the system instruction / prompt failed: {error}",
-            ) from error
-
-        response_schema = _build_response_schema(
-            frozenset(aliases.values()),
-            favorevoli_count=_day_list_count(payload, "giorni_favorevoli"),
-            attenzione_count=_day_list_count(payload, "giorni_di_attenzione"),
-        )
-
-        try:
-            raw = self._client.generate_content(
-                system_instruction=system_instruction,
-                prompt=prompt,
-                response_schema=response_schema,
-            )
-        except Exception as error:
-            raise GenerationError("request", f"the Gemini call failed: {error}") from error
-
-        data = _parse_response(raw)
-        draft = _build_draft(data)
-        _validate_no_alias_tokens_in_text(draft)
-        draft = _translate_aliases_to_real_ids(draft, alias_to_id)
-        _validate_citations(draft, payload)
-        _validate_no_date_tokens(draft)
-        _validate_day_list_coverage(draft, payload)
-        return draft
 
     def generate_section(
         self,
@@ -546,55 +404,6 @@ def _build_system_instruction(style_guide: StyleGuideVersion) -> str:
     )
 
 
-def _build_prompt(
-    payload: dict[str, Any],
-    theme_previous: ReportTheme | None,
-    theme_current: ReportTheme,
-    aliases: dict[str, str],
-) -> str:
-    payload_json = _aliased_payload_json(payload, aliases)
-    sections_list = "\n".join(f"- {name}" for name in _SECTION_FIELD_NAMES)
-    theme_diff = diff_themes(theme_previous, theme_current)
-    continuity = _render_continuity(theme_previous, theme_current, theme_diff)
-    continuity_block = f"\n\n{continuity}" if continuity else ""
-    favorevoli_count = _day_list_count(payload, "giorni_favorevoli")
-    attenzione_count = _day_list_count(payload, "giorni_di_attenzione")
-
-    return (
-        "Genera il Report mensile come struttura citata, non come prosa libera.\n\n"
-        "Restituisci esattamente le otto Sezioni seguenti, in questo ordine, come "
-        "chiavi dell'oggetto JSON:\n"
-        f"{sections_list}\n\n"
-        'Ogni Sezione è una lista di frasi; ogni frase ha due campi: "text" (la '
-        'frase in italiano) e "entry_ids" (gli id degli eventi del Payload su cui '
-        "la frase si basa -- ogni affermazione specifica deve citare almeno un id "
-        'valido). Nel Payload qui sotto ogni evento porta un "id" breve (es. '
-        '"e12"): usa esattamente questi identificativi brevi in "entry_ids", mai '
-        "un id diverso, più lungo o inventato. Questi id vanno SOLO nel campo "
-        '"entry_ids": il campo "text" è prosa rivolta al lettore finale e non deve '
-        "mai contenere un id, una sua parte, o un riferimento tra parentesi come "
-        '"(e12)" o "(e12, e7)" -- il lettore non vede mai il Payload e un simile '
-        "riferimento nel testo sarebbe incomprensibile e da correggere.\n\n"
-        'Le Sezioni "giorni_favorevoli" e "giorni_di_attenzione" non devono MAI '
-        "contenere una data (né un giorno del mese con un nome di mese, né una "
-        "data in formato ISO): le date sono già proiettate a monte dal codice.\n\n"
-        f'La Sezione "giorni_favorevoli" contiene esattamente {favorevoli_count} '
-        "eventi in payload['day_lists']['giorni_favorevoli']: scrivi esattamente "
-        f"{favorevoli_count} frasi in questa Sezione, una per ciascun evento, ognuna "
-        'con un solo id in "entry_ids" (mai più di uno). Non accorpare più eventi '
-        "sotto la stessa frase, anche quando le date sono vicine o gli eventi sembrano "
-        "tematicamente simili: ogni frase descrive un solo evento, e il numero totale "
-        "di frasi deve corrispondere esattamente al numero di eventi -- il documento "
-        "non ha un limite di lunghezza fisso su questa Sezione, si adatta a quanti "
-        "eventi il mese ne offre.\n"
-        f'La Sezione "giorni_di_attenzione" contiene esattamente {attenzione_count} '
-        f"eventi: applica la stessa regola, {attenzione_count} frasi, una per evento, "
-        "un solo id ciascuna, nessun accorpamento."
-        f"{continuity_block}\n\n"
-        f"--- PAYLOAD (JSON) ---\n{payload_json}\n"
-    )
-
-
 #: The Section-specific instruction appended last by
 #: :func:`_build_section_prompt` (Story 10.3). Everything before it -- system
 #: instruction, Payload, continuity -- is identical for all eight calls, so
@@ -706,12 +515,3 @@ def _parse_sentences(section: str, raw_sentences: Any) -> tuple[Sentence, ...]:
             )
         sentences.append(Sentence(text=text, entry_ids=tuple(entry_ids)))
     return tuple(sentences)
-
-
-def _build_draft(data: dict[str, Any]) -> GeneratedDraft:
-    fields: dict[str, tuple[Sentence, ...]] = {}
-    for name in _SECTION_FIELD_NAMES:
-        if name not in data:
-            raise GenerationError("parsing", f"the model response is missing Section {name!r}.")
-        fields[name] = _parse_sentences(name, data[name])
-    return GeneratedDraft(**fields)

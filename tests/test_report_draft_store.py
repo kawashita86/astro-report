@@ -186,7 +186,7 @@ def test_a_second_report_draft_at_the_same_attempt_raises_integrity_error(
     loosened this from "per ``ReportRun``"), enforced by a unique constraint
     on ``(report_run_id, attempt)`` -- not merely by ``store_report_draft()``
     only ever being called once per attempt in
-    ``shell/runner/driver.py``'s ``draft_ready`` stage."""
+    ``shell/runner/advance.py``'s ``draft_ready`` stage."""
     client = _create_client(session)
     run = _create_run(session, client)
 

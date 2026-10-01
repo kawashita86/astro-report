@@ -31,6 +31,7 @@ from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.gate_violation_review import GateViolationReview
 from shell.adapters.postgres.report import Report
 from shell.adapters.postgres.report_draft import ReportDraft
+from shell.adapters.postgres.report_draft_section import ReportDraftSection
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.postgres.report_theme import StoredReportTheme
@@ -193,7 +194,7 @@ def deserialize_natal_chart(stored: StoredNatalChart) -> NatalChart:
     """Reverse :func:`_serialize`'s ``Decimal``-to-``str`` JSON encoding back
     into the frozen :mod:`core.types.chart` dataclasses (Story 3.5).
 
-    ``shell/runner/driver.py``'s ``advance()`` needs an already-computed chart
+    ``shell/runner/advance.py``'s ``advance()`` needs an already-computed chart
     as a real :class:`NatalChart` -- the shape ``core/transits/*``'s four
     scan functions take -- not the JSON rows ``StoredNatalChart`` persists it
     as. ``stored.ascendant``/``stored.midheaven`` are already ``Decimal``
@@ -359,6 +360,7 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
     ``ReportRun`` joined the cascade in Story 3.5; ``StoredReportTheme`` in
     Story 4.3; ``ReportDraft`` in Story 4.6; ``Report`` in Story 5.3;
     ``StoredGateResult`` in Story 5.6; ``ExportRecord`` in Story 6.2;
+    ``ReportDraftSection`` in Story 10.4;
     ``CorpusEntry`` in Story 7.1; ``GateViolationReview`` in Story 5.7).
 
     Every ``CorpusEntry`` row *paired* to ``client`` (``client_id == client.id``)
@@ -474,6 +476,17 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
         session.delete(stored_gate_result)
 
     runs = session.exec(select(ReportRun).where(ReportRun.client_id == client.id)).all()
+    # ReportDraftSection has no client_id (so it is not in _CLIENT_CASCADE_TABLES) but
+    # a foreign key to report_run.id: delete it before the runs.
+    run_ids = [run.id for run in runs]
+    if run_ids:
+        for stored_section in session.exec(
+            select(ReportDraftSection).where(
+                ReportDraftSection.report_run_id.in_(run_ids)  # type: ignore[attr-defined]
+            )
+        ).all():
+            session.delete(stored_section)
+        session.flush()
     for run in runs:
         session.delete(run)
 
