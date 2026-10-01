@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import fields as dataclass_fields
 from typing import Any, Protocol
 
@@ -36,6 +37,9 @@ from shell.adapters.generation.validation import (
     _validate_citations,
     _validate_day_list_coverage,
     _validate_no_date_tokens,
+    _validate_section_citations,
+    _validate_section_day_list_coverage,
+    _validate_section_no_date_tokens,
 )
 from shell.config import DEFAULT_GEMINI_MODEL
 from shell.ports.generator import StyleGuideVersion
@@ -115,17 +119,23 @@ def _translate_aliases_to_real_ids(
 _ALIAS_TOKEN_IN_TEXT_PATTERN = re.compile(r"\be\d+\b", re.IGNORECASE)
 
 
+def _validate_section_no_alias_tokens_in_text(
+    section: str, sentences: tuple[Sentence, ...]
+) -> None:
+    for sentence in sentences:
+        match = _ALIAS_TOKEN_IN_TEXT_PATTERN.search(sentence.text)
+        if match is not None:
+            raise GenerationError(
+                "alias_token_in_text",
+                f"sentence {sentence.text!r} in Section {section!r} leaks the "
+                f"internal id alias {match.group()!r} into reader-facing prose -- "
+                'ids belong only in "entry_ids", never in "text".',
+            )
+
+
 def _validate_no_alias_tokens_in_text(draft: GeneratedDraft) -> None:
     for field in dataclass_fields(draft):
-        for sentence in getattr(draft, field.name):
-            match = _ALIAS_TOKEN_IN_TEXT_PATTERN.search(sentence.text)
-            if match is not None:
-                raise GenerationError(
-                    "alias_token_in_text",
-                    f"sentence {sentence.text!r} in Section {field.name!r} leaks the "
-                    f"internal id alias {match.group()!r} into reader-facing prose -- "
-                    'ids belong only in "entry_ids", never in "text".',
-                )
+        _validate_section_no_alias_tokens_in_text(field.name, getattr(draft, field.name))
 
 
 def _build_response_schema(
@@ -190,6 +200,40 @@ def _build_response_schema(
         else:
             properties[name] = {"type": "array", "items": narrative_sentence_schema}
     return {"type": "object", "properties": properties, "required": list(_SECTION_FIELD_NAMES)}
+
+
+def _build_section_response_schema(
+    section: str, known_ids: frozenset[str], *, day_list_count: int
+) -> dict[str, Any]:
+    """One-Section counterpart of :func:`_build_response_schema` (Story
+    10.3): an object with a single ``sentences`` array -- an object, not a
+    bare array, so the structured-output root stays an object. The sentence
+    shape, the alias ``enum`` and the day-list pinning (exactly one id per
+    sentence, array length equal to the Payload's day-list count) are the
+    same as the whole-report schema's, for this Section only.
+    """
+    entry_id_schema: dict[str, Any] = {"type": "string", "enum": sorted(known_ids)}
+    entry_ids_schema: dict[str, Any] = {"type": "array", "items": entry_id_schema}
+    sentences_schema: dict[str, Any]
+    if section in _DATE_TOKEN_SECTIONS:
+        entry_ids_schema = {**entry_ids_schema, "minItems": 1, "maxItems": 1}
+        sentences_schema = {"minItems": day_list_count, "maxItems": day_list_count}
+    else:
+        sentences_schema = {}
+    sentences_schema = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}, "entry_ids": entry_ids_schema},
+            "required": ["text", "entry_ids"],
+        },
+        **sentences_schema,
+    }
+    return {
+        "type": "object",
+        "properties": {"sentences": sentences_schema},
+        "required": ["sentences"],
+    }
 
 
 class _GeminiClient(Protocol):
@@ -292,6 +336,67 @@ class GeminiGenerator:
         _validate_no_date_tokens(draft)
         _validate_day_list_coverage(draft, payload)
         return draft
+
+    def generate_section(
+        self,
+        section: str,
+        payload: dict,
+        style_guide: StyleGuideVersion,
+        theme_previous: ReportTheme | None,
+        theme_current: ReportTheme,
+        written_sections: Mapping[str, tuple[Sentence, ...]] | None = None,
+    ) -> tuple[Sentence, ...]:
+        if section not in _SECTION_FIELD_NAMES:
+            raise ValueError(f"unknown Section {section!r}; expected one of {_SECTION_FIELD_NAMES}")
+        aliases = _build_id_aliases(_collect_known_entry_ids(payload))
+        alias_to_id = {alias: real_id for real_id, alias in aliases.items()}
+
+        try:
+            system_instruction = _build_system_instruction(style_guide)
+            prompt = _build_section_prompt(
+                section, payload, theme_previous, theme_current, aliases, written_sections
+            )
+        except GenerationError:
+            raise
+        except Exception as error:
+            raise GenerationError(
+                "prompt_construction",
+                f"building the system instruction / prompt failed: {error}",
+            ) from error
+
+        response_schema = _build_section_response_schema(
+            section,
+            frozenset(aliases.values()),
+            day_list_count=_day_list_count(payload, section),
+        )
+
+        try:
+            raw = self._client.generate_content(
+                system_instruction=system_instruction,
+                prompt=prompt,
+                response_schema=response_schema,
+            )
+        except Exception as error:
+            raise GenerationError("request", f"the Gemini call failed: {error}") from error
+
+        data = _parse_response(raw)
+        if "sentences" not in data:
+            raise GenerationError(
+                "parsing", f"the model response is missing the 'sentences' list for {section!r}."
+            )
+        sentences = _parse_sentences(section, data["sentences"])
+        _validate_section_no_alias_tokens_in_text(section, sentences)
+        sentences = tuple(
+            Sentence(
+                text=sentence.text,
+                entry_ids=tuple(alias_to_id.get(alias, alias) for alias in sentence.entry_ids),
+            )
+            for sentence in sentences
+        )
+        _validate_section_citations(section, sentences, payload)
+        _validate_section_no_date_tokens(section, sentences)
+        _validate_section_day_list_coverage(section, sentences, payload)
+        return sentences
 
 
 #: Rendered per matched/unmatched ``AspectChange.status`` (Story 4.7, Design
@@ -487,6 +592,77 @@ def _build_prompt(
         "un solo id ciascuna, nessun accorpamento."
         f"{continuity_block}\n\n"
         f"--- PAYLOAD (JSON) ---\n{payload_json}\n"
+    )
+
+
+#: The Section-specific instruction appended last by
+#: :func:`_build_section_prompt` (Story 10.3). Everything before it -- system
+#: instruction, Payload, continuity -- is identical for all eight calls, so
+#: the provider's implicit prompt cache can serve the shared prefix.
+_SECTION_FRAMING = (
+    "Scrivi UNA sola Sezione del Report mensile, come struttura citata e non come "
+    'prosa libera, e restituisci un oggetto JSON con la chiave "sentences".\n\n'
+    'Ogni frase ha due campi: "text" (la frase in italiano) e "entry_ids" (gli id '
+    "degli eventi del Payload su cui la frase si basa -- ogni affermazione specifica "
+    'deve citare almeno un id valido). Nel Payload ogni evento porta un "id" breve '
+    '(es. "e12"): usa esattamente questi identificativi brevi in "entry_ids", mai un '
+    'id diverso, più lungo o inventato. Gli id vanno SOLO in "entry_ids": il campo '
+    '"text" è prosa rivolta al lettore finale e non deve mai contenere un id, una '
+    'sua parte, o un riferimento tra parentesi come "(e12)".'
+)
+
+
+def _section_instruction(
+    section: str,
+    payload: dict[str, Any],
+    written_sections: Mapping[str, tuple[Sentence, ...]] | None,
+) -> str:
+    lines = [f'{_SECTION_FRAMING}\n\nLa Sezione da scrivere è "{section}".']
+    if section in _DATE_TOKEN_SECTIONS:
+        count = _day_list_count(payload, section)
+        lines.append(
+            f"Questa Sezione non deve MAI contenere una data (né un giorno del mese con "
+            "un nome di mese, né una data in formato ISO): le date sono già proiettate a "
+            f"monte dal codice. Contiene esattamente {count} eventi in "
+            f"payload['day_lists']['{section}']: scrivi esattamente {count} frasi, una "
+            'per ciascun evento, ognuna con un solo id in "entry_ids" (mai più di uno). '
+            "Non accorpare più eventi sotto la stessa frase: ogni frase descrive un solo "
+            "evento."
+        )
+    if section == "consiglio_finale" and written_sections:
+        written = "\n".join(
+            f"[{name}] {sentence.text}"
+            for name in _SECTION_FIELD_NAMES
+            if name != section
+            for sentence in written_sections.get(name, ())
+        )
+        lines.append(
+            "Le Sezioni precedenti, già scritte, sono qui sotto: il consiglio finale deve "
+            "essere coerente con esse e non ripeterle. Questi testi non portano id; "
+            "continua a citare solo id del Payload.\n"
+            f"--- SEZIONI GIÀ SCRITTE ---\n{written}"
+        )
+    return "\n\n".join(lines)
+
+
+def _build_section_prompt(
+    section: str,
+    payload: dict[str, Any],
+    theme_previous: ReportTheme | None,
+    theme_current: ReportTheme,
+    aliases: dict[str, str],
+    written_sections: Mapping[str, tuple[Sentence, ...]] | None,
+) -> str:
+    """Payload and continuity first (the same bytes for every Section of a
+    Report), the Section-specific instruction last."""
+    payload_json = _aliased_payload_json(payload, aliases)
+    theme_diff = diff_themes(theme_previous, theme_current)
+    continuity = _render_continuity(theme_previous, theme_current, theme_diff)
+    continuity_block = f"\n\n{continuity}" if continuity else ""
+    return (
+        f"--- PAYLOAD (JSON) ---\n{payload_json}\n"
+        f"{continuity_block}\n\n"
+        f"{_section_instruction(section, payload, written_sections)}"
     )
 
 

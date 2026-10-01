@@ -16,10 +16,11 @@ takes only ``core.types.place`` value objects, never a database row.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-from core.types.generation import GeneratedDraft
+from core.types.generation import GeneratedDraft, Sentence
 from core.types.memory import ReportTheme
 
 __all__ = ["Generator", "StyleGuideVersion"]
@@ -64,5 +65,30 @@ class Generator(Protocol):
                 validation is a best-effort regex heuristic, not a
                 completeness guarantee -- it catches the token shapes the
                 adapter knows about, not every way a date could be written.
+        """
+        ...
+
+    def generate_section(
+        self,
+        section: str,
+        payload: dict,
+        style_guide: StyleGuideVersion,
+        theme_previous: ReportTheme | None,
+        theme_current: ReportTheme,
+        written_sections: Mapping[str, tuple[Sentence, ...]] | None = None,
+    ) -> tuple[Sentence, ...]:
+        """Write one Section (a ``GeneratedDraft`` field name) as cited
+        sentences, so Sections can be written in parallel and rewritten
+        individually (Story 10.3).
+
+        ``written_sections`` is read only by ``consiglio_finale``, which is
+        shown Sections 1-7's sentence *texts* (never their ids) and still
+        cites only ``payload`` ids. Validation (alias leak, citations, and
+        for the two day-list Sections date tokens and coverage) is scoped to
+        this one Section.
+
+        Raises:
+            ValueError: ``section`` is not one of the eight Section names.
+            GenerationError: as for ``generate()``, scoped to this Section.
         """
         ...

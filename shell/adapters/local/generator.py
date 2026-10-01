@@ -18,6 +18,7 @@ call to make.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from core.types.generation import GeneratedDraft, Sentence
@@ -29,6 +30,9 @@ from shell.adapters.generation.validation import (
     _validate_citations,
     _validate_day_list_coverage,
     _validate_no_date_tokens,
+    _validate_section_citations,
+    _validate_section_day_list_coverage,
+    _validate_section_no_date_tokens,
 )
 from shell.ports.generator import StyleGuideVersion
 
@@ -81,3 +85,21 @@ class RecordedResponseGenerator:
         _validate_no_date_tokens(draft)
         _validate_day_list_coverage(draft, payload)
         return draft
+
+    def generate_section(
+        self,
+        section: str,
+        payload: dict,
+        style_guide: StyleGuideVersion,
+        theme_previous: ReportTheme | None,
+        theme_current: ReportTheme,
+        written_sections: Mapping[str, tuple[Sentence, ...]] | None = None,
+    ) -> tuple[Sentence, ...]:
+        if section not in _SECTION_FIELD_NAMES:
+            raise ValueError(f"unknown Section {section!r}; expected one of {_SECTION_FIELD_NAMES}")
+        entry_ids = tuple(sorted(_collect_known_entry_ids(_section_subtree(payload, section))))
+        sentences = (Sentence(text=_PLACEHOLDER_TEXT, entry_ids=entry_ids),)
+        _validate_section_citations(section, sentences, payload)
+        _validate_section_no_date_tokens(section, sentences)
+        _validate_section_day_list_coverage(section, sentences, payload)
+        return sentences

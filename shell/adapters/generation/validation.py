@@ -22,7 +22,7 @@ from dataclasses import fields as dataclass_fields
 from typing import Any
 
 from core.errors import GenerationError
-from core.types.generation import GeneratedDraft
+from core.types.generation import GeneratedDraft, Sentence
 
 __all__ = [
     "_DATE_TOKEN_PATTERN",
@@ -32,6 +32,9 @@ __all__ = [
     "_validate_citations",
     "_validate_day_list_coverage",
     "_validate_no_date_tokens",
+    "_validate_section_citations",
+    "_validate_section_day_list_coverage",
+    "_validate_section_no_date_tokens",
 ]
 
 #: The eight Section field names, in ``GeneratedDraft``'s own fixed order
@@ -125,32 +128,46 @@ def _collect_known_entry_ids(payload: dict[str, Any]) -> frozenset[str]:
     return frozenset(ids)
 
 
-def _validate_citations(draft: GeneratedDraft, payload: dict[str, Any]) -> None:
+def _validate_section_citations(
+    section: str, sentences: tuple[Sentence, ...], payload: dict[str, Any]
+) -> None:
     known_ids = _collect_known_entry_ids(payload)
+    for sentence in sentences:
+        for entry_id in sentence.entry_ids:
+            if entry_id not in known_ids:
+                raise GenerationError(
+                    "citation_validation",
+                    f"sentence {sentence.text!r} in Section {section!r} cites "
+                    f"unknown entry id {entry_id!r}, absent from the Payload.",
+                )
+
+
+def _validate_citations(draft: GeneratedDraft, payload: dict[str, Any]) -> None:
     for field in dataclass_fields(draft):
-        for sentence in getattr(draft, field.name):
-            for entry_id in sentence.entry_ids:
-                if entry_id not in known_ids:
-                    raise GenerationError(
-                        "citation_validation",
-                        f"sentence {sentence.text!r} in Section {field.name!r} cites "
-                        f"unknown entry id {entry_id!r}, absent from the Payload.",
-                    )
+        _validate_section_citations(field.name, getattr(draft, field.name), payload)
+
+
+def _validate_section_no_date_tokens(section: str, sentences: tuple[Sentence, ...]) -> None:
+    if section not in _DATE_TOKEN_SECTIONS:
+        return
+    for sentence in sentences:
+        if _DATE_TOKEN_PATTERN.search(sentence.text):
+            raise GenerationError(
+                "date_token_validation",
+                f"sentence {sentence.text!r} in Section {section!r} contains a "
+                "date-shaped token; dates in this Section are code-projected "
+                "upstream (Story 3.7) and must never be written by the model.",
+            )
 
 
 def _validate_no_date_tokens(draft: GeneratedDraft) -> None:
     for section in _DATE_TOKEN_SECTIONS:
-        for sentence in getattr(draft, section):
-            if _DATE_TOKEN_PATTERN.search(sentence.text):
-                raise GenerationError(
-                    "date_token_validation",
-                    f"sentence {sentence.text!r} in Section {section!r} contains a "
-                    "date-shaped token; dates in this Section are code-projected "
-                    "upstream (Story 3.7) and must never be written by the model.",
-                )
+        _validate_section_no_date_tokens(section, getattr(draft, section))
 
 
-def _validate_day_list_coverage(draft: GeneratedDraft, payload: dict[str, Any]) -> None:
+def _validate_section_day_list_coverage(
+    section: str, sentences: tuple[Sentence, ...], payload: dict[str, Any]
+) -> None:
     """Every entry in ``payload["day_lists"][section]`` must be cited by at
     least one Sentence in that same Section.
 
@@ -162,24 +179,28 @@ def _validate_day_list_coverage(draft: GeneratedDraft, payload: dict[str, Any]) 
     six Sections, Sections 6/7 have a closed, code-known set of entries the
     model is being handed to describe, so "the model wrote nothing about
     this one" is checkable and worth catching here, before export, rather
-    than leaving a blank line for Francesco to notice.
+    than leaving a blank line for Francesco to notice. A no-op for the six
+    narrative Sections.
     """
-    day_lists = payload.get("day_lists", {})
+    if section not in _DATE_TOKEN_SECTIONS:
+        return
+    known_ids = {
+        entry["id"]
+        for entry in payload.get("day_lists", {}).get(section, [])
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    }
+    cited_ids = {entry_id for sentence in sentences for entry_id in sentence.entry_ids}
+    missing = known_ids - cited_ids
+    if missing:
+        raise GenerationError(
+            "day_list_coverage_validation",
+            f"Section {section!r} has {len(missing)} day-list entry id(s) with no "
+            f"citing sentence: {sorted(missing)!r}. Every entry in "
+            "payload['day_lists'] must be described by at least one sentence in "
+            "its own Section.",
+        )
+
+
+def _validate_day_list_coverage(draft: GeneratedDraft, payload: dict[str, Any]) -> None:
     for section in _DATE_TOKEN_SECTIONS:
-        known_ids = {
-            entry["id"]
-            for entry in day_lists.get(section, [])
-            if isinstance(entry, dict) and isinstance(entry.get("id"), str)
-        }
-        cited_ids = {
-            entry_id for sentence in getattr(draft, section) for entry_id in sentence.entry_ids
-        }
-        missing = known_ids - cited_ids
-        if missing:
-            raise GenerationError(
-                "day_list_coverage_validation",
-                f"Section {section!r} has {len(missing)} day-list entry id(s) with no "
-                f"citing sentence: {sorted(missing)!r}. Every entry in "
-                "payload['day_lists'] must be described by at least one sentence in "
-                "its own Section.",
-            )
+        _validate_section_day_list_coverage(section, getattr(draft, section), payload)

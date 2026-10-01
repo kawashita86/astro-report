@@ -450,3 +450,32 @@ def test_never_imports_google_genai() -> None:
     assert not any(
         name == "google" or name.startswith("google.") for name in validation_imports
     ), f"generation/validation.py imports a google root: {validation_imports}"
+
+
+# --- Story 10.3: generate_section ---------------------------------------------
+
+
+@pytest.mark.parametrize("name", _SECTION_NAMES)
+def test_generate_section_matches_the_whole_draft_section(name: str) -> None:
+    payload = _multi_section_payload()
+    generator = RecordedResponseGenerator()
+
+    sentences = generator.generate_section(name, payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+    draft = generator.generate(payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert sentences == getattr(draft, name)
+
+
+def test_generate_section_covers_every_day_list_entry() -> None:
+    sentences = RecordedResponseGenerator().generate_section(
+        "giorni_di_attenzione", _multi_section_payload(), _STYLE_GUIDE, None, _EMPTY_THEME
+    )
+
+    assert sentences[0].entry_ids == ("aspect-attenzione-1",)
+
+
+def test_generate_section_unknown_section_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown Section"):
+        RecordedResponseGenerator().generate_section(
+            "foo", _multi_section_payload(), _STYLE_GUIDE, None, _EMPTY_THEME
+        )

@@ -943,3 +943,10 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-10-1-a-pdf-in-seconds-and-instantly-the-second-time.md`
   summary: In `report_export.html` the birth-data card now precedes the title in DOM order (float layout), changing PDF text-extraction order.
   evidence: Implementation moved `.birth-data-card` before `.header-copy` so the float aligns with the title.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-3-generate-one-section-at-a-time.md`
+  summary: Share the prompt-construction/request/alias-translation code between `GeminiGenerator.generate()` and `generate_section()`, or drop it with `generate()` in Story 10.4.
+  evidence: The two methods duplicate about 40 lines; `generate()` is removed in 10.4 so the duplication is temporary.
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-3-generate-one-section-at-a-time.md`
+  summary: Day-list coverage validation does not enforce one-id-per-sentence; the recorded generator cites every id in a single sentence.
+  evidence: Pre-existing in `generate()`; the Gemini schema pins it, other adapters are not checked.

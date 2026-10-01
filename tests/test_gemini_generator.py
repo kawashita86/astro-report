@@ -17,7 +17,7 @@ from core.ephemeris.identity import verify_ephemeris_identity
 from core.errors import GenerationError
 from core.payload.freeze import freeze_payload
 from core.types.day_lists import DayLists
-from core.types.generation import GeneratedDraft
+from core.types.generation import GeneratedDraft, Sentence
 from core.types.memory import ReportTheme, ThemeAspect
 from core.types.payload import Payload, SectionPayload
 from core.types.transits import StandingRetrograde, TransitAspectEvent
@@ -1025,3 +1025,236 @@ def test_generator_for_settings_passes_the_configured_model(
     scheduler.generator_for_settings(settings)
 
     assert seen["model"] == "gemini-2.5-pro"
+
+
+# --- Story 10.3: generate_section ---------------------------------------------
+
+
+def _section_response(*sentences: dict[str, Any]) -> str:
+    return json.dumps({"sentences": list(sentences)})
+
+
+def _section_generator(response: str | None) -> tuple[GeminiGenerator, _FakeGeminiClient]:
+    client = _FakeGeminiClient(response=response)
+    return GeminiGenerator(api_key="unused", client=client), client
+
+
+def _two_id_aliases() -> dict[str, str]:
+    return _build_id_aliases(frozenset({_KNOWN_ID, _ANOTHER_KNOWN_ID}))
+
+
+def test_generate_section_narrative_translates_aliases_back_to_real_ids() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    aliases = _two_id_aliases()
+    generator, client = _section_generator(
+        _section_response({"text": "Una frase.", "entry_ids": [aliases[_KNOWN_ID]]})
+    )
+
+    sentences = generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert sentences[0].text == "Una frase."
+    assert sentences[0].entry_ids == (_KNOWN_ID,)
+    assert len(client.calls) == 1
+
+
+def test_generate_section_day_list_schema_pins_count_and_one_id_per_sentence() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    aliases = _two_id_aliases()
+    generator, client = _section_generator(
+        _section_response({"text": "Voce.", "entry_ids": [aliases[_ANOTHER_KNOWN_ID]]})
+    )
+
+    generator.generate_section("giorni_favorevoli", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    schema = client.calls[0]["response_schema"]
+    sentences = schema["properties"]["sentences"]
+    assert sentences["minItems"] == sentences["maxItems"] == 1
+    entry_ids = sentences["items"]["properties"]["entry_ids"]
+    assert entry_ids["minItems"] == entry_ids["maxItems"] == 1
+    assert entry_ids["items"]["enum"] == sorted(aliases.values())
+
+
+def test_generate_section_narrative_schema_is_unconstrained_in_length() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, client = _section_generator(_section_response())
+
+    generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    sentences = client.calls[0]["response_schema"]["properties"]["sentences"]
+    assert "minItems" not in sentences
+    assert "minItems" not in sentences["items"]["properties"]["entry_ids"]
+
+
+def test_generate_section_day_list_missing_coverage_raises() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, _ = _section_generator(_section_response())
+
+    with pytest.raises(GenerationError) as excinfo:
+        generator.generate_section("giorni_favorevoli", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert excinfo.value.step == "day_list_coverage_validation"
+
+
+def test_generate_section_prompts_share_an_identical_prefix_and_end_with_the_instruction() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    aliases = _two_id_aliases()
+    previous = _theme(aspects=(_theme_aspect(),))
+    current = _theme(aspects=(_theme_aspect(perfected_at=None),))
+    day_list_reply = _section_response({"text": "Voce.", "entry_ids": [aliases[_ANOTHER_KNOWN_ID]]})
+    generator, client = _section_generator(day_list_reply)
+
+    generator.generate_section("giorni_favorevoli", payload, _STYLE_GUIDE, previous, current)
+    generator.generate_section("amore", payload, _STYLE_GUIDE, previous, current)
+
+    first, second = client.calls
+    assert first["system_instruction"] == second["system_instruction"]
+    marker = "La Sezione da scrivere è"
+    first_prefix, first_instruction = first["prompt"].split(marker)
+    second_prefix, second_instruction = second["prompt"].split(marker)
+    assert first_prefix == second_prefix
+    assert "--- PAYLOAD (JSON) ---" in first_prefix
+    assert first_instruction.startswith(' "giorni_favorevoli"')
+    assert second_instruction.startswith(' "amore"')
+    assert "esattamente 1 eventi" in first_instruction
+    assert "esattamente" not in second_instruction
+
+
+def test_generate_section_accepts_an_empty_day_list() -> None:
+    payload = _payload_with_ids(_KNOWN_ID)
+    generator, client = _section_generator(_section_response())
+
+    sentences = generator.generate_section(
+        "giorni_di_attenzione", payload, _STYLE_GUIDE, None, _EMPTY_THEME
+    )
+
+    assert sentences == ()
+    schema = client.calls[0]["response_schema"]["properties"]["sentences"]
+    assert schema["minItems"] == schema["maxItems"] == 0
+
+
+def test_consiglio_finale_prompt_carries_the_other_texts_but_never_their_ids() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    aliases = _two_id_aliases()
+    written = {
+        "amore": (Sentence(text="Testo dell'amore.", entry_ids=(_KNOWN_ID,)),),
+        "lavoro": (Sentence(text="Testo del lavoro.", entry_ids=(_ANOTHER_KNOWN_ID,)),),
+    }
+    generator, client = _section_generator(
+        _section_response({"text": "Consiglio.", "entry_ids": [aliases[_KNOWN_ID]]})
+    )
+
+    sentences = generator.generate_section(
+        "consiglio_finale", payload, _STYLE_GUIDE, None, _EMPTY_THEME, written
+    )
+
+    instruction = client.calls[0]["prompt"].split("--- SEZIONI GIÀ SCRITTE ---")[1]
+    assert "Testo dell'amore." in instruction
+    assert "Testo del lavoro." in instruction
+    for token in (_KNOWN_ID, _ANOTHER_KNOWN_ID, *aliases.values()):
+        assert token not in instruction
+    assert sentences[0].entry_ids == (_KNOWN_ID,)
+
+
+def test_other_sections_ignore_written_sections() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    written = {"amore": (Sentence(text="Testo dell'amore.", entry_ids=()),)}
+    generator, client = _section_generator(_section_response())
+
+    generator.generate_section("lavoro", payload, _STYLE_GUIDE, None, _EMPTY_THEME, written)
+
+    assert "Testo dell'amore." not in client.calls[0]["prompt"]
+
+
+def test_generate_section_alias_leak_in_text_raises() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, _ = _section_generator(
+        _section_response({"text": "Vedi (e1, e2).", "entry_ids": []})
+    )
+
+    with pytest.raises(GenerationError) as excinfo:
+        generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert excinfo.value.step == "alias_token_in_text"
+
+
+def test_generate_section_unknown_id_raises_at_the_citation_step() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, _ = _section_generator(
+        _section_response({"text": "Frase.", "entry_ids": ["not-an-alias"]})
+    )
+
+    with pytest.raises(GenerationError) as excinfo:
+        generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert excinfo.value.step == "citation_validation"
+
+
+def test_generate_section_date_token_in_a_day_list_section_raises() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    aliases = _two_id_aliases()
+    generator, _ = _section_generator(
+        _section_response(
+            {"text": "Il 15 gennaio va bene.", "entry_ids": [aliases[_ANOTHER_KNOWN_ID]]}
+        )
+    )
+
+    with pytest.raises(GenerationError) as excinfo:
+        generator.generate_section("giorni_favorevoli", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert excinfo.value.step == "date_token_validation"
+
+
+def test_generate_section_a_date_in_a_narrative_section_is_allowed() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, _ = _section_generator(
+        _section_response({"text": "Il 15 gennaio.", "entry_ids": []})
+    )
+
+    sentences = generator.generate_section("amore", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert sentences[0].text == "Il 15 gennaio."
+
+
+@pytest.mark.parametrize(
+    ("response", "step"),
+    [
+        (None, "parsing"),
+        ("not json", "parsing"),
+        (json.dumps({"other": []}), "parsing"),
+        (json.dumps({"sentences": "x"}), "parsing"),
+    ],
+)
+def test_generate_section_bad_responses_raise_at_the_parsing_step(
+    response: str | None, step: str
+) -> None:
+    generator, _ = _section_generator(response)
+
+    with pytest.raises(GenerationError) as excinfo:
+        generator.generate_section(
+            "amore", _payload_with_ids(_KNOWN_ID), _STYLE_GUIDE, None, _EMPTY_THEME
+        )
+
+    assert excinfo.value.step == step
+
+
+def test_generate_section_client_failure_raises_at_the_request_step() -> None:
+    client = _FakeGeminiClient(error=RuntimeError("boom"))
+    generator = GeminiGenerator(api_key="unused", client=client)
+
+    with pytest.raises(GenerationError) as excinfo:
+        generator.generate_section(
+            "amore", _payload_with_ids(_KNOWN_ID), _STYLE_GUIDE, None, _EMPTY_THEME
+        )
+
+    assert excinfo.value.step == "request"
+
+
+def test_generate_section_unknown_section_is_rejected_before_any_call() -> None:
+    generator, client = _section_generator(_section_response())
+
+    with pytest.raises(ValueError, match="unknown Section"):
+        generator.generate_section(
+            "foo", _payload_with_ids(_KNOWN_ID), _STYLE_GUIDE, None, _EMPTY_THEME
+        )
+
+    assert client.calls == []
