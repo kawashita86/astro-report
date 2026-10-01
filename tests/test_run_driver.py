@@ -621,14 +621,14 @@ def test_start_returns_at_once_and_a_stopped_driver_ignores_it(
 # --- the Gate ----------------------------------------------------------------------------
 
 
-def test_a_gate_failure_opens_a_new_full_attempt_of_eight_fresh_rows(
+def test_a_gate_failure_opens_a_new_attempt_that_rewrites_only_the_named_sections(
     drivers: list[RunDriver], engine: Engine, run_id: UUID
 ) -> None:
     class _ViolatesOnce(_Recorder):
         def generate_section(self, section, *args, **kwargs):
             draft = (
                 _a_two_violation_generated_draft()
-                if self.counts.get("amore", 0) == 0
+                if self.counts.get("consiglio_finale", 0) == 0
                 else _a_generated_draft()
             )
             self._draft = draft
@@ -647,9 +647,60 @@ def test_a_gate_failure_opens_a_new_full_attempt_of_eight_fresh_rows(
     assert len(_rows(engine, run_id, 0)) == 8
     assert len(_rows(engine, run_id, 1)) == 8
     assert {row.status for row in _rows(engine, run_id, 1)} == {"complete"}
+    # The violations named energia_generale and amore: those two plus consiglio_finale
+    # were rewritten, the other five were copied forward.
+    assert generator.counts == {
+        name: 2 if name in ("energia_generale", "amore", "consiglio_finale") else 1
+        for name in SECTION_NAMES
+    }
     with Session(engine) as session:
         results = session.exec(select(StoredGateResult).order_by(StoredGateResult.created_at)).all()
     assert [result.passed for result in results] == [False, True]
+    assert [result.draft_attempt for result in results] == [0, 1]
+
+
+def test_a_gate_failure_in_amore_alone_rewrites_only_amore_and_consiglio_finale(
+    drivers: list[RunDriver], engine: Engine, run_id: UUID
+) -> None:
+    class _AmoreViolatesOnce(_Recorder):
+        def generate_section(self, section, *args, **kwargs):
+            self._draft = (
+                _an_amore_violation_draft()
+                if self.counts.get("consiglio_finale", 0) == 0
+                else _a_generated_draft()
+            )
+            return super().generate_section(section, *args, **kwargs)
+
+    generator = _AmoreViolatesOnce()
+    driver = _driver(drivers, engine, generator)
+
+    driver.start(run_id)
+    _wait_done(driver)
+
+    run = _run(engine, run_id)
+    assert run.stage == "gate_passed"
+    assert run.regeneration_count == 1
+    assert generator.counts == {
+        name: 2 if name in ("amore", "consiglio_finale") else 1 for name in SECTION_NAMES
+    }
+    # The five untouched Sections are the first attempt's, carried over verbatim.
+    first, second = _rows(engine, run_id, 0), _rows(engine, run_id, 1)
+    for before, after in zip(first, second, strict=True):
+        if before.name not in ("amore", "consiglio_finale"):
+            assert after.sentences == before.sentences
+
+
+def _an_amore_violation_draft() -> GeneratedDraft:
+    return GeneratedDraft(
+        energia_generale=_a_generated_draft().energia_generale,
+        amore=(Sentence(text="Venere porta armonia.", entry_ids=()),),
+        lavoro=(),
+        denaro=(),
+        benessere=(),
+        giorni_favorevoli=(),
+        giorni_di_attenzione=(),
+        consiglio_finale=(),
+    )
 
 
 def test_a_regenerate_rewind_is_picked_up_by_a_new_start(

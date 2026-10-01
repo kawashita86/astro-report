@@ -17,6 +17,7 @@ with their Client (``delete_client_and_derived``).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -28,6 +29,7 @@ from uuid6 import uuid7
 
 from core.draft_state import (
     SECTION_NAMES,
+    STATUS_COMPLETE,
     STATUS_PENDING,
     SectionRowState,
 )
@@ -110,18 +112,35 @@ def section_rows(session: Session, run_id: UUID, attempt: int) -> list[ReportDra
     )
 
 
-def open_section_rows(session: Session, run_id: UUID, attempt: int) -> bool:
-    """Create the eight ``pending`` rows of ``attempt``; ``False`` if they already exist.
+def open_section_rows(
+    session: Session,
+    run_id: UUID,
+    attempt: int,
+    *,
+    carried: Mapping[int, tuple[Sentence, ...]] | None = None,
+) -> bool:
+    """Create the eight rows of ``attempt``; ``False`` if they already exist.
+
+    Ordinals in ``carried`` are written ``complete`` with those sentences (a targeted
+    regeneration copying forward what the Gate accepted, Story 10.5); every other
+    ordinal starts ``pending``.
 
     Runs in a savepoint so a concurrent opener's unique-index conflict leaves the
     caller's transaction usable. Flushes, never commits.
     """
+    carried = carried or {}
     try:
         with session.begin_nested():
             for ordinal, name in enumerate(SECTION_NAMES, start=1):
+                kept = carried.get(ordinal)
                 session.add(
                     ReportDraftSection(
-                        report_run_id=run_id, attempt=attempt, ordinal=ordinal, name=name
+                        report_run_id=run_id,
+                        attempt=attempt,
+                        ordinal=ordinal,
+                        name=name,
+                        status=STATUS_PENDING if kept is None else STATUS_COMPLETE,
+                        sentences=None if kept is None else sentences_to_json(kept),
                     )
                 )
             session.flush()

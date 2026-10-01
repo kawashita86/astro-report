@@ -42,6 +42,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from core.draft_state import SECTION_NAMES
 from core.gate.run import _index_entries, run_gate
 from core.types.generation import Sentence
 from shell.adapters.postgres.client import (
@@ -66,6 +67,7 @@ from shell.adapters.postgres.report_draft import (
     next_report_draft_attempt,
     store_report_draft,
 )
+from shell.adapters.postgres.report_draft_section import open_section_rows
 from shell.adapters.postgres.report_payload import ReportPayload
 from shell.adapters.postgres.report_run import ReportRun
 from shell.adapters.weasyprint.render import html_to_pdf
@@ -716,9 +718,7 @@ def _close_run_via_accepted_violations(
     return True
 
 
-@router.post(
-    "/report-runs/{run_id}/violations/{violation_index}/accept", include_in_schema=False
-)
+@router.post("/report-runs/{run_id}/violations/{violation_index}/accept", include_in_schema=False)
 def accept_gate_violation(
     run_id: UUID,
     violation_index: int,
@@ -840,9 +840,7 @@ def accept_gate_violation(
     return response
 
 
-@router.post(
-    "/report-runs/{run_id}/violations/{violation_index}/correct", include_in_schema=False
-)
+@router.post("/report-runs/{run_id}/violations/{violation_index}/correct", include_in_schema=False)
 def correct_gate_violation(
     run_id: UUID,
     violation_index: int,
@@ -1024,6 +1022,17 @@ def correct_gate_violation(
             draft=corrected_draft,
             attempt=next_report_draft_attempt(session, run.id),
         )
+        # The corrected attempt's Sections, all complete, so rows and drafts stay one
+        # per attempt and a later targeted regeneration starts from this text (Story 10.5).
+        open_section_rows(
+            session,
+            run.id,
+            stored_new_draft.attempt,
+            carried={
+                ordinal: getattr(corrected_draft, name)
+                for ordinal, name in enumerate(SECTION_NAMES, start=1)
+            },
+        )
     except IntegrityError:
         # A concurrent request (another hand-correction, or a Rigenera)
         # minted the same next `attempt` first -- roll back and let
@@ -1048,6 +1057,7 @@ def correct_gate_violation(
         vocabulary_version=result.vocabulary_version,
         vocabulary_content_hash=result.vocabulary_content_hash,
         violations=result.violations,
+        draft_attempt=stored_new_draft.attempt,
     )
 
     # Counted, not a plain set (code-review fix, 2026-09-02): two violations

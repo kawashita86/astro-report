@@ -15,7 +15,7 @@ are ``complete`` and is shown their text.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields
 from datetime import datetime
 
@@ -33,6 +33,7 @@ __all__ = [
     "is_exhausted",
     "is_lease_live",
     "live_lease_expiries",
+    "regeneration_ordinals",
 ]
 
 #: The eight Section names in AD-6's fixed order; ordinal ``n`` is ``SECTION_NAMES[n - 1]``.
@@ -106,3 +107,19 @@ def is_exhausted(rows: Sequence[SectionRowState], *, max_attempts: int) -> bool:
         or (row.status == STATUS_PENDING and row.attempts >= max_attempts)
         for row in rows
     )
+
+
+def regeneration_ordinals(violation_sections: Iterable[str]) -> frozenset[int]:
+    """Ordinals a regeneration must rewrite after the Gate named ``violation_sections``.
+
+    Each named Section is reset, and Consiglio finale with it whenever any of
+    Sections 1-7 is (it is written from their text, so it would otherwise go stale).
+    Names that match no Section are ignored; when none matches at all there is nothing
+    to target, so every Section is rewritten -- the same full attempt as a first draft.
+    """
+    named = {SECTION_NAMES.index(name) + 1 for name in violation_sections if name in SECTION_NAMES}
+    if not named:
+        return frozenset(range(1, CLOSING_ORDINAL + 1))
+    if any(ordinal < CLOSING_ORDINAL for ordinal in named):
+        named.add(CLOSING_ORDINAL)
+    return frozenset(named)

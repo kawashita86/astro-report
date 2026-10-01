@@ -963,3 +963,7 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-10-4-section-rows-and-the-rundriver.md`
   summary: Client deletion does not tell the driver to stop loops for the deleted run's Sections; the 2 s gate-result correlation window comment in report_runs.py assumed a slower failure path.
   evidence: jobs fail quietly via LookupError today; a non-Gate failure within 2 s of a regenerate could be misread as a Gate failure.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-5-regenerate-only-what-the-gate-rejected.md`
+  summary: Consider a composite index on `gate_result (report_run_id, draft_attempt)` if targeted-regeneration lookups ever show up in profiling.
+  evidence: `_carried_sections` filters by run, `passed` and `draft_attempt`; table is tiny today (single operator), so not urgent.

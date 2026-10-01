@@ -14,6 +14,7 @@ from core.draft_state import (
     is_draft_complete,
     is_exhausted,
     live_lease_expiries,
+    regeneration_ordinals,
 )
 from core.types.generation import GeneratedDraft
 
@@ -119,3 +120,23 @@ def test_the_module_reads_no_clock() -> None:
     assert claimable_sections(rows, max_attempts=MAX, now=NOW) == claimable_sections(
         rows, max_attempts=MAX, now=NOW
     )
+
+
+def test_regeneration_resets_the_named_section_and_consiglio_finale() -> None:
+    assert regeneration_ordinals(["amore"]) == {2, CLOSING_ORDINAL}
+    assert regeneration_ordinals(["lavoro", "giorni_di_attenzione", "lavoro"]) == {
+        3,
+        7,
+        CLOSING_ORDINAL,
+    }
+
+
+def test_regeneration_of_consiglio_finale_alone_resets_only_it() -> None:
+    assert regeneration_ordinals(["consiglio_finale"]) == {CLOSING_ORDINAL}
+
+
+def test_regeneration_with_no_resolvable_section_resets_everything() -> None:
+    everything = frozenset(range(1, CLOSING_ORDINAL + 1))
+    assert regeneration_ordinals([]) == everything
+    assert regeneration_ordinals(["not_a_section"]) == everything
+    assert regeneration_ordinals(["not_a_section", "amore"]) == {2, CLOSING_ORDINAL}

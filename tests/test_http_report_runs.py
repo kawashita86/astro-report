@@ -341,9 +341,7 @@ def test_an_htmx_poll_request_gets_a_fragment_without_the_full_page_shell(
     db_session.commit()
 
     full_page = authenticated_client.get(f"/report-runs/{run.id}")
-    fragment = authenticated_client.get(
-        f"/report-runs/{run.id}", headers={"HX-Request": "true"}
-    )
+    fragment = authenticated_client.get(f"/report-runs/{run.id}", headers={"HX-Request": "true"})
 
     assert "<html" in full_page.text.lower()
     assert "<html" not in fragment.text.lower()
@@ -526,7 +524,8 @@ def test_getting_the_payload_only_the_first_section_is_open_by_default(
 
 
 def test_the_poll_view_withholds_the_payload_link_while_bozza_is_active(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     """Fix (2026-09-03): "Vedi Payload" is withheld specifically while Bozza
     (``draft_ready``) is the active, still-generating node, so Francesco is
@@ -543,9 +542,10 @@ def test_the_poll_view_withholds_the_payload_link_while_bozza_is_active(
 
 
 def test_the_poll_view_links_to_the_payload_while_the_gate_check_runs(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
-    """"Vedi Payload" still shows once Bozza has completed and Verifica di
+    """ "Vedi Payload" still shows once Bozza has completed and Verifica di
     fondatezza is the active node, as long as the Gate has not yet failed."""
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
@@ -559,7 +559,8 @@ def test_the_poll_view_links_to_the_payload_while_the_gate_check_runs(
 
 
 def test_the_poll_view_has_no_payload_link_before_payload_ready(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     start_response = authenticated_client.post(
@@ -708,7 +709,8 @@ def test_getting_the_draft_shows_the_latest_attempt_when_more_than_one_exists(
 
 
 def test_the_poll_view_links_to_payload_while_the_gate_is_still_running(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     """Story 9.5's I/O Matrix, "Gate running": ``draft_ready`` with no
     failure yet links to Payload, not the (still unvetted) draft."""
@@ -780,7 +782,8 @@ def test_the_poll_view_links_to_the_draft_once_a_gate_failure_exists(
 
 
 def test_the_poll_view_has_no_draft_link_before_draft_ready(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
@@ -1350,7 +1353,8 @@ def test_getting_the_draft_for_a_passing_run_shows_no_gate_failures_block(
 
 
 def test_a_running_runs_poll_fragment_shows_all_six_nodes_and_the_active_caption(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="payload_ready")
@@ -1376,7 +1380,8 @@ def test_a_running_runs_poll_fragment_shows_all_six_nodes_and_the_active_caption
 
 
 def test_the_bozza_stage_shows_an_inline_spinner_and_never_offers_vedi_payload(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     """Fix (2026-09-03): while Bozza (``draft_ready``) is the active,
     still-running node, the caption carries an inline spinner (never an
@@ -1397,7 +1402,8 @@ def test_the_bozza_stage_shows_an_inline_spinner_and_never_offers_vedi_payload(
 
 
 def test_a_terminally_failed_run_at_payload_ready_shows_no_spinner(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     """The spinner names genuine in-progress work -- a run that failed while
     Bozza was active (a generic, non-Gate terminal failure) must never show
@@ -1420,7 +1426,8 @@ def test_a_terminally_failed_run_at_payload_ready_shows_no_spinner(
 
 
 def test_the_payload_stage_shows_no_spinner(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     """The new spinner is scoped to Bozza alone: while Payload (not Bozza)
     is the active node, no spinner is shown."""
@@ -1436,7 +1443,8 @@ def test_the_payload_stage_shows_no_spinner(
 
 
 def test_the_gate_passed_stage_shows_vedi_report_as_a_button_and_a_success_caption(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     """Fix (2026-09-03): "Vedi report" reads as a primary button, never a
     plain link; "Pronto per l'esportazione" reads as a success message
@@ -1457,7 +1465,8 @@ def test_the_gate_passed_stage_shows_vedi_report_as_a_button_and_a_success_capti
 
 
 def test_a_gate_passed_runs_poll_fragment_has_no_hx_trigger(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="gate_passed")
@@ -1473,7 +1482,8 @@ def test_a_gate_passed_runs_poll_fragment_has_no_hx_trigger(
 
 
 def test_an_exported_runs_poll_fragment_shows_every_node_done_with_no_hx_trigger(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="exported")
@@ -1817,9 +1827,7 @@ def _a_gate_failed_run_with_violations(
 
 
 def test_accepting_a_violation_without_a_session_is_401(client: TestClient) -> None:
-    response = client.post(
-        "/report-runs/01a01abf-0000-7000-8000-000000000000/violations/0/accept"
-    )
+    response = client.post("/report-runs/01a01abf-0000-7000-8000-000000000000/violations/0/accept")
 
     assert response.status_code == 401
 
@@ -1977,9 +1985,7 @@ def test_accepting_the_last_open_violation_closes_the_run(
     assert run.failure_reason is None
     assert run.stage == "gate_passed"
 
-    stored_report = db_session.exec(
-        select(Report).where(Report.report_run_id == run.id)
-    ).one()
+    stored_report = db_session.exec(select(Report).where(Report.report_run_id == run.id)).one()
     assert stored_report.accepted_violation_count == 3
     assert stored_report.closing_gate_result_id == gate_result.id
 
@@ -2536,6 +2542,44 @@ def test_correcting_one_violation_that_still_fails_leaves_the_run_open_with_one_
     assert "Venere porta amore." in draft_response.text
     assert f'action="/report-runs/{run.id}/violations/0/correct"' in draft_response.text
     assert f'action="/report-runs/{run.id}/violations/0/accept"' in draft_response.text
+
+
+def test_a_hand_correction_writes_the_corrected_attempts_section_rows_and_records_its_attempt(
+    authenticated_client: TestClient, db_session: Session
+) -> None:
+    """Story 10.5: the corrected draft's eight Sections are stored ``complete`` with the
+    corrected text, and the new Gate result names the corrected draft's attempt."""
+    from shell.adapters.postgres.report_draft_section import ReportDraftSection
+
+    ada = _create_client_with_real_chart(db_session)
+    run = _a_gate_failed_run_with_two_correctable_violations(db_session, ada.id)
+
+    authenticated_client.post(
+        f"/report-runs/{run.id}/violations/0/correct",
+        data={"sentence_text": "Un lavoro tranquillo."},
+        follow_redirects=False,
+    )
+
+    new_draft = db_session.exec(
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run.id)
+        .order_by(ReportDraft.attempt.desc())
+    ).first()
+    assert new_draft is not None
+    rows = db_session.exec(
+        select(ReportDraftSection)
+        .where(ReportDraftSection.report_run_id == run.id)
+        .where(ReportDraftSection.attempt == new_draft.attempt)
+    ).all()
+    assert len(rows) == 8
+    assert {row.status for row in rows} == {"complete"}
+    assert any("Un lavoro tranquillo." in str(row.sentences) for row in rows)
+    newest = db_session.exec(
+        select(StoredGateResult)
+        .where(StoredGateResult.report_run_id == run.id)
+        .order_by(StoredGateResult.created_at.desc())
+    ).first()
+    assert newest is not None and newest.draft_attempt == new_draft.attempt
 
 
 def test_correcting_one_violation_carries_forward_an_already_accepted_untouched_violation(
@@ -3306,9 +3350,7 @@ def test_getting_the_report_for_a_clean_pass_shows_no_warning_badge(
     db_session.commit()
     frozen = _a_frozen_payload_with_one_aspect()
     store_report_payload(db_session, run=run, frozen=frozen)
-    _store_passed_report(
-        db_session, run=run, frozen=frozen, draft=_a_generated_draft_for(frozen)
-    )
+    _store_passed_report(db_session, run=run, frozen=frozen, draft=_a_generated_draft_for(frozen))
 
     response = authenticated_client.get(f"/report-runs/{run.id}/report")
 
@@ -3573,7 +3615,8 @@ def test_the_poll_view_links_to_the_report_once_the_gate_has_passed(
 
 
 def test_the_poll_view_has_no_report_link_before_the_gate_has_passed(
-    authenticated_client: TestClient, db_session: Session,
+    authenticated_client: TestClient,
+    db_session: Session,
 ) -> None:
     ada = _create_client_with_real_chart(db_session)
     run = ReportRun(client_id=ada.id, month="2026-01", stage="draft_ready")
@@ -4090,9 +4133,7 @@ def test_the_exported_html_shows_an_uncited_day_list_entry_as_date_only(
     # giorni_favorevoli's event (perfected_at 2026-01-10 15:00 UTC) -> 10
     # local; it IS cited ("Ottimo per gli incontri."), so its card shows
     # both the date and the caption prose.
-    favorevoli_block = html.split(">Giorni favorevoli<", 1)[1].split(">Giorni di attenzione<", 1)[
-        0
-    ]
+    favorevoli_block = html.split(">Giorni favorevoli<", 1)[1].split(">Giorni di attenzione<", 1)[0]
     assert '<span class="serif timeline-day">10</span>' in favorevoli_block
     assert '<span class="timeline-month">Gen</span>' in favorevoli_block
     assert '<p class="prose timeline-text">Ottimo per gli incontri.</p>' in favorevoli_block
@@ -4817,9 +4858,7 @@ def test_an_htmx_poll_fragment_carries_no_breadcrumb(
     db_session.add(run)
     db_session.commit()
 
-    body = authenticated_client.get(
-        f"/report-runs/{run.id}", headers={"hx-request": "true"}
-    ).text
+    body = authenticated_client.get(f"/report-runs/{run.id}", headers={"hx-request": "true"}).text
 
     assert '<a href="/clients">Clienti</a>' not in body
 

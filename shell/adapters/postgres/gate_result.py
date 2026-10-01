@@ -84,6 +84,10 @@ class StoredGateResult(SQLModel, table=True):
     # `nullable` from the type annotation, so `nullable=False` must be given
     # explicitly here -- matching `ReportDraft.draft`'s own JSON column.
     violations: list[dict[str, Any]] = Field(sa_column=Column(JSON, nullable=False))
+    # The `ReportDraft.attempt` this check examined (Story 10.5), so a targeted
+    # regeneration knows the violations belong to the draft it is about to copy forward.
+    # Nullable: a row written before migration `0026` honestly has no recorded attempt.
+    draft_attempt: int | None = Field(default=None)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(_UTCDateTime, nullable=False),
@@ -118,8 +122,7 @@ def _json_safe(value: Any) -> Any:
     """
     if is_dataclass(value) and not isinstance(value, type):
         return {
-            field.name: _json_safe(getattr(value, field.name))
-            for field in dataclass_fields(value)
+            field.name: _json_safe(getattr(value, field.name)) for field in dataclass_fields(value)
         }
     if isinstance(value, (tuple, list)):
         return [_json_safe(item) for item in value]
@@ -135,6 +138,7 @@ def store_gate_result(
     vocabulary_version: int,
     vocabulary_content_hash: str,
     violations: tuple[GateViolation, ...],
+    draft_attempt: int | None = None,
 ) -> StoredGateResult:
     """Persist one Groundedness Gate outcome for ``run``, in one flush.
 
@@ -158,6 +162,7 @@ def store_gate_result(
         vocabulary_version=vocabulary_version,
         vocabulary_content_hash=vocabulary_content_hash,
         violations=_json_safe(violations),
+        draft_attempt=draft_attempt,
     )
     session.add(stored)
     session.flush()

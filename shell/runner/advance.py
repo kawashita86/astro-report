@@ -63,7 +63,7 @@ from sqlmodel import Session, select
 
 from core.domains.profiles import assemble_domain_profiles
 from core.domains.rulers import resolve_house_rulers
-from core.draft_state import is_draft_complete
+from core.draft_state import SECTION_NAMES, is_draft_complete, regeneration_ordinals
 from core.ephemeris.identity import EphemerisIdentity
 from core.errors import GateFailedError
 from core.gate.run import run_gate
@@ -83,7 +83,7 @@ from core.types.memory import ReportTheme, ThemeAspect, ThemeLunation
 from core.types.sections import SectionsConfig
 from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
 from shell.adapters.postgres.client import Client
-from shell.adapters.postgres.gate_result import store_gate_result
+from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
 from shell.adapters.postgres.report import store_report
 from shell.adapters.postgres.report_draft import (
     ReportDraft,
@@ -546,18 +546,63 @@ def load_generation_inputs(session: Session, run: ReportRun) -> GenerationInputs
     )
 
 
+def _carried_sections(
+    session: Session, run: ReportRun, attempt: int
+) -> dict[int, tuple[Sentence, ...]]:
+    """What a regeneration copies forward unchanged into draft attempt ``attempt``
+    (Story 10.5), by ordinal; empty when the attempt must be written in full.
+
+    The source is the latest ``ReportDraft`` -- the draft the Gate rejected, hand
+    corrections included -- and only when the run's newest failing ``StoredGateResult``
+    is recorded against exactly that draft's attempt. A first attempt, a legacy result
+    with no recorded attempt, or violations naming no known Section all give a full
+    attempt, never a guess about which Sections to keep.
+    """
+    latest = session.exec(
+        select(ReportDraft)
+        .where(ReportDraft.report_run_id == run.id)
+        .order_by(ReportDraft.attempt.desc())  # type: ignore[attr-defined]
+    ).first()
+    if latest is None:
+        return {}
+    failure = session.exec(
+        select(StoredGateResult)
+        .where(StoredGateResult.report_run_id == run.id)
+        .where(StoredGateResult.passed.is_(False))  # type: ignore[attr-defined]
+        .where(StoredGateResult.draft_attempt == latest.attempt)
+        .order_by(StoredGateResult.created_at.desc())  # type: ignore[attr-defined]
+    ).first()
+    if failure is None:
+        return {}
+    reset = regeneration_ordinals(
+        violation.get("section", "")
+        for violation in failure.violations
+        if isinstance(violation, dict)
+    )
+    draft = _deserialize_generated_draft(latest.draft)
+    return {
+        ordinal: getattr(draft, name)
+        for ordinal, name in enumerate(SECTION_NAMES, start=1)
+        if ordinal not in reset
+    }
+
+
 def open_draft_attempt(session: Session, run: ReportRun) -> int:
-    """Make sure the draft attempt ``run`` is about to write has its eight ``pending``
-    Section rows, and return that attempt's number; commits.
+    """Make sure the draft attempt ``run`` is about to write has its eight Section
+    rows, and return that attempt's number; commits.
 
     The attempt number is ``next_report_draft_attempt`` -- a count of the run's
-    ``ReportDraft`` rows (Story 5.8) -- so a Gate-failure rewind opens a *new full*
-    attempt with eight fresh rows (Story 10.5 narrows that), while a restart or a second
-    caller finds the rows already there and changes nothing.
+    ``ReportDraft`` rows (Story 5.8). A Gate-failure rewind opens a new attempt that
+    carries every Section the Gate did not name forward as ``complete`` and leaves only
+    the named ones (plus Consiglio finale) ``pending`` (Story 10.5); a first draft is
+    all ``pending``. A restart or a second caller finds the rows already there and
+    changes nothing.
     """
     attempt = next_report_draft_attempt(session, run.id)
     if not section_rows(session, run.id, attempt):
-        open_section_rows(session, run.id, attempt)
+        open_section_rows(
+            session, run.id, attempt, carried=_carried_sections(session, run, attempt)
+        )
     session.commit()
     return attempt
 
@@ -612,6 +657,15 @@ def assemble_draft(session: Session, run: ReportRun, attempt: int) -> bool:
     session.commit()
     _logger.info("report run advanced to draft_ready: %s", run.id)
     return True
+
+
+def _latest_draft_attempt(session: Session, run: ReportRun) -> int | None:
+    """The attempt of ``run``'s newest ``ReportDraft`` -- the one a Gate check just ran on."""
+    return session.exec(
+        select(ReportDraft.attempt)
+        .where(ReportDraft.report_run_id == run.id)
+        .order_by(ReportDraft.attempt.desc())  # type: ignore[attr-defined]
+    ).first()
 
 
 def _run_gate_passed(
@@ -688,6 +742,7 @@ def _run_gate_passed(
         vocabulary_version=result.vocabulary_version,
         vocabulary_content_hash=result.vocabulary_content_hash,
         violations=result.violations,
+        draft_attempt=stored_draft.attempt,
     )
 
 
@@ -931,9 +986,7 @@ def advance(
         # distinct counter/path (Story 5.4): stage_failure_count is left
         # untouched here, exactly as the module's own Design Notes
         # require.
-        _logger.exception(
-            "gate_passed rejected the draft, regenerating: %s", run.id
-        )
+        _logger.exception("gate_passed rejected the draft, regenerating: %s", run.id)
         try:
             store_gate_result(
                 session,
@@ -943,6 +996,7 @@ def advance(
                 vocabulary_version=vocabulary.version,
                 vocabulary_content_hash=vocabulary.content_hash,
                 violations=error.violations,
+                draft_attempt=_latest_draft_attempt(session, run),
             )
         except Exception:
             # This write sits outside `with_backoff` by design (Story
@@ -980,20 +1034,17 @@ def advance(
         if run.regeneration_count <= _MAX_REGENERATIONS:
             run.stage = "payload_ready"
             _logger.info(
-                "report run rewound to payload_ready for regeneration "
-                "attempt %s: %s",
+                "report run rewound to payload_ready for regeneration attempt %s: %s",
                 run.regeneration_count,
                 run.id,
             )
         else:
             run.failed_at = run.updated_at
             run.failure_reason = (
-                f"regeneration bound exhausted after {run.regeneration_count} "
-                f"attempts: {error}"
+                f"regeneration bound exhausted after {run.regeneration_count} attempts: {error}"
             )
             _logger.error(
-                "report run marked terminally failed: regeneration bound "
-                "exhausted: %s",
+                "report run marked terminally failed: regeneration bound exhausted: %s",
                 run.id,
             )
         session.add(run)
@@ -1015,12 +1066,10 @@ def advance(
         if run.stage_failure_count >= _MAX_STAGE_FAILURES:
             run.failed_at = run.updated_at
             run.failure_reason = (
-                f"stage {stage_name!r} failed {run.stage_failure_count} consecutive "
-                f"times: {error}"
+                f"stage {stage_name!r} failed {run.stage_failure_count} consecutive times: {error}"
             )
             _logger.error(
-                "report run marked terminally failed at %s after %s consecutive "
-                "failures: %s",
+                "report run marked terminally failed at %s after %s consecutive failures: %s",
                 stage_name,
                 run.stage_failure_count,
                 run.id,
@@ -1046,8 +1095,7 @@ def advance(
                 # are all left exactly as the concurrent winner's
                 # committed row (just refreshed) has them.
                 _logger.info(
-                    "stage %s already completed by a concurrent advance(); "
-                    "run.stage is now %s: %s",
+                    "stage %s already completed by a concurrent advance(); run.stage is now %s: %s",
                     stage_name,
                     run.stage,
                     run.id,
@@ -1061,8 +1109,7 @@ def advance(
             # clause with no active exception handler; `exc_info` carries
             # the conflict caught back inside `_attempt`.
             _logger.error(
-                "report run stage failed on a non-concurrent IntegrityError, "
-                "left un-advanced: %s",
+                "report run stage failed on a non-concurrent IntegrityError, left un-advanced: %s",
                 run.id,
                 exc_info=integrity_error,
             )
@@ -1075,8 +1122,7 @@ def advance(
                     f"times: {integrity_error}"
                 )
                 _logger.error(
-                    "report run marked terminally failed at %s after %s consecutive "
-                    "failures: %s",
+                    "report run marked terminally failed at %s after %s consecutive failures: %s",
                     stage_name,
                     run.stage_failure_count,
                     run.id,

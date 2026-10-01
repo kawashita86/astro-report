@@ -99,6 +99,17 @@ def _a_client_and_run(engine: Engine) -> tuple[UUID, UUID]:
         return client.id, run.id
 
 
+def test_the_migration_adds_the_nullable_gate_result_draft_attempt_column(engine: Engine) -> None:
+    """Migration ``0026`` (Story 10.5): an integer, nullable, no backfill."""
+    column = next(
+        column
+        for column in inspect(engine).get_columns("gate_result")
+        if column["name"] == "draft_attempt"
+    )
+    assert column["nullable"] is True
+    assert "INT" in str(column["type"]).upper()
+
+
 def test_the_migration_creates_the_table_with_its_columns_and_unique_key(engine: Engine) -> None:
     inspector = inspect(engine)
 
