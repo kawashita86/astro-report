@@ -26,6 +26,7 @@ from core.types.computation import ComputationConfig
 from core.types.place import ResolvedPlace
 from shell.adapters.postgres.corpus_entry import CorpusEntry
 from shell.adapters.postgres.export_record import ExportRecord
+from shell.adapters.postgres.exported_pdf import ExportedPdf
 from shell.adapters.postgres.gate_result import StoredGateResult
 from shell.adapters.postgres.gate_violation_review import GateViolationReview
 from shell.adapters.postgres.report import Report
@@ -445,6 +446,15 @@ def delete_client_and_derived(session: Session, *, client: Client) -> None:
         session.delete(stored_export_record)
 
     reports = session.exec(select(Report).where(Report.client_id == client.id)).all()
+    # ExportedPdf has no client_id (so it is not in _CLIENT_CASCADE_TABLES) but
+    # a foreign key to report.id: delete it before the reports.
+    report_ids = [stored_report.id for stored_report in reports]
+    if report_ids:
+        for stored_pdf in session.exec(
+            select(ExportedPdf).where(ExportedPdf.report_id.in_(report_ids))  # type: ignore[attr-defined]
+        ).all():
+            session.delete(stored_pdf)
+        session.flush()
     for stored_report in reports:
         session.delete(stored_report)
 

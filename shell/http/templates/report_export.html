@@ -165,20 +165,31 @@
       }
 
       /* --- Page 1: header + birth data + positions/wheel + Energia generale --- */
+      /* Block layout, not flex/grid: WeasyPrint re-measures every word of
+         prose nested in flex/grid containers several times (3.5 s vs 1.0 s
+         for this document), so prose cards stay plain blocks and
+         side-by-side groups use floats or display: table. Flex survives
+         only on small fixed-size icon rows. */
       .header-row {
-        display: flex;
-        gap: 32px;
-        align-items: flex-start;
-        justify-content: space-between;
         margin-bottom: 20px;
         break-inside: avoid;
       }
+      .header-row::after,
+      .day-lists-row::after,
+      .timeline-item::after {
+        content: "";
+        display: block;
+        clear: both;
+      }
       .header-copy {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
         padding-top: 6px;
-        flex: 1;
+        margin-right: 280px;
+      }
+      .header-copy > .label {
+        margin-bottom: 10px;
+      }
+      .header-copy > .report-subtitle {
+        margin-bottom: 10px;
       }
       .report-title {
         font-size: 60px;
@@ -203,11 +214,15 @@
       }
       .birth-data-card {
         width: 248px;
-        flex: none;
+        float: right;
         padding: 22px 24px;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
+      }
+      .birth-data-card > .label,
+      .birth-data-card > .data-row {
+        margin-bottom: 16px;
+      }
+      .birth-data-card > .data-row:last-child {
+        margin-bottom: 0;
       }
       .data-row {
         display: flex;
@@ -218,12 +233,11 @@
         flex: none;
         margin-top: 2px;
       }
-      .data-row-copy {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
+      .data-row-copy span {
+        display: block;
       }
       .data-row-caption {
+        margin-bottom: 2px;
         font-size: 12px;
         color: #857c74;
       }
@@ -233,17 +247,33 @@
       }
 
       .positions-wheel-row {
-        display: grid;
-        grid-template-columns: 210px minmax(0, 1fr);
-        gap: 16px;
+        display: table;
+        table-layout: fixed;
+        width: 100%;
         margin-bottom: 20px;
         break-inside: avoid;
       }
+      .positions-wheel-row > * {
+        display: table-cell;
+        vertical-align: top;
+      }
+      .positions-wheel-row > .row-gap {
+        width: 16px;
+        border: 0;
+        background: none;
+      }
       .positions-card {
+        width: 210px;
         padding: 22px 22px;
-        display: flex;
-        flex-direction: column;
-        gap: 26px;
+      }
+      .positions-card > .label {
+        margin-bottom: 26px;
+      }
+      .positions-card > .placement-row {
+        margin-bottom: 26px;
+      }
+      .positions-card > .placement-row:last-child {
+        margin-bottom: 0;
       }
       .placement-row {
         display: flex;
@@ -253,10 +283,8 @@
       .placement-row svg {
         flex: none;
       }
-      .placement-copy {
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
+      .placement-copy span {
+        display: block;
       }
       .placement-label {
         font-size: 12px;
@@ -275,28 +303,26 @@
       }
       .wheel-card {
         padding: 22px 24px 18px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+      }
+      .wheel-card > .label {
+        margin-bottom: 10px;
       }
       .wheel-frame {
-        display: flex;
-        justify-content: center;
+        text-align: center;
       }
       .wheel-frame svg {
         width: 350px;
         height: 350px;
         display: block;
+        margin: 0 auto;
       }
 
       .icon-card {
         padding: 24px 28px 26px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
         margin-bottom: 20px;
       }
       .icon-card-header {
+        margin-bottom: 10px;
         display: flex;
         gap: 22px;
         align-items: center;
@@ -308,12 +334,10 @@
       /* --- Page 2: the four domain cards, one full-width row each --- */
       .domain-card {
         padding: 22px 24px 24px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
         margin-bottom: 16px;
       }
       .domain-card-header {
+        margin-bottom: 12px;
         display: flex;
         gap: 12px;
         align-items: center;
@@ -321,28 +345,26 @@
 
       /* --- Page 3: the two day-list timelines + Consiglio finale --- */
       .day-lists-row {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 16px;
-        align-items: start;
         margin-bottom: 16px;
       }
       .day-list-card {
+        float: left;
+        width: 341px;
         padding: 22px 22px 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
         break-inside: auto;
       }
+      .day-list-card + .day-list-card {
+        float: right;
+      }
       .day-list-card-header {
+        margin-bottom: 16px;
         display: flex;
         gap: 12px;
         align-items: center;
       }
       .timeline-item {
         position: relative;
-        display: flex;
-        gap: 16px;
+        padding-left: 27px;
         padding-bottom: 14px;
         break-inside: avoid;
       }
@@ -364,16 +386,16 @@
         border: 1.3px solid #a77b57;
         border-radius: 50%;
         background: #fffdfa;
-        flex: none;
-        margin-top: 5px;
-        position: relative;
+        position: absolute;
+        left: 0;
+        top: 5px;
       }
       .timeline-date {
+        float: left;
         width: 44px;
-        flex: none;
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
+      }
+      .timeline-date span {
+        display: block;
       }
       .timeline-day {
         font-size: 26px;
@@ -389,16 +411,14 @@
         margin-top: 2px;
       }
       .timeline-text {
-        flex: 1;
+        margin-left: 60px;
       }
 
       .final-advice-card {
         padding: 28px 32px 30px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
       }
       .final-advice-header {
+        margin-bottom: 12px;
         display: flex;
         gap: 26px;
         align-items: center;
@@ -418,15 +438,6 @@
   <body>
     <!-- Page 1 · Apertura -->
     <div class="header-row">
-      <div class="header-copy">
-        <p class="label" style="color: #6e665f;">Report astrologico mensile</p>
-        <h1 class="serif report-title">{{ month_label }}</h1>
-        <p class="serif report-subtitle">per {{ client_name }}</p>
-        <p class="prose report-tagline">
-          Una lettura del mese costruita sul tuo tema natale e sui transiti del periodo.
-        </p>
-      </div>
-
       <div class="card birth-data-card">
         <p class="label">Dati di nascita</p>
         <div class="data-row">
@@ -453,6 +464,16 @@
         </div>
         {% endif %}
       </div>
+
+      <div class="header-copy">
+        <p class="label" style="color: #6e665f;">Report astrologico mensile</p>
+        <h1 class="serif report-title">{{ month_label }}</h1>
+        <p class="serif report-subtitle">per {{ client_name }}</p>
+        <p class="prose report-tagline">
+          Una lettura del mese costruita sul tuo tema natale e sui transiti del periodo.
+        </p>
+      </div>
+
     </div>
 
     <div class="positions-wheel-row">
@@ -483,6 +504,8 @@
           </div>
         </div>
       </div>
+
+      <div class="row-gap"></div>
 
       <div class="card wheel-card">
         <p class="label">Il tuo tema natale</p>

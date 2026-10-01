@@ -53,6 +53,7 @@ from shell.adapters.postgres.client import (
     current_chart_for_client,
 )
 from shell.adapters.postgres.export_record import ExportRecord
+from shell.adapters.postgres.exported_pdf import ExportedPdf, store_pdf
 from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
 from shell.adapters.postgres.gate_violation_review import (
     GateViolationReview,
@@ -3949,6 +3950,93 @@ def test_the_pdf_render_runs_with_no_database_connection_held(
     assert in_transaction_during_render == [False]
     assert run.stage == "exported"
     assert len(_export_records(db_session)) == 1
+
+
+# --- Story 10.1: the stored-PDF cache --------------------------------------
+
+
+def _count_pdf_renders(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Replace ``html_to_pdf`` with a counting fake whose bytes differ per call."""
+    import shell.http.routes.report_runs as report_runs_module
+
+    renders: list[str] = []
+
+    def _fake_html_to_pdf(html: str, *, base_url: str) -> bytes:
+        renders.append(html)
+        return f"%PDF-render-{len(renders)}".encode()
+
+    monkeypatch.setattr(report_runs_module, "html_to_pdf", _fake_html_to_pdf)
+    return renders
+
+
+def test_a_repeat_download_serves_the_stored_pdf_without_rendering(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Matrix rows "First download" / "Repeat download": the second download
+    returns identical bytes, never calls ``html_to_pdf``, still writes a
+    second ``ExportRecord`` and leaves ``run.stage`` at ``exported``."""
+    run = _a_passed_run_ready_to_export(db_session)
+    renders = _count_pdf_renders(monkeypatch)
+
+    first = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+    second = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert first.status_code == second.status_code == 200
+    assert first.content == second.content == b"%PDF-render-1"
+    assert len(renders) == 1
+    assert len(_export_records(db_session)) == 2
+    assert run.stage == "exported"
+    assert len(db_session.exec(select(ExportedPdf)).all()) == 1
+
+
+def test_a_hand_corrected_section_misses_the_cache_and_replaces_the_row(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Matrix row "Section hand-corrected": a newer draft attempt changes the
+    rendered text, so the fingerprint differs and a fresh render is stored."""
+    run = _a_passed_run_ready_to_export(db_session)
+    renders = _count_pdf_renders(monkeypatch)
+    first = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+    frozen = _a_frozen_payload_with_one_aspect()
+    corrected = replace(
+        _a_generated_draft_for(frozen),
+        energia_generale=(Sentence(text="Un mese corretto a mano.", entry_ids=()),),
+    )
+    store_report_draft(
+        db_session,
+        run=run,
+        style_guide_version=1,
+        sections_config_version=frozen["sections_config_version"],
+        draft=corrected,
+        attempt=1,
+    )
+    db_session.commit()
+
+    second = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert first.content == b"%PDF-render-1"
+    assert second.content == b"%PDF-render-2"
+    assert len(renders) == 2
+    assert "Un mese corretto a mano." in renders[1]
+    rows = db_session.exec(select(ExportedPdf)).all()
+    assert len(rows) == 1
+    assert rows[0].pdf_bytes == b"%PDF-render-2"
+
+
+def test_a_stale_stored_pdf_is_replaced_on_the_next_download(
+    authenticated_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _a_passed_run_ready_to_export(db_session)
+    _count_pdf_renders(monkeypatch)
+    # Pre-seed a row with another fingerprint: the replace path is exercised.
+    store_pdf(db_session, db_session.exec(select(Report)).one().id, "f" * 64, b"%PDF-old")
+    db_session.commit()
+
+    response = authenticated_client.get(f"/report-runs/{run.id}/export/pdf")
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-render-1"
+    assert db_session.exec(select(ExportedPdf)).one().pdf_bytes == b"%PDF-render-1"
 
 
 def test_a_failed_pdf_render_records_no_export_and_leaves_the_stage_alone(

@@ -936,3 +936,10 @@ the spec that surfaced it. Append only.
 - source_spec: `AGENTS.md` refresh (bmad-project-context, 2026-10-01) for the `spec-fix-db-pool-exhaustion` deferred item on the Render plus Neon deployment
   summary: Production moved from Render plus Neon (free, €0/month) to Coolify on a Netcup VPS 1000 G12 (Vienna, AT, €12/month) with its own Postgres and Coolify scheduled backups to Backblaze B2 EU Central (Amsterdam), but the planning artifacts still state the old constraints: NFR-7 ("€0/month ... any design requiring paid infrastructure ... must be raised") in `_bmad-output/planning-artifacts/epics.md` and the PRD, and the hosting/storage invariants (AD-17's "Neon has no scheduled backups", Render/Neon hosting) in `ARCHITECTURE-SPINE.md`.
   evidence: The repo-side records were updated in the same refresh (README Deployment and Running cost, data-terms residency now Vienna, AT, RGD-3 re-decided to `policy_decision = "none"` against the 256 GB disk, backup/restore docs). NFR-7 and the AD invariants are planning decisions to amend through `bmad-prd` (update) / `bmad-architecture`, not doc wording; the €12/month cost was confirmed by Francesco on 2026-10-01.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-1-a-pdf-in-seconds-and-instantly-the-second-time.md`
+  summary: The PDF cache fingerprint has no code-version salt, so a change to `build_export_context`/`report_export_view` formatting logic or a WeasyPrint/font upgrade serves stale stored PDFs.
+  evidence: `pdf_fingerprint` hashes data inputs and the template file hash only; logic and library versions are not inputs.
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-1-a-pdf-in-seconds-and-instantly-the-second-time.md`
+  summary: In `report_export.html` the birth-data card now precedes the title in DOM order (float layout), changing PDF text-extraction order.
+  evidence: Implementation moved `.birth-data-card` before `.header-copy` so the float aligns with the title.

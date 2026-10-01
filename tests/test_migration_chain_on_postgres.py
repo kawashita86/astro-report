@@ -34,7 +34,7 @@ ALEMBIC_INI = REPO_ROOT / "alembic.ini"
 
 #: Tables that live behind the revision the VARCHAR(32) ceiling used to block
 #: (``0014``). If the chain stops short, at least one of these is absent.
-TABLES_BEHIND_THE_OLD_BLOCK = ("export_record", "backup_record", "corpus_entry")
+TABLES_BEHIND_THE_OLD_BLOCK = ("export_record", "backup_record", "corpus_entry", "exported_pdf")
 
 
 def _database_url() -> str:

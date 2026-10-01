@@ -30,6 +30,8 @@ before a request ever reaches this module, mirroring
 from __future__ import annotations
 
 import copy
+import functools
+import hashlib
 import re
 from collections import Counter
 from dataclasses import replace as dataclasses_replace
@@ -66,6 +68,7 @@ from shell.adapters.postgres.export_record import (
     record_send_disposition,
     store_export_record,
 )
+from shell.adapters.postgres.exported_pdf import get_stored_pdf, pdf_fingerprint, store_pdf
 from shell.adapters.postgres.gate_result import StoredGateResult, store_gate_result
 from shell.adapters.postgres.gate_violation_review import (
     GateViolationReview,
@@ -120,6 +123,14 @@ _templates = Jinja2Templates(
 #: resolve to ``file:///a/fonts/x.woff2`` -- verified empirically against
 #: WeasyPrint 69).
 _TEMPLATES_BASE_URL = f"{_TEMPLATES_DIR}/"
+
+
+@functools.cache
+def _export_template_hash() -> str:
+    """SHA-256 of ``report_export.html``'s bytes: a template edit changes
+    every stored PDF's fingerprint, so a deploy never serves stale layout."""
+    return hashlib.sha256((_TEMPLATES_DIR / "report_export.html").read_bytes()).hexdigest()
+
 
 # --- report_export.html's natal wheel: copper/ink literal-color palette ----
 #
@@ -1526,23 +1537,38 @@ def download_report_pdf(
     """
     bundle = _load_passed_report_bundle(session, run_id)
     stored_chart = _load_run_natal_chart(session, bundle)
-    wheel_svg = _build_wheel_svg(
-        bundle.client, stored_chart, request.app.state.computation_config.orbs.natal
-    )
-    export_context = build_export_context(
-        client=bundle.client,
-        run=bundle.run,
+    natal_orbs = request.app.state.computation_config.orbs.natal
+    report_id = bundle.report.id
+    fingerprint = pdf_fingerprint(
         rendered=bundle.rendered,
-        chart=stored_chart,
-        wheel_svg=wheel_svg,
+        client_name=bundle.client.name,
+        birth_date=bundle.client.birth_date,
+        birth_time=bundle.client.birth_time,
+        birthplace_name=bundle.client.birthplace_name,
+        month=bundle.run.month,
+        chart_id=stored_chart.id,
+        template_hash=_export_template_hash(),
+        natal_orbs=natal_orbs,
     )
-    export_html = _templates.get_template("report_export.html").render(export_context)
-    # Release the connection before the CPU-heavy WeasyPrint render: ending
-    # the read transaction returns it to the pool. `bundle.run`/`bundle.report`
-    # stay attached (expired), so the write below reloads them in a fresh,
-    # short transaction. `rollback()`, not `close()`, which would detach them.
-    session.rollback()
-    pdf_bytes = html_to_pdf(export_html, base_url=_TEMPLATES_BASE_URL)
+    pdf_bytes = get_stored_pdf(session, report_id, fingerprint)
+    cache_hit = pdf_bytes is not None
+    if pdf_bytes is None:
+        wheel_svg = _build_wheel_svg(bundle.client, stored_chart, natal_orbs)
+        export_context = build_export_context(
+            client=bundle.client,
+            run=bundle.run,
+            rendered=bundle.rendered,
+            chart=stored_chart,
+            wheel_svg=wheel_svg,
+        )
+        export_html = _templates.get_template("report_export.html").render(export_context)
+        # Release the connection before the CPU-heavy WeasyPrint render:
+        # ending the read transaction returns it to the pool.
+        # `bundle.run`/`bundle.report` stay attached (expired), so the write
+        # below reloads them in a fresh, short transaction. `rollback()`, not
+        # `close()`, which would detach them.
+        session.rollback()
+        pdf_bytes = html_to_pdf(export_html, base_url=_TEMPLATES_BASE_URL)
 
     if bundle.run.stage != "exported":
         bundle.run.stage = "exported"
@@ -1551,6 +1577,8 @@ def download_report_pdf(
     store_export_record(
         session, report=bundle.report, format="pdf", elapsed_seconds=elapsed_seconds
     )
+    if not cache_hit:
+        store_pdf(session, report_id, fingerprint, pdf_bytes)
     session.commit()
 
     return Response(
