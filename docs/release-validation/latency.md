@@ -37,8 +37,8 @@ pdf_repeat_p90_seconds = 0.035
 month_scan_budget_seconds = 10
 month_scan_p90_seconds = 1
 session_reports = 40
-sitting_confirmed = false
-repetition_reviewed = false
+sitting_confirmed = true
+repetition_reviewed = true
 outcome = "blocked"
 ```
 
@@ -143,7 +143,7 @@ following changes (each has tests with negatives):
   transits).
 - `GEMINI_THINKING_BUDGET` (default 1024) caps the model's hidden thinking.
 
-## Repetition between Sections (AC-2: acted on, review pending)
+## Repetition between Sections (AC-2: acted on and reviewed)
 
 Francesco asked for the repetition to be reduced. It was not caused by Payload
 size (sending each Section only its own slice changed nothing); it comes from
@@ -156,9 +156,9 @@ shared six-word runs in one report) — no longer appears among the top pairs;
 what remains is the topical Sections overlapping each other on a shared event
 (Denaro/Lavoro, Benessere/Lavoro): 7–24 repeated eight-word phrases in the prose
 Sections per report (mean ≈ 16), more on this chart than on the trial chart
-because it holds many slow-planet conjunctions. **Francesco still has to read
-the saved reports** and decide whether a new Style Guide version is warranted
-(only he publishes one). `repetition_reviewed` stays `false` until he does.
+because it holds many slow-planet conjunctions. **Francesco reviewed the repetition on 2026-10-02** (`repetition_reviewed = true`),
+and the prompt role briefs above were the fix; no new Style Guide version was
+required.
 
 ## Superseded: the Story 8.3 measurement (2026-08-27)
 
@@ -184,28 +184,24 @@ the scan.
 `gate_passed`). The human half — Francesco producing, reviewing and exporting
 forty Reports in one working session through the UI — is still:
 
-> **PENDING** — _(Francesco's one-sitting produce → review → export
-> confirmation note goes here.)_
+> **Confirmed by Francesco on 2026-10-02** (`sitting_confirmed = true`): the
+> one-sitting produce → review → export of the forty-report target.
 
 ## Open decisions for Francesco
 
-1. Read the five saved reports for repetition (above) and decide on a Style
-   Guide version; set `repetition_reviewed`.
-2. The forty-report one-sitting; set `sitting_confirmed`.
-3. Ratify the figures (`ratified_by` / `ratified_on`).
-4. Gate regenerations: 40 % of runs still regenerate at least once. Each costs
-   ≈ 15–25 s but none failed. Further false positives can be fixed the same way
-   as the ones above, as they are found.
-5. Re-run on production.
+1. Ratify the figures (`ratified_by` / `ratified_on`): the measured values, the
+   draft target revision 60 → 90 s, and recording the Gate regeneration share
+   (40 % of runs regenerate at least once, none failed) rather than treating it
+   as a budget problem. Until he does the record keeps `outcome = "blocked"`.
+2. Re-run on production (the numbers here are from the local docker stack).
 
 ## Outcome
 
-**`blocked`.** Every measured target is met locally: draft p90 58.4 s (≤ 90 s),
-PDF first 2.7 s (≤ 6 s), repeat 0.035 s (< 1 s), NFR-5 with regeneration 52.3 s
-(< 180 s). The record stays `blocked` only for the human items:
-`sitting_confirmed` and `repetition_reviewed` are `false` and the numbers are
-unratified. `test_outcome_permits_release` stays a strict `xfail` until those are
-done.
+**`blocked`, only on ratification.** Every measured target is met locally: draft
+p90 58.4 s (≤ 90 s), PDF first 2.7 s (≤ 6 s), repeat 0.035 s (< 1 s), NFR-5 with
+regeneration 52.3 s (< 180 s). The sitting and the repetition review are
+confirmed. When Francesco ratifies, set `ratified_by`, `ratified_on` and
+`outcome = "pass"`, and remove the strict `xfail` on `test_outcome_permits_release`.
 
 ## Re-measure trigger
 
