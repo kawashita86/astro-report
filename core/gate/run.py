@@ -846,6 +846,22 @@ def _check_claim(
     house_rulers = frozenset(
         ruler for house in asserted_houses for ruler in natal_house_rulers.get(house, frozenset())
     )
+    # "... mentre il tuo Marte natale in Quarta Casa ...": beside what it cites, a sentence
+    # may place a *natal* body in its own natal house or sign; the profile vouches for that.
+    natal_placed = frozenset()
+    if _NATAL_MARKER_PATTERN.search(lowered) is not None:
+        natal_placed = frozenset(
+            body
+            for body in asserted_bodies_signs
+            if body in natal_sign_by_point
+            and (
+                natal_house_by_planet.get(body) in asserted_houses
+                or natal_sign_by_point[body] in asserted_bodies_signs
+            )
+        )
+    natal_placed_houses = frozenset(
+        natal_house_by_planet[body] for body in natal_placed if body in natal_house_by_planet
+    )
     # "Marte, governatore della tua Settima Casa": a house ruled by a body the cited
     # entries name is grounded by the profile's ruler data.
     cited_bodies = _body_sign_facts(entries, natal_sign_by_point)
@@ -858,7 +874,10 @@ def _check_claim(
             section=section,
             sentence=sentence,
             sentence_index=sentence_index,
-            gathered=_body_sign_facts(entries, natal_sign_by_point) | cusp_signs | house_rulers,
+            gathered=_body_sign_facts(entries, natal_sign_by_point)
+            | cusp_signs
+            | house_rulers
+            | natal_placed,
             asserted=asserted_bodies_signs,
         )
         if violation is not None:
@@ -872,7 +891,8 @@ def _check_claim(
             sentence_index=sentence_index,
             gathered=_house_facts(entries, natal_house_by_planet, natal_sign_by_point)
             | cusp_houses
-            | ruled_houses,
+            | ruled_houses
+            | natal_placed_houses,
             asserted=asserted_houses,
         )
         if violation is not None:

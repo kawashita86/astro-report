@@ -903,6 +903,24 @@ def test_a_retrograde_claim_on_a_cited_body_the_payload_records_as_retrograde_is
     assert run_gate(other_body, frozen, _VOCABULARY).passed is False
 
 
+def test_a_natal_body_placed_beside_a_cited_entry_is_grounded_by_the_profile() -> None:
+    frozen, aspect_id = _frozen_amore_profile(cited_body="venus")
+    frozen["sections"]["energia_generale"]["profile"]["house_4"] = {
+        "number": 4,
+        "sign": "capricorn",
+        "planets": [],
+    }
+    text = "Il tuo Marte natale in Quarta Casa ricorda le fondamenta, mentre Venere agisce."
+    wrong = text.replace("Quarta", "Nona")
+
+    assert run_gate(
+        _draft(amore=(Sentence(text=text, entry_ids=(aspect_id,)),)), frozen, _VOCABULARY
+    ).passed
+    assert not run_gate(
+        _draft(amore=(Sentence(text=wrong, entry_ids=(aspect_id,)),)), frozen, _VOCABULARY
+    ).passed
+
+
 # --- Matrix row: date token in day list --------------------------------------------
 
 
