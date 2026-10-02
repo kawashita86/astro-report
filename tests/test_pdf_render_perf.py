@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 from sqlmodel import Session
+from weasyprint import HTML
 
 from core.ephemeris.chart import compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
@@ -62,7 +63,7 @@ def _realistic_rendered() -> dict[str, Any]:
     }
 
 
-def render_export_html() -> str:
+def render_export_html(rendered: dict[str, Any] | None = None) -> str:
     config = load_computation_config()
     place = ResolvedPlace(
         latitude=Decimal("45.4642"),
@@ -95,7 +96,7 @@ def render_export_html() -> str:
         context = build_export_context(
             client=client,
             run=run,
-            rendered=_realistic_rendered(),
+            rendered=rendered if rendered is not None else _realistic_rendered(),
             chart=stored_chart,
             wheel_svg=wheel_svg,
         )
@@ -119,6 +120,52 @@ def test_html_to_pdf_stays_within_the_time_budget(export_html: str) -> None:
         timings.append(time.perf_counter() - started)
 
     assert min(timings) <= _BUDGET_SECONDS, timings
+
+
+def _day_list_card_pages(document: Any) -> list[list[int]]:
+    """For each ``.day-list-card`` in document order, the pages it spans."""
+    pages: dict[int, list[int]] = {}
+
+    def walk(box: Any, number: int) -> None:
+        element = getattr(box, "element", None)
+        if element is not None and "day-list-card" in (element.get("class") or "").split():
+            spans = pages.setdefault(id(element), [])
+            if number not in spans:
+                spans.append(number)
+            return
+        for child in getattr(box, "children", ()):
+            walk(child, number)
+
+    order: list[int] = []
+    for number, page in enumerate(document.pages, start=1):
+        before = set(pages)
+        walk(page._page_box, number)
+        order += [key for key in pages if key not in before]
+    return [pages[key] for key in order]
+
+
+def test_long_day_lists_stack_instead_of_paginating_side_by_side() -> None:
+    # A real month yields ~20 favourable and ~10 caution entries, so both
+    # day-list cards span pages. Side by side (two floats) WeasyPrint
+    # fragmented them out of step: blank pages, one caution entry per page,
+    # Consiglio finale painted over the lists, and NaN-height backgrounds.
+    rendered = _realistic_rendered()
+    rendered["giorni_favorevoli"] = [
+        {"date": f"{i + 1:02d}/01/2026", "text": _prose(2)} for i in range(18)
+    ]
+    rendered["giorni_di_attenzione"] = [
+        {"date": f"{3 * i + 1:02d}/01/2026", "text": _prose(3)} for i in range(8)
+    ]
+    document = HTML(
+        string=render_export_html(rendered),
+        base_url=report_runs_module._TEMPLATES_BASE_URL,
+    ).render()
+
+    favorevoli, attenzione = _day_list_card_pages(document)
+    assert max(favorevoli) <= min(attenzione), (favorevoli, attenzione)
+    # The split floats also drew card backgrounds with a NaN height, which
+    # PDF readers report as a syntax error.
+    assert b" nan " not in document.write_pdf(uncompressed_pdf=True)
 
 
 _ALLOWED_FLEX_SELECTORS = {".data-row", ".placement-row"}

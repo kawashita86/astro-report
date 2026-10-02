@@ -344,20 +344,22 @@
       }
 
       /* --- Page 3: the two day-list timelines + Consiglio finale --- */
+      /* Stacked full-width blocks, not two floats side by side: a list runs
+         to 20+ entries and spans pages, and WeasyPrint fragments page-
+         spanning floats independently -- blank pages, columns paginating
+         out of step, and the following card painted over the floats. */
       .day-lists-row {
         margin-bottom: 16px;
       }
       .day-list-card {
-        float: left;
-        width: 341px;
         padding: 22px 22px 12px;
+        margin-bottom: 16px;
         break-inside: auto;
-      }
-      .day-list-card + .day-list-card {
-        float: right;
+        box-decoration-break: clone;
       }
       .day-list-card-header {
         margin-bottom: 16px;
+        break-after: avoid;
         display: flex;
         gap: 12px;
         align-items: center;
@@ -401,6 +403,8 @@
         font-size: 26px;
         font-weight: 600;
         line-height: 1;
+        /* Cormorant's default old-style "1" reads as a Roman "I". */
+        font-variant-numeric: lining-nums;
         color: #221e1b;
       }
       .timeline-month {
