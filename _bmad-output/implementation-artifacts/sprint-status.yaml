@@ -135,7 +135,7 @@ development_status:
   10-4-section-rows-and-the-rundriver: review
   10-5-regenerate-only-what-the-gate-rejected: review
   10-6-watch-the-sections-being-written: review
-  10-7-measure-it: in-progress
+  10-7-measure-it: review
   epic-10-retrospective: optional
 action_items:
   - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"

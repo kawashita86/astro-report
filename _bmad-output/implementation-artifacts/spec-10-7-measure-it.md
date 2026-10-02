@@ -2,7 +2,7 @@
 title: '10-7 Measure it'
 type: 'chore'
 created: '2026-10-01'
-status: 'in-progress'
+status: 'in-review'
 baseline_commit: '8bcb31f59d8e51eebbabf3b3baa74e00a3e9e000'
 review_loop_iteration: 0
 context:
@@ -52,10 +52,10 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `tests/test_latency_record.py` -- add `test_measure_epic10_latency` (skip unless `RUN_LATENCY_MEASUREMENT=epic10` and app healthy): seed Client, 20 runs over HTTP + DB polling, two PDF GETs each, save five report texts under `cache/latency-reports/`, print toml block and a naive cross-Section repeated-sentence count
-- [ ] `tests/test_latency_record.py` -- new keys `draft_p90_seconds`, `section_p90_seconds`, `one_regen_p90_seconds`, `one_regen_basis`, `pdf_first_p90_seconds`, `pdf_repeat_p90_seconds` (repeat as float, whole seconds is too coarse), `runs_ok`, `repetition_reviewed`; budget tests (60 / 6 / <1, NFR-5 180 on `one_regen_p90`); drop the single-call composition tests; negative tests `test_the_guard_detects_a_*` for over-budget draft, PDF, and `bound` presented as `observed`
-- [ ] `docs/release-validation/latency.md` -- run the harness, record measured values, Epic 10 section, side-by-side reading instructions, repetition-review PENDING marker
-- [ ] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- 10-7 to `review`
+- [x] `tests/test_latency_record.py` -- add `test_measure_epic10_latency` (skip unless `RUN_LATENCY_MEASUREMENT=epic10` and app healthy): seed Client, 20 runs over HTTP + DB polling, two PDF GETs each, save five report texts under `cache/latency-reports/`, print toml block and a naive cross-Section repeated-sentence count
+- [x] `tests/test_latency_record.py` -- new keys `draft_p90_seconds`, `section_p90_seconds`, `one_regen_p90_seconds`, `one_regen_basis`, `pdf_first_p90_seconds`, `pdf_repeat_p90_seconds` (repeat as float, whole seconds is too coarse), `runs_ok`, `repetition_reviewed`; budget tests (60 / 6 / <1, NFR-5 180 on `one_regen_p90`); drop the single-call composition tests; negative tests `test_the_guard_detects_a_*` for over-budget draft, PDF, and `bound` presented as `observed`
+- [x] `docs/release-validation/latency.md` -- run the harness, record measured values, Epic 10 section, side-by-side reading instructions, repetition-review PENDING marker
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- 10-7 to `review`
 
 **Acceptance Criteria:**
 - Given the local stack with real Gemini, when the harness runs, then `latency.md` holds draft, per-Section, one-regeneration p90 and PDF first/repeat times from that run.
