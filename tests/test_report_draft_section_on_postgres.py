@@ -23,6 +23,7 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -71,7 +72,9 @@ def engine() -> Iterator[Engine]:
     _reset_public_schema(url)
     completed = run_online_upgrade(url)
     assert completed.returncode == 0, completed.stderr
-    engine = create_engine(url, pool_pre_ping=True)
+    # The app's own driver (psycopg 3); a bare postgresql:// URL (CI's) would make
+    # SQLAlchemy reach for psycopg2, which is not a dependency.
+    engine = create_engine(make_url(url).set(drivername="postgresql+psycopg"), pool_pre_ping=True)
     yield engine
     engine.dispose()
 
