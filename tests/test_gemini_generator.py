@@ -1077,3 +1077,14 @@ def test_the_section_prompt_forbids_a_perfection_date_for_a_never_perfected_aspe
     prompt = client.calls[0]["prompt"]
     assert '"never_perfected": true' in prompt
     assert "non scrivere MAI una data di perfezionamento" in prompt
+
+
+def test_the_section_prompt_forbids_date_ranges_and_approximations() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, client = _section_generator(_section_response())
+
+    generator.generate_section("denaro", payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    prompt = client.calls[0]["prompt"]
+    assert "MAI intervalli" in prompt
+    assert "intorno al 10 gennaio" in prompt

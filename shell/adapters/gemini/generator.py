@@ -450,7 +450,14 @@ _SECTION_FRAMING = (
     "esatto nel mese: non scrivere MAI una data di perfezionamento per lui (né "
     '"si perfezionerà il 24 gennaio" né simili); puoi dire solo che entra in orbita '
     '(da "orb_entry_at") o che resta attivo. Se per un evento il Payload non dà una '
-    "data, non indicarne nessuna."
+    "data, non indicarne nessuna.\n\n"
+    "Date: scrivi solo giorni esatti presi dai campi (perfected_at, orb_entry_at, "
+    "orb_exit_at, station_at, crossed_at, occurred_at, retrograde_start_utc, "
+    "retrograde_end_utc) degli eventi che citi nella stessa frase, un giorno per "
+    'evento. MAI intervalli ("tra il 14 e il 23 gennaio"), approssimazioni ("intorno '
+    'al 10 gennaio", "verso metà mese") o giorni di tua invenzione: se vuoi indicare '
+    'un periodo, usa parole generiche senza numeri ("nella seconda metà del mese"), '
+    "e non scrivere nessun giorno che non sia nel campo di un evento citato."
 )
 
 
