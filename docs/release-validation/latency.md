@@ -5,7 +5,7 @@ scan, Payload assembly, generation, Groundedness Gate and any bounded
 regeneration — at **under 3 minutes at p90**, and NFR-10 puts a full-month
 transit scan for one Client at **under 10 seconds**. Epic 10 (parallel
 per-Section generation, a stored-PDF cache) adds three targets of its own:
-**draft p90 ≤ 60 s**, **PDF first export ≤ 6 s**, **repeat download < 1 s**.
+**draft p90 ≤ 90 s** (revised from 60 s by Francesco on 2026-10-02), **PDF first export ≤ 6 s**, **repeat download < 1 s**.
 This file is the durable, dated record. The machine-readable block below is
 parsed by `tests/test_latency_record.py`; the guard suite stays red while a
 measured figure sits outside its budget, while a budget drifts from
@@ -21,19 +21,19 @@ is indexed as **RGD-2** in [`docs/decisions/README.md`](../decisions/README.md).
 checked = 2026-10-02
 ratified_by = "unratified: measured by Claude on 2026-10-02, pending Francesco"
 ratified_on = 2026-10-02
-environment = "local docker (app image built from the repo, one uvicorn worker, local Postgres 18), real paid gemini-2.5-flash over the network; not production"
+environment = "local docker (app image built from the repo, one uvicorn worker, local Postgres 18), real paid gemini-2.5-flash with a 1024 thinking budget; not production"
 report_budget_seconds = 180
-draft_budget_seconds = 60
+draft_budget_seconds = 90
 pdf_first_budget_seconds = 6
 pdf_repeat_budget_seconds = 1
-runs_ok = 19
-draft_p90_seconds = 137.7
-section_p90_seconds = 39.3
-one_regen_p90_seconds = 137.7
+runs_ok = 20
+draft_p90_seconds = 58.4
+section_p90_seconds = 14.8
+one_regen_p90_seconds = 52.3
 one_regen_basis = "observed"
 regen_runs_observed = 4
-pdf_first_p90_seconds = 1.7
-pdf_repeat_p90_seconds = 0.019
+pdf_first_p90_seconds = 2.7
+pdf_repeat_p90_seconds = 0.035
 month_scan_budget_seconds = 10
 month_scan_p90_seconds = 1
 session_reports = 40
@@ -45,74 +45,74 @@ outcome = "blocked"
 ## Result (Story 10.7, 2026-10-02)
 
 20 reports were driven through the running local docker app by
-`test_measure_epic10_latency` (`RUN_LATENCY_MEASUREMENT=epic10`); 19 reached
-`gate_passed` and were exported twice, one failed the Gate three times.
+`test_measure_epic10_latency` (`RUN_LATENCY_MEASUREMENT=epic10`) on the committed
+build; **all 20 reached `gate_passed`** and were exported twice.
 
 | Figure | p90 | Target | Verdict |
 |---|---|---|---|
-| Draft, start → `gate_passed` (incl. regenerations) | **137.7 s** | ≤ 60 s | **missed** |
-| One Section (claim → complete) | 39.3 s | — | — |
-| One regeneration (4 observed runs) | 137.7 s | < 180 s (NFR-5) | within |
-| PDF first export | 1.7 s | ≤ 6 s | met |
-| PDF repeat download | 0.019 s | < 1 s | met |
+| Draft, start → `gate_passed` (incl. regenerations) | **58.4 s** | ≤ 90 s | met |
+| One Section (claim → complete) | 14.8 s | — | — |
+| One regeneration (4 runs with exactly one) | 52.3 s | < 180 s (NFR-5) | within |
+| PDF first export | 2.7 s | ≤ 6 s | met |
+| PDF repeat download | 0.035 s | < 1 s | met |
 
-- Median draft ≈ 77 s; fastest 46 s, slowest 215 s (three attempts).
-- The **PDF work of Story 10.1 is a clear success**: 1.1–2.0 s first, ~15 ms
-  repeat, against 20–25 s before.
-- **The 60 s draft target is not met.** Even the 14 runs with no regeneration
-  took 46–123 s (median ≈ 70 s). A draft is the slowest of the seven parallel
-  Sections (Section p90 39 s, max 77 s — Gemini latency, not the local pipeline)
-  **plus** Consiglio finale, which waits for all seven before it starts.
-  Regeneration adds one more such round for a rejected Section and Consiglio
-  finale. This is a
-  finding for Francesco, not a budget to edit: see Open decisions.
-- NFR-5 (3 min, regeneration counted) holds at p90 (137.7 s) but one run took
-  215 s with three attempts.
-- Gate regeneration: 5 of the 19 successful runs needed a regeneration (four
-  one, one two) and 1 run exhausted the three-attempt bound. `one_regen` is the
-  p90 over the four runs with exactly one regeneration (attempts = 2).
+- Median draft ≈ 27 s. The 12 runs with no regeneration took 23.5–30.0 s
+  (median ≈ 25 s); the 8 runs with a regeneration took 42–66 s (four with one,
+  four with two). **Regeneration is what sets the p90**, not generation speed.
+- The 60 s target first set for this story would also have been met (58.4 s).
+- **What changed since the first measurement** (draft p90 137.7 s → 58.4 s):
+  Gemini's hidden "thinking" tokens were the latency. A Section wrote ~1,000
+  tokens but spent 1,000–13,000 thinking, taking 10–60 s; `GEMINI_THINKING_BUDGET`
+  (default 1024) brings a Section to ≈ 10 s, a clean draft to ≈ 25 s. Section time
+  p90 fell from 39.3 s to 14.8 s. The PDF work of Story 10.1 is unchanged: 1.4–2.9 s
+  first, ~30 ms repeat, against 20–25 s before.
+- NFR-5 (3 min, regeneration counted) holds with a wide margin: slowest run
+  65.6 s.
+- **Gate regeneration is still frequent:** 8 of 20 runs (40 %) needed at least
+  one. None exhausted the three-attempt bound (the first measurement lost one
+  run in 20 and three in four early samples).
+- Generation concurrency (default 11) was not raised: a report has seven
+  parallel Sections, so it only matters when several reports run at once.
+- Consiglio finale stays sequential: it takes the other seven Sections as
+  input and adds ≈ 8–10 s; written blind it would repeat the headline transits.
+- Sending each Section only its own Payload slice was trialled and not
+  adopted: no effect on time or repetition on whole reports.
 
 ### Per-run table
 
 | run | draft s | draft attempts | PDF first s | PDF repeat s |
 |---|---|---|---|---|
-| 1 | 94.9 | 2 | 1.13 | 0.014 |
-| 2 | 75.5 | 1 | 1.57 | 0.016 |
-| 3 | 83.5 | 1 | 1.15 | 0.012 |
-| 4 | 50.9 | 1 | 1.48 | 0.015 |
-| 5 | 51.5 | 1 | 1.17 | 0.015 |
-| 6 | 64.4 | 1 | 1.46 | 0.013 |
-| 7 | 106.0 | 2 | 1.16 | 0.011 |
-| 8 | 137.7 | 2 | 1.58 | 0.011 |
-| 9 | failed (Gate, 3 attempts) | 3 | — | — |
-| 10 | 63.5 | 1 | 1.34 | 0.016 |
-| 11 | 105.0 | 1 | 1.58 | 0.013 |
-| 12 | 68.4 | 1 | 1.56 | 0.012 |
-| 13 | 46.2 | 1 | 1.41 | 0.009 |
-| 14 | 122.7 | 1 | 1.48 | 0.018 |
-| 15 | 70.5 | 1 | 1.48 | 0.017 |
-| 16 | 54.3 | 1 | 1.37 | 0.011 |
-| 17 | 77.8 | 1 | 1.43 | 0.016 |
-| 18 | 109.5 | 1 | 1.98 | 0.022 |
-| 19 | 214.7 | 3 | 1.25 | 0.012 |
-| 20 | 108.0 | 2 | 1.68 | 0.014 |
+| 1 | 26.4 | 1 | 2.42 | 0.017 |
+| 2 | 25.3 | 1 | 1.41 | 0.032 |
+| 3 | 27.4 | 1 | 1.92 | 0.031 |
+| 4 | 23.5 | 1 | 2.48 | 0.026 |
+| 5 | 27.6 | 1 | 2.36 | 0.032 |
+| 6 | 42.3 | 2 | 2.03 | 0.034 |
+| 7 | 65.6 | 3 | 1.49 | 0.016 |
+| 8 | 25.9 | 1 | 2.61 | 0.035 |
+| 9 | 24.1 | 1 | 1.75 | 0.029 |
+| 10 | 47.6 | 2 | 1.87 | 0.028 |
+| 11 | 58.4 | 3 | 2.89 | 0.038 |
+| 12 | 64.6 | 3 | 2.19 | 0.023 |
+| 13 | 30.0 | 1 | 2.51 | 0.029 |
+| 14 | 24.1 | 1 | 1.82 | 0.031 |
+| 15 | 49.9 | 3 | 1.90 | 0.028 |
+| 16 | 26.0 | 1 | 2.04 | 0.028 |
+| 17 | 46.2 | 2 | 1.51 | 0.033 |
+| 18 | 52.3 | 2 | 2.64 | 0.035 |
+| 19 | 24.3 | 1 | 1.39 | 0.016 |
+| 20 | 24.7 | 1 | 2.52 | 0.035 |
 
 ### Caveats
 
 - **Local, not production.** The Netcup VPS is a slower vCPU; PDF times in
-  particular will differ. Re-run against production before treating the PDF
-  targets as demonstrated there.
-- **The measured build predates the last Gate and prompt fixes** (a natal body
-  placed beside a cited entry, an uncited house and its ruler, the "no date
-  ranges or approximations" prompt rule). Those fixes cut Gate rejections, so
-  the regeneration share and the draft p90 here are pessimistic; the one failed
-  run (9) died on an uncited "tra il 10 e il 15 gennaio" that the new prompt
-  rule targets. Re-measure on the committed build.
+  particular will differ, and Gemini latency from the EU VPS may too. Re-run
+  against production before treating the targets as demonstrated there.
 - **Section time is polled** every 0.2 s from Postgres (claim → seen
   `complete`), so each reads up to 0.2 s high.
 - n = 20; a p90 of 20 samples is the 18th-ranked value.
-- To get these runs through the Gate, Story 10.7 also loosened the Gate and
-  stopped rejecting leaked id aliases (see Gate changes below).
+- Gate and prompt changes made while measuring are listed below; they are in the
+  measured build.
 
 ## Gate changes made while measuring
 
@@ -126,23 +126,39 @@ following changes (each has tests with negatives):
   house); a number followed by "anni/giorni/volte…" is not a day; the verb
   "bilancia" is not the sign Libra. These narrow AD-8's day-of-month and
   casa-ordinal tokens; two tripwire tests (epic-5 retro item 40) were inverted.
-  **Francesco has not yet acknowledged this change to AD-8.**
+  **Acknowledged by Francesco on 2026-10-02**; recorded as an amendment under AD-8 in `ARCHITECTURE-SPINE.md`.
 - Natal profile data grounds claims: a body's natal sign/house/retrograde, a
   house's cusp sign and rulers, uncited natal-only sentences, a natal body
   placed beside a cited entry, a retrograde on a body the Payload records as
   retrograde, and standing-retrograde start/end dates (one day of timezone
   slack).
 - Prompt: no perfection date for a `never_perfected` aspect; no date ranges or
-  approximations; only exact days from the cited events' fields.
+  approximations; only exact days from the cited events' fields — for the six
+  Sections that may state dates only. A shared version of that rule had made
+  `giorni_favorevoli` fail 5 of 12 attempts by contradicting its no-dates rule;
+  it now gets a checklist of the ids it must cover (0 of 24 day-list attempts
+  failed afterwards, from 6 of 24). Each Section also has a one-paragraph role
+  (Energia generale the overview; the topical Sections only what the events mean
+  for their area; Consiglio finale practical advice without re-describing
+  transits).
+- `GEMINI_THINKING_BUDGET` (default 1024) caps the model's hidden thinking.
 
-## Repetition between Sections (AC-2, not yet done)
+## Repetition between Sections (AC-2: acted on, review pending)
 
-Five Epic 10 reports are saved under `cache/latency-reports/after-epic-10-*.md`
-(gitignored). A naive count of six-word runs that appear under more than one
-Section: 24, 40, 42, 37, 68. **Francesco still has to read them side by side
-against reports generated before Epic 10** and decide whether the repetition
-warrants a new Style Guide version (only he publishes one). `repetition_reviewed`
-stays `false` until he does.
+Francesco asked for the repetition to be reduced. It was not caused by Payload
+size (sending each Section only its own slice changed nothing); it comes from
+the Sections being written in parallel from the same events with no role.
+Each Section's prompt now states its role. In trials on whole reports, repeated
+eight-word phrases across Sections fell by about 40 % (≈ 22 → ≈ 12). In the five
+reports saved from this measurement (`cache/latency-reports/after-epic-10-*.md`,
+gitignored), Consiglio finale ↔ Energia generale — the largest pair before (17
+shared six-word runs in one report) — no longer appears among the top pairs;
+what remains is the topical Sections overlapping each other on a shared event
+(Denaro/Lavoro, Benessere/Lavoro): 7–24 repeated eight-word phrases in the prose
+Sections per report (mean ≈ 16), more on this chart than on the trial chart
+because it holds many slow-planet conjunctions. **Francesco still has to read
+the saved reports** and decide whether a new Style Guide version is warranted
+(only he publishes one). `repetition_reviewed` stays `false` until he does.
 
 ## Superseded: the Story 8.3 measurement (2026-08-27)
 
@@ -173,23 +189,23 @@ forty Reports in one working session through the UI — is still:
 
 ## Open decisions for Francesco
 
-1. **The 60 s draft target is missed** (p90 137.7 s; median ≈ 77 s). Options:
-   raise `GENERATION_CONCURRENCY` or generate Consiglio finale in parallel with
-   a Payload-only brief (it currently waits for the other seven Sections);
-   shorten the Payload each Section receives; accept a revised target. The
-   guard stays red until a measurement meets the target or he revises it.
-2. Acknowledge (or reject) the AD-8 narrowing listed above.
-3. Read the five saved reports for repetition and decide on a Style Guide
-   version.
-4. The forty-report one-sitting.
+1. Read the five saved reports for repetition (above) and decide on a Style
+   Guide version; set `repetition_reviewed`.
+2. The forty-report one-sitting; set `sitting_confirmed`.
+3. Ratify the figures (`ratified_by` / `ratified_on`).
+4. Gate regenerations: 40 % of runs still regenerate at least once. Each costs
+   ≈ 15–25 s but none failed. Further false positives can be fixed the same way
+   as the ones above, as they are found.
+5. Re-run on production.
 
 ## Outcome
 
-**`blocked`.** Measured and recorded honestly: the PDF targets are met locally,
-NFR-5 holds at p90, the draft target is missed, `sitting_confirmed` and
-`repetition_reviewed` are both `false`, and the numbers are unratified.
-`test_draft_p90_within_target` is red on purpose until the target is met or
-Francesco revises it; `test_outcome_permits_release` stays a strict `xfail`.
+**`blocked`.** Every measured target is met locally: draft p90 58.4 s (≤ 90 s),
+PDF first 2.7 s (≤ 6 s), repeat 0.035 s (< 1 s), NFR-5 with regeneration 52.3 s
+(< 180 s). The record stays `blocked` only for the human items:
+`sitting_confirmed` and `repetition_reviewed` are `false` and the numbers are
+unratified. `test_outcome_permits_release` stays a strict `xfail` until those are
+done.
 
 ## Re-measure trigger
 
