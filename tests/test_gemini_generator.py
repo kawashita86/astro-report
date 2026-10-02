@@ -1153,3 +1153,19 @@ def test_consiglio_finale_is_told_not_to_restate_the_transits_and_day_lists_have
     from shell.adapters.gemini.generator import _section_instruction
 
     assert "Ruolo:" not in _section_instruction("giorni_favorevoli", payload, None)
+
+
+def test_a_day_list_prompt_lists_the_ids_it_must_cover_and_other_sections_do_not() -> None:
+    from shell.adapters.gemini.generator import _section_instruction
+
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    aliases = _two_id_aliases()
+
+    day_list = _section_instruction("giorni_favorevoli", payload, None, aliases)
+    other = _section_instruction("amore", payload, None, aliases)
+
+    assert f"gli id da coprire, uno per frase, sono {aliases[_ANOTHER_KNOWN_ID]}." in day_list
+    assert "id da coprire" not in other
+    assert "il 3 gennaio" in day_list  # the forbidden form is shown by example
+    assert "Ogni giorno o data che scrivi" not in day_list  # the date rules are not sent here
+    assert "Ogni giorno o data che scrivi" in other

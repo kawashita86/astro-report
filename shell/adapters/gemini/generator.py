@@ -453,7 +453,14 @@ _SECTION_FRAMING = (
     '(es. "e12"): usa esattamente questi identificativi brevi in "entry_ids", mai un '
     'id diverso, più lungo o inventato. Gli id vanno SOLO in "entry_ids": il campo '
     '"text" è prosa rivolta al lettore finale e non deve mai contenere un id, una '
-    'sua parte, o un riferimento tra parentesi come "(e12)".\n\n'
+    'sua parte, o un riferimento tra parentesi come "(e12)".'
+)
+
+#: Date rules for the six Sections that may state dates (never the two day lists, whose
+#: dates are code-projected). Kept out of ``_SECTION_FRAMING`` because that text reaches
+#: the day lists too, where "write exact days from the event" contradicts "never write a
+#: date" and made ``giorni_favorevoli`` fail 5 of 12 attempts (Story 10.7).
+_DATE_RULES = (
     "Ogni giorno o data che scrivi deve venire dai campi dell'evento che citi. Un "
     'aspetto con "never_perfected": true e "perfected_at": null non diventa mai '
     "esatto nel mese: non scrivere MAI una data di perfezionamento per lui (né "
@@ -513,6 +520,19 @@ _SECTION_BRIEFS: dict[str, str] = {
 }
 
 
+def _day_list_checklist(
+    section: str, payload: dict[str, Any], aliases: Mapping[str, str] | None
+) -> str:
+    """The short ids of every event a day-list Section must cover, in Payload order --
+    a list the model can tick off, since dropping one of ~30 events was the commonest
+    way a Section failed (Story 10.7)."""
+    if not aliases:
+        return ""
+    entries = payload.get("day_lists", {}).get(section, [])
+    ids = [aliases[entry["id"]] for entry in entries if entry.get("id") in aliases]
+    return ", ".join(ids)
+
+
 def _section_brief(section: str) -> str:
     return _SECTION_BRIEFS.get(section, "")
 
@@ -521,6 +541,7 @@ def _section_instruction(
     section: str,
     payload: dict[str, Any],
     written_sections: Mapping[str, tuple[Sentence, ...]] | None,
+    aliases: Mapping[str, str] | None = None,
 ) -> str:
     lines = [f'{_SECTION_FRAMING}\n\nLa Sezione da scrivere è "{section}".']
     brief = _section_brief(section)
@@ -529,14 +550,24 @@ def _section_instruction(
     if section in _DATE_TOKEN_SECTIONS:
         count = _day_list_count(payload, section)
         lines.append(
-            f"Questa Sezione non deve MAI contenere una data (né un giorno del mese con "
-            "un nome di mese, né una data in formato ISO): le date sono già proiettate a "
-            f"monte dal codice. Contiene esattamente {count} eventi in "
+            f"Questa Sezione non deve MAI contenere una data o un giorno del mese: né "
+            '"il 3 gennaio", né "il 3", né "si perfeziona il 3", né una data ISO. Le date '
+            "sono già proiettate a monte dal codice e le aggiunge lui accanto a ogni "
+            f"frase. Contiene esattamente {count} eventi in "
             f"payload['day_lists']['{section}']: scrivi esattamente {count} frasi, una "
             'per ciascun evento, ognuna con un solo id in "entry_ids" (mai più di uno). '
-            "Non accorpare più eventi sotto la stessa frase: ogni frase descrive un solo "
-            "evento."
+            "Non accorpare più eventi sotto la stessa frase e non saltarne nessuno: ogni "
+            f"frase descrive un solo evento, e prima di rispondere controlla di aver "
+            f"coperto tutti i {count} eventi."
         )
+        checklist = _day_list_checklist(section, payload, aliases)
+        if checklist:
+            lines.append(
+                f"Elenco di controllo: gli id da coprire, uno per frase, sono {checklist}. "
+                "Ognuno compare in esattamente una frase."
+            )
+    else:
+        lines.append(_DATE_RULES)
     if section == "consiglio_finale" and written_sections:
         written = "\n".join(
             f"[{name}] {sentence.text}"
@@ -570,7 +601,7 @@ def _build_section_prompt(
     return (
         f"--- PAYLOAD (JSON) ---\n{payload_json}\n"
         f"{continuity_block}\n\n"
-        f"{_section_instruction(section, payload, written_sections)}"
+        f"{_section_instruction(section, payload, written_sections, aliases)}"
     )
 
 

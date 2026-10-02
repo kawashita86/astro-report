@@ -14,7 +14,7 @@ context:
 
 ## Intent
 
-**Problem:** `latency.md` records the pre-Epic-10 single-call generation (p90 118 s) and no PDF timing, so the new latency is unproven against NFR-5 and the Epic 10 targets (draft p90 ≤ 60 s, PDF first ≤ 6 s, repeat < 1 s).
+**Problem:** `latency.md` records the pre-Epic-10 single-call generation (p90 118 s) and no PDF timing, so the new latency is unproven against NFR-5 and the Epic 10 targets (draft p90 ≤ 90 s, PDF first ≤ 6 s, repeat < 1 s).
 
 **Approach:** An opt-in harness drives the running local docker app (real `gemini-2.5-flash`, local Postgres, one uvicorn worker) over HTTP, timing draft, per-Section, regeneration and PDF export; its figures replace the stale ones in `latency.md`, and `tests/test_latency_record.py` checks them against the budgets. Five generated reports are saved for Francesco's side-by-side read for repetition.
 
@@ -53,7 +53,7 @@ context:
 
 **Execution:**
 - [x] `tests/test_latency_record.py` -- add `test_measure_epic10_latency` (skip unless `RUN_LATENCY_MEASUREMENT=epic10` and app healthy): seed Client, 20 runs over HTTP + DB polling, two PDF GETs each, save five report texts under `cache/latency-reports/`, print toml block and a naive cross-Section repeated-sentence count
-- [x] `tests/test_latency_record.py` -- new keys `draft_p90_seconds`, `section_p90_seconds`, `one_regen_p90_seconds`, `one_regen_basis`, `pdf_first_p90_seconds`, `pdf_repeat_p90_seconds` (repeat as float, whole seconds is too coarse), `runs_ok`, `repetition_reviewed`; budget tests (60 / 6 / <1, NFR-5 180 on `one_regen_p90`); drop the single-call composition tests; negative tests `test_the_guard_detects_a_*` for over-budget draft, PDF, and `bound` presented as `observed`
+- [x] `tests/test_latency_record.py` -- new keys `draft_p90_seconds`, `section_p90_seconds`, `one_regen_p90_seconds`, `one_regen_basis`, `pdf_first_p90_seconds`, `pdf_repeat_p90_seconds` (repeat as float, whole seconds is too coarse), `runs_ok`, `repetition_reviewed`; budget tests (90 / 6 / <1, NFR-5 180 on `one_regen_p90`); drop the single-call composition tests; negative tests `test_the_guard_detects_a_*` for over-budget draft, PDF, and `bound` presented as `observed`
 - [x] `docs/release-validation/latency.md` -- run the harness, record measured values, Epic 10 section, side-by-side reading instructions, repetition-review PENDING marker
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- 10-7 to `review`
 

@@ -2507,7 +2507,7 @@ So that the 3-minute budget is checked against reality, regeneration included.
 **When** the 8-3 measurement is re-run
 **Then** `docs/release-validation/latency.md` records draft p90, per-Section p90, one-regeneration p90,
 and PDF first/repeat export times, and its guard test checks them against budget
-**And** the targets are: draft p90 ≤ 60 s, PDF first export ≤ 6 s, repeat download < 1 s
+**And** the targets are: draft p90 ≤ 90 s (revised from 60 s by Francesco on 2026-10-02 after the first real-Gemini measurement), PDF first export ≤ 6 s, repeat download < 1 s
 
 **Given** five reports generated before and after Epic 10
 **When** Francesco reads them side by side

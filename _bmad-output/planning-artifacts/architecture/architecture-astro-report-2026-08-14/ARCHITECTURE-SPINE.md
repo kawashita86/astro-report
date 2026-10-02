@@ -172,6 +172,17 @@ No arrow runs from `core` to `shell`. There is no exception.
   sentence containing no such token is interpretation: it is never a Claim, never fails the Gate, and
   is governed by the Style Guide instead. **Stated limit:** a sentence that leans on a fact without
   naming it is not policed, because it is not verifiable against a Payload by any mechanism.
+- **Amendment 2026-10-02 (Story 10.7, acknowledged by Francesco):** measuring real Gemini output
+  showed the Gate rejecting true sentences, so the vocabulary tokens are read more precisely, and
+  natal profile data in the Payload grounds natal claims. A *day-of-month numeral* is not a number
+  followed by a unit of time or measure ("29 anni", "3 giorni", "10 gradi"); *`casa` with an
+  ordinal* requires the ordinal next to `casa` ("la Quinta Casa", "casa quinta"), not elsewhere in
+  the sentence ("la terza settimana"); the verb "bilancia" is not the sign Libra. A Claim whose
+  facts are present in the Payload's natal `profile` (a body's natal sign, house, retrograde flag; a
+  house's cusp sign and rulers) need not cite an entry, and a body the Payload records as retrograde
+  grounds a retrograde claim on an entry that cites that body. Standing-retrograde start and end
+  dates are checkable dates (one day of timezone slack). Aspects and transits remain checked only
+  through cited entries.
 
 ### AD-9 — One Generator adapter; no runtime failover
 

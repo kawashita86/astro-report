@@ -64,9 +64,10 @@ _MONTH_SCAN_BUDGET_SECONDS = 10
 #: session.
 _SESSION_REPORTS_TARGET = 40
 
-#: Epic 10's targets (Story 10.7): draft p90 at most, PDF first export at most,
+#: Epic 10's targets (Story 10.7; the draft target was revised from 60 s to 90 s by
+#: Francesco on 2026-10-02): draft p90 at most, PDF first export at most,
 #: repeat download strictly under.
-_DRAFT_BUDGET_SECONDS = 60
+_DRAFT_BUDGET_SECONDS = 90
 _PDF_FIRST_BUDGET_SECONDS = 6
 _PDF_REPEAT_BUDGET_SECONDS = 1
 
