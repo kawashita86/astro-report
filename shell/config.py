@@ -28,7 +28,9 @@ from argon2.exceptions import InvalidHashError
 
 __all__ = [
     "DEFAULT_GEMINI_MODEL",
+    "DEFAULT_GEMINI_THINKING_BUDGET",
     "DEFAULT_GENERATION_CONCURRENCY",
+    "MAX_GEMINI_THINKING_BUDGET",
     "MAX_GENERATION_CONCURRENCY",
     "MAX_SECTION_ATTEMPTS",
     "ConfigError",
@@ -68,6 +70,13 @@ _SQLALCHEMY_SCHEME = "postgresql+psycopg"
 #: The one Generator model this application is configured against (AD-9), used when
 #: ``GEMINI_MODEL`` is unset or blank. Paid tier, EEA data terms.
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
+#: Tokens ``gemini-2.5-flash`` may spend "thinking" before it writes a Section, when
+#: ``GEMINI_THINKING_BUDGET`` is unset or blank, and the largest value accepted. Left to
+#: the model's dynamic default it spent 1,000-13,000 thinking tokens on a ~1,000-token
+#: Section and took 10-60 s; at 1,024 a Section takes about 10 s (Story 10.7).
+DEFAULT_GEMINI_THINKING_BUDGET = 1024
+MAX_GEMINI_THINKING_BUDGET = 24576
 
 #: How many Section generations may be in flight at once when
 #: ``GENERATION_CONCURRENCY`` is unset or blank, and the largest value accepted.
@@ -122,6 +131,7 @@ class Settings:
     # `Settings(...)` directly keep working (Story 10.2).
     gemini_model: str = DEFAULT_GEMINI_MODEL
     generation_concurrency: int = DEFAULT_GENERATION_CONCURRENCY
+    gemini_thinking_budget: int = DEFAULT_GEMINI_THINKING_BUDGET
 
     def __repr__(self) -> str:
         return (
@@ -133,7 +143,8 @@ class Settings:
             f"gemini_data_terms_verified_at={self.gemini_data_terms_verified_at!r}, "
             f"use_real_gemini_locally={self.use_real_gemini_locally!r}, "
             f"gemini_model={self.gemini_model!r}, "
-            f"generation_concurrency={self.generation_concurrency!r})"
+            f"generation_concurrency={self.generation_concurrency!r}, "
+            f"gemini_thinking_budget={self.gemini_thinking_budget!r})"
         )
 
     @property
@@ -366,6 +377,22 @@ def _read_gemini_model(environ: Mapping[str, str]) -> tuple[str | None, str | No
     return raw.strip(), None
 
 
+def _read_gemini_thinking_budget(
+    environ: Mapping[str, str],
+) -> tuple[int | None, str | None]:
+    """Optional integer 0-24576 (ASCII digits only); unset or blank means the default."""
+    raw = environ.get("GEMINI_THINKING_BUDGET")
+    if raw is None or not raw.strip():
+        return DEFAULT_GEMINI_THINKING_BUDGET, None
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit()) or int(text) > MAX_GEMINI_THINKING_BUDGET:
+        return None, (
+            f"GEMINI_THINKING_BUDGET is invalid: {raw!r} is not an integer "
+            f"between 0 and {MAX_GEMINI_THINKING_BUDGET}."
+        )
+    return int(text), None
+
+
 def _read_generation_concurrency(
     environ: Mapping[str, str],
 ) -> tuple[int | None, str | None]:
@@ -405,6 +432,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     use_real_gemini_locally, use_real_gemini_locally_error = _read_use_real_gemini_locally(source)
     gemini_model, gemini_model_error = _read_gemini_model(source)
     generation_concurrency, generation_concurrency_error = _read_generation_concurrency(source)
+    gemini_thinking_budget, gemini_thinking_budget_error = _read_gemini_thinking_budget(source)
 
     problems = [
         problem
@@ -419,6 +447,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             use_real_gemini_locally_error,
             gemini_model_error,
             generation_concurrency_error,
+            gemini_thinking_budget_error,
         )
         if problem is not None
     ]
@@ -439,6 +468,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         and use_real_gemini_locally is not None
         and gemini_model is not None
         and generation_concurrency is not None
+        and gemini_thinking_budget is not None
     )
     return Settings(
         environment=environment,
@@ -451,6 +481,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         use_real_gemini_locally=use_real_gemini_locally,
         gemini_model=gemini_model,
         generation_concurrency=generation_concurrency,
+        gemini_thinking_budget=gemini_thinking_budget,
     )
 
 

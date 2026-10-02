@@ -606,3 +606,32 @@ def test_generation_concurrency_bounds_are_accepted(good: str) -> None:
     assert load_settings(
         environment_with(GENERATION_CONCURRENCY=good)
     ).generation_concurrency == int(good)
+
+
+# --- GEMINI_THINKING_BUDGET (Story 10.7) ---------------------------------------
+
+
+def test_thinking_budget_defaults_when_unset_or_blank() -> None:
+    assert load_settings(VALID_ENVIRONMENT).gemini_thinking_budget == 1024
+    assert (
+        load_settings(environment_with(GEMINI_THINKING_BUDGET="  ")).gemini_thinking_budget == 1024
+    )
+
+
+def test_thinking_budget_override_is_carried_and_zero_is_allowed() -> None:
+    settings = load_settings(environment_with(GEMINI_THINKING_BUDGET="512"))
+
+    assert settings.gemini_thinking_budget == 512
+    assert "gemini_thinking_budget=512" in repr(settings)
+    assert load_settings(environment_with(GEMINI_THINKING_BUDGET="0")).gemini_thinking_budget == 0
+
+
+@pytest.mark.parametrize("bad", ["-1", "24577", "abc", "4.5", "\u0664"])
+def test_a_bad_thinking_budget_aborts_and_is_named(bad: str) -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_with(GEMINI_THINKING_BUDGET=bad, PORT="nope"))
+
+    message = str(raised.value)
+    assert "GEMINI_THINKING_BUDGET" in message
+    assert "0 and 24576" in message
+    assert "PORT" in message

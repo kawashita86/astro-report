@@ -702,7 +702,7 @@ def test_google_genai_client_wrapper_calls_the_real_sdk_correctly(
 
     monkeypatch.setattr("shell.adapters.gemini.generator.genai.Client", _FakeSDKClient)
 
-    wrapper = _GoogleGenAIClient(api_key="secret-key", model="gemini-2.5-pro")
+    wrapper = _GoogleGenAIClient(api_key="secret-key", model="gemini-2.5-pro", thinking_budget=700)
     result = wrapper.generate_content(
         system_instruction="be nice", prompt="hello", response_schema={"type": "object"}
     )
@@ -716,6 +716,33 @@ def test_google_genai_client_wrapper_calls_the_real_sdk_correctly(
     assert config.system_instruction == "be nice"
     assert config.response_mime_type == "application/json"
     assert config.response_json_schema == {"type": "object"}
+    assert config.thinking_config is not None
+    assert config.thinking_config.thinking_budget == 700
+
+
+def test_google_genai_client_wrapper_leaves_thinking_alone_when_no_budget_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shell.adapters.gemini.generator import _GoogleGenAIClient
+
+    captured: dict[str, Any] = {}
+
+    class _FakeModels:
+        def generate_content(self, *, model: str, contents: str, config: Any) -> Any:
+            captured["config"] = config
+            return type("R", (), {"text": "{}"})()
+
+    class _FakeSDKClient:
+        def __init__(self, api_key: str) -> None:
+            self.models = _FakeModels()
+
+    monkeypatch.setattr("shell.adapters.gemini.generator.genai.Client", _FakeSDKClient)
+
+    _GoogleGenAIClient(api_key="k", model="m").generate_content(
+        system_instruction="s", prompt="p", response_schema={}
+    )
+
+    assert captured["config"].thinking_config is None
 
 
 # --- The adapter holds no DB handle, filesystem access or tool definitions ---
@@ -777,17 +804,21 @@ def test_generator_for_settings_passes_the_configured_model(
     seen: dict[str, object] = {}
 
     class _Spy:
-        def __init__(self, api_key: str, *, model: str) -> None:
+        def __init__(self, api_key: str, *, model: str, thinking_budget: int) -> None:
             seen["model"] = model
+            seen["thinking_budget"] = thinking_budget
 
     monkeypatch.setattr(scheduler, "GeminiGenerator", _Spy)
     settings = load_settings(
-        environment_with(ENVIRONMENT="production", GEMINI_MODEL="gemini-2.5-pro")
+        environment_with(
+            ENVIRONMENT="production", GEMINI_MODEL="gemini-2.5-pro", GEMINI_THINKING_BUDGET="300"
+        )
     )
 
     scheduler.generator_for_settings(settings)
 
     assert seen["model"] == "gemini-2.5-pro"
+    assert seen["thinking_budget"] == 300
 
 
 # --- Story 10.3: generate_section ---------------------------------------------

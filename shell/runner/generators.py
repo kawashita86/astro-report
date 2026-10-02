@@ -25,4 +25,8 @@ def generator_for_settings(settings: Settings) -> Generator:
     deliberate and explicit, never a deployment default."""
     if settings.environment is Environment.LOCAL and not settings.use_real_gemini_locally:
         return RecordedResponseGenerator()
-    return GeminiGenerator(settings.gemini_api_key, model=settings.gemini_model)
+    return GeminiGenerator(
+        settings.gemini_api_key,
+        model=settings.gemini_model,
+        thinking_budget=settings.gemini_thinking_budget,
+    )

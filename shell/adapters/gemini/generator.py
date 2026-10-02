@@ -185,9 +185,10 @@ class _GoogleGenAIClient:
     never needs to know the real SDK's shape either.
     """
 
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, thinking_budget: int | None = None) -> None:
         self._client = genai.Client(api_key=api_key)
         self._model = model
+        self._thinking_budget = thinking_budget
 
     def generate_content(
         self, *, system_instruction: str, prompt: str, response_schema: dict[str, Any]
@@ -199,6 +200,13 @@ class _GoogleGenAIClient:
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
                 response_json_schema=response_schema,
+                # Hidden "thinking" tokens dominated a Section's latency (10-60 s for a
+                # ~1,000-token answer); a bounded budget keeps it near 10 s (Story 10.7).
+                thinking_config=(
+                    None
+                    if self._thinking_budget is None
+                    else types.ThinkingConfig(thinking_budget=self._thinking_budget)
+                ),
             ),
         )
         return response.text
@@ -218,9 +226,10 @@ class GeminiGenerator:
         api_key: str,
         *,
         model: str = DEFAULT_GEMINI_MODEL,
+        thinking_budget: int | None = None,
         client: _GeminiClient | None = None,
     ) -> None:
-        self._client = client or _GoogleGenAIClient(api_key, model)
+        self._client = client or _GoogleGenAIClient(api_key, model, thinking_budget)
 
     def generate_section(
         self,
