@@ -921,6 +921,29 @@ def test_a_natal_body_placed_beside_a_cited_entry_is_grounded_by_the_profile() -
     ).passed
 
 
+def test_an_uncited_house_and_its_ruler_are_grounded_by_the_profile() -> None:
+    frozen = _frozen_money_profile()
+    right = _draft(
+        denaro=(
+            Sentence(
+                text="La tua Ottava Casa e il suo governatore Venere chiedono attenzione.",
+                entry_ids=(),
+            ),
+        )
+    )
+    wrong = _draft(
+        denaro=(
+            Sentence(
+                text="La tua Ottava Casa e il suo governatore Marte chiedono attenzione.",
+                entry_ids=(),
+            ),
+        )
+    )
+
+    assert run_gate(right, frozen, _VOCABULARY).passed is True
+    assert _kinds(run_gate(wrong, frozen, _VOCABULARY)) == ["empty_citation"]
+
+
 # --- Matrix row: date token in day list --------------------------------------------
 
 

@@ -734,6 +734,7 @@ def _grounded_by_natal_profile(
     natal_sign_by_point: dict[str, str],
     natal_retrograde_by_planet: dict[str, bool],
     natal_house_cusp_sign: dict[int, str],
+    natal_house_rulers: dict[int, frozenset[str]],
     vocabulary: GateVocabulary,
 ) -> bool:
     """Whether an *uncited* Claim is wholly true of the natal chart.
@@ -782,7 +783,10 @@ def _grounded_by_natal_profile(
         if house is not None
     }
     cusp_named_houses = {house for house in houses if natal_house_cusp_sign.get(house) in signs}
-    if not houses <= placed_houses | cusp_named_houses:
+    ruled_named_houses = {
+        house for house in houses if natal_house_rulers.get(house, frozenset()) & bodies
+    }
+    if not houses <= placed_houses | cusp_named_houses | ruled_named_houses:
         return False
     if retrograde:
         return any(natal_retrograde_by_planet.get(body) for body in bodies)
@@ -810,6 +814,7 @@ def _check_claim(
             natal_sign_by_point=natal_sign_by_point,
             natal_retrograde_by_planet=natal_retrograde_by_planet,
             natal_house_cusp_sign=natal_house_cusp_sign,
+            natal_house_rulers=natal_house_rulers,
             vocabulary=vocabulary,
         ):
             return []

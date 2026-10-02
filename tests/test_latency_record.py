@@ -598,9 +598,17 @@ def test_measure_epic10_latency(capsys: pytest.CaptureFixture[str]) -> None:
     try:
         with authenticated_client() as http:
             for index in range(total_runs):
-                samples.append(
-                    measure_run(http, client_id, month=_MONTH, capture_markdown=index < 5)
-                )
+                sample = measure_run(http, client_id, month=_MONTH, capture_markdown=index < 5)
+                samples.append(sample)
+                with capsys.disabled():  # a crash later must not lose what was measured
+                    print(
+                        f"run {index + 1}/{total_runs}: draft {sample.draft_seconds:.1f}s "
+                        f"attempts {sample.max_attempt + 1} sections "
+                        f"{[round(t, 1) for t in sample.section_seconds]} "
+                        f"pdf {sample.pdf_first_seconds:.2f}s/{sample.pdf_repeat_seconds:.3f}s "
+                        f"{sample.failure or ''}",
+                        flush=True,
+                    )
     finally:
         with Session(engine) as session:
             leftover = session.get(Client, client_id)
@@ -618,6 +626,7 @@ def test_measure_epic10_latency(capsys: pytest.CaptureFixture[str]) -> None:
         "generator, not real Gemini; refusing to record it"
     )
 
+    assert any(s.section_seconds for s in ok), "no Section timing was observed"
     draft_p90 = nearest_rank_p90([s.draft_seconds for s in ok])
     section_p90 = nearest_rank_p90([t for s in ok for t in s.section_seconds])
     regen = [s for s in ok if s.max_attempt == 1]

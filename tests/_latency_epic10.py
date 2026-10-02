@@ -123,10 +123,12 @@ def app_is_up() -> bool:
 def _observe(
     conn: psycopg.Connection[Any],
     run_id: UUID,
+    claims: dict[tuple[int, int], datetime],
     seen: dict[tuple[int, int], float],
     sample: RunSample,
 ) -> tuple[str | None, bool]:
-    """One poll: record any Section newly seen complete; return (stage, failed)."""
+    """One poll: remember when each in-flight Section was claimed (the lease is cleared
+    when it completes), record any Section newly seen complete; return (stage, failed)."""
     now = datetime.now(UTC)
     stage, failed_at = conn.execute(
         "select stage, failed_at from report_run where id = %s", (run_id,)
@@ -138,8 +140,10 @@ def _observe(
     ):
         sample.max_attempt = max(sample.max_attempt, attempt)
         key = (attempt, ordinal)
-        if status == "complete" and key not in seen and claimed_at is not None:
-            seen[key] = (now - claimed_at).total_seconds()
+        if claimed_at is not None:
+            claims[key] = claimed_at
+        if status == "complete" and key not in seen and key in claims:
+            seen[key] = (now - claims[key]).total_seconds()
     return stage, failed_at is not None
 
 
@@ -159,9 +163,10 @@ def measure_run(
     run_id = UUID(response.headers["location"].rsplit("/", 1)[1])
     sample = RunSample(run_id=run_id)
     seen: dict[tuple[int, int], float] = {}
+    claims: dict[tuple[int, int], datetime] = {}
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
         while True:
-            stage, failed = _observe(conn, run_id, seen, sample)
+            stage, failed = _observe(conn, run_id, claims, seen, sample)
             if failed:
                 (reason,) = conn.execute(
                     "select failure_reason from report_run where id = %s", (run_id,)
