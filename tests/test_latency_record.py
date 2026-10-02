@@ -214,14 +214,6 @@ def test_sitting_confirmed_is_a_bool(meta: dict[str, object]) -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="epic-8-retro-item-65: latency.md honestly records outcome = "
-    "\"blocked\" -- AC-4's human half (Francesco's forty-report one-sitting "
-    "produce -> review -> export) has not happened, so `sitting_confirmed` is "
-    "false. When that sitting is done and the field flips to true this test "
-    "passes -> xfail_strict fires an XPASS -> remove this marker.",
-)
 def test_outcome_permits_release(meta: dict[str, object]) -> None:
     assert_outcome_permits_release(
         meta,

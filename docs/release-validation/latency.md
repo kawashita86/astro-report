@@ -19,7 +19,7 @@ is indexed as **RGD-2** in [`docs/decisions/README.md`](../decisions/README.md).
 
 ```toml
 checked = 2026-10-02
-ratified_by = "unratified: measured by Claude on 2026-10-02, pending Francesco"
+ratified_by = "Francesco"
 ratified_on = 2026-10-02
 environment = "local docker (app image built from the repo, one uvicorn worker, local Postgres 18), real paid gemini-2.5-flash with a 1024 thinking budget; not production"
 report_budget_seconds = 180
@@ -39,7 +39,7 @@ month_scan_p90_seconds = 1
 session_reports = 40
 sitting_confirmed = true
 repetition_reviewed = true
-outcome = "blocked"
+outcome = "pass"
 ```
 
 ## Result (Story 10.7, 2026-10-02)
@@ -187,21 +187,22 @@ forty Reports in one working session through the UI — is still:
 > **Confirmed by Francesco on 2026-10-02** (`sitting_confirmed = true`): the
 > one-sitting produce → review → export of the forty-report target.
 
-## Open decisions for Francesco
+## Ratification
 
-1. Ratify the figures (`ratified_by` / `ratified_on`): the measured values, the
-   draft target revision 60 → 90 s, and recording the Gate regeneration share
-   (40 % of runs regenerate at least once, none failed) rather than treating it
-   as a budget problem. Until he does the record keeps `outcome = "blocked"`.
-2. Re-run on production (the numbers here are from the local docker stack).
+**Ratified by Francesco on 2026-10-02:** the measured figures above, the draft
+target revision from 60 s to 90 s, and recording the Gate regeneration share
+(40 % of runs regenerate at least once, none failed) rather than treating it as a
+budget problem. The scope of the ratification is the **local docker stack**, not
+production: a production re-run is still worth doing, since the VPS is a slower
+vCPU and Gemini latency from it may differ.
 
 ## Outcome
 
-**`blocked`, only on ratification.** Every measured target is met locally: draft
-p90 58.4 s (≤ 90 s), PDF first 2.7 s (≤ 6 s), repeat 0.035 s (< 1 s), NFR-5 with
-regeneration 52.3 s (< 180 s). The sitting and the repetition review are
-confirmed. When Francesco ratifies, set `ratified_by`, `ratified_on` and
-`outcome = "pass"`, and remove the strict `xfail` on `test_outcome_permits_release`.
+**`pass`.** Every measured target is met locally: draft p90 58.4 s (≤ 90 s), PDF
+first 2.7 s (≤ 6 s), repeat 0.035 s (< 1 s), NFR-5 with regeneration 52.3 s
+(< 180 s). The forty-report sitting and the repetition review are confirmed and
+Francesco has ratified the figures. `test_outcome_permits_release` is now an
+ordinary test; the strict `xfail` that held it has been removed.
 
 ## Re-measure trigger
 
