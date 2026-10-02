@@ -1119,3 +1119,37 @@ def test_the_section_prompt_forbids_date_ranges_and_approximations() -> None:
     prompt = client.calls[0]["prompt"]
     assert "MAI intervalli" in prompt
     assert "intorno al 10 gennaio" in prompt
+
+
+@pytest.mark.parametrize(
+    ("section", "expected"),
+    [
+        ("energia_generale", "il quadro generale del mese"),
+        ("amore", "relazioni e gli affetti"),
+        ("lavoro", "lavoro e la carriera"),
+        ("denaro", "risorse e il denaro"),
+        ("benessere", "salute"),
+    ],
+)
+def test_each_topical_section_prompt_states_its_own_role(section: str, expected: str) -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    generator, client = _section_generator(_section_response())
+
+    generator.generate_section(section, payload, _STYLE_GUIDE, None, _EMPTY_THEME)
+
+    assert "Ruolo: " in client.calls[0]["prompt"]
+    assert expected in client.calls[0]["prompt"]
+
+
+def test_consiglio_finale_is_told_not_to_restate_the_transits_and_day_lists_have_no_role() -> None:
+    payload = _payload_with_ids(_KNOWN_ID, _ANOTHER_KNOWN_ID)
+    written = {"amore": (Sentence(text="Testo.", entry_ids=(_KNOWN_ID,)),)}
+    generator, client = _section_generator(_section_response())
+    generator.generate_section(
+        "consiglio_finale", payload, _STYLE_GUIDE, None, _EMPTY_THEME, written
+    )
+    assert "NON nominare i transiti" in client.calls[0]["prompt"]
+
+    from shell.adapters.gemini.generator import _section_instruction
+
+    assert "Ruolo:" not in _section_instruction("giorni_favorevoli", payload, None)

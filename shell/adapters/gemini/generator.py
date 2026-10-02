@@ -470,12 +470,62 @@ _SECTION_FRAMING = (
 )
 
 
+#: What each Section is *for* in the whole Report. The eight Sections are written in
+#: parallel from the same events, so without a role each one retells the month's headline
+#: transits (Consiglio finale most of all); measured by counting six-word runs repeated
+#: across Sections (Story 10.7).
+_SECTION_BRIEFS: dict[str, str] = {
+    "energia_generale": (
+        "Ruolo: il quadro generale del mese. Presenta qui, una volta sola, i due o tre "
+        "eventi dominanti; le altre Sezioni non li rispiegheranno."
+    ),
+    "amore": (
+        "Ruolo: solo ciò che gli eventi significano per le relazioni e gli affetti. "
+        "Non riscrivere il quadro generale del mese né spiegare di nuovo i grandi "
+        "transiti dei pianeti lenti: sono già in energia_generale. Se citi un evento "
+        "condiviso, nominalo in poche parole e dedica la frase al suo effetto su questa area."
+    ),
+    "lavoro": (
+        "Ruolo: solo ciò che gli eventi significano per il lavoro e la carriera. "
+        "Non riscrivere il quadro generale del mese né spiegare di nuovo i grandi "
+        "transiti dei pianeti lenti: sono già in energia_generale. Se citi un evento "
+        "condiviso, nominalo in poche parole e dedica la frase al suo effetto su questa area."
+    ),
+    "denaro": (
+        "Ruolo: solo ciò che gli eventi significano per le risorse e il denaro. "
+        "Non riscrivere il quadro generale del mese né spiegare di nuovo i grandi "
+        "transiti dei pianeti lenti: sono già in energia_generale. Se citi un evento "
+        "condiviso, nominalo in poche parole e dedica la frase al suo effetto su questa area."
+    ),
+    "benessere": (
+        "Ruolo: solo ciò che gli eventi significano per la salute, l'energia e il "
+        "benessere. Non riscrivere il quadro generale del mese né spiegare di nuovo i "
+        "grandi transiti dei pianeti lenti: sono già in energia_generale. Se citi un "
+        "evento condiviso, nominalo in poche parole e dedica la frase al suo effetto "
+        "su questa area."
+    ),
+    "consiglio_finale": (
+        "Ruolo: la chiusura pratica. NON nominare i transiti, i pianeti o le date già "
+        "descritti nelle Sezioni scritte e non riassumerle: traduci il mese in due o "
+        "quattro indicazioni concrete da mettere in pratica e chiudi con una sola "
+        "immagine finale."
+    ),
+}
+
+
+def _section_brief(section: str) -> str:
+    return _SECTION_BRIEFS.get(section, "")
+
+
 def _section_instruction(
     section: str,
     payload: dict[str, Any],
     written_sections: Mapping[str, tuple[Sentence, ...]] | None,
 ) -> str:
     lines = [f'{_SECTION_FRAMING}\n\nLa Sezione da scrivere è "{section}".']
+    brief = _section_brief(section)
+    if brief:
+        lines.append(brief)
     if section in _DATE_TOKEN_SECTIONS:
         count = _day_list_count(payload, section)
         lines.append(
