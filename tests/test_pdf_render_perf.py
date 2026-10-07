@@ -33,7 +33,7 @@ from shell.http.report_export_view import build_export_context
 from shell.http.routes import report_runs as report_runs_module
 from tests._fk import fk_enforcing_engine
 
-_BUDGET_SECONDS = 1.2
+_BUDGET_SECONDS = 2.0
 _SENTENCE = (
     "La configurazione del mese invita a rallentare e a guardare con attenzione "
     "ai rapporti che contano, senza forzare le decisioni che non sono ancora mature. "

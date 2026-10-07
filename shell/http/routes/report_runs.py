@@ -130,25 +130,34 @@ def _export_template_hash() -> str:
     return hashlib.sha256((_TEMPLATES_DIR / "report_export.html").read_bytes()).hexdigest()
 
 
-# --- report_export.html's natal wheel: copper/ink literal-color palette ----
+# --- report_export.html's natal wheel: navy "night" literal-color palette ---
 #
 # WeasyPrint 69 does not resolve `var(--kerykeion-*)` CSS custom properties
 # referenced from inside an *inlined* SVG's own presentation attributes --
 # verified empirically (the CSS-var-driven default renders the whole wheel
-# as a solid black disc under WeasyPrint, never the copper/ink tones the
-# design calls for). Literal hex colors sidestep CSS custom property
+# as a solid black disc under WeasyPrint, never the tones the design calls
+# for). Literal hex colors sidestep CSS custom property
 # resolution entirely, so this module builds its own copy of Kerykeion's
 # three settings structures (``kerykeion.settings.chart_defaults``) with
 # every ``var(...)`` replaced by a literal color from this design's palette
 # -- this is the "literal-color override" the story's Ask-First risk names;
 # it renders correctly (verified against a rasterized PDF page), so the
 # PNG-rasterization fallback that risk also names is never reached.
-_WHEEL_INK = "#2B2724"
-_WHEEL_COPPER = "#A77B57"
-_WHEEL_CARD = "#FFFDFA"
-_WHEEL_GROUND = "#F7F4EF"
-_WHEEL_BORDER = "#E6DED4"
-_WHEEL_MUTED_RULE = "#D9CBBB"
+#
+# The values are the navy palette on "night" paper the client chose
+# (mockups/key-pdf-export-navy.html, wheel key-pdf-export-night-wheel-contrast.svg):
+# light glyphs and lines on two alternating navy sign bands, painted fully
+# opaque (``_opaque_wheel_svg``) because Kerykeion's default half-opacity
+# sign bands wash out against the dark card.
+_WHEEL_INK = "#F4F3F6"
+_WHEEL_ASPECT = "#E8E7EB"
+_WHEEL_SIGN_GLYPH = "#D3D8F2"
+_WHEEL_HOUSE_NUMBER = "#C4C6CF"
+_WHEEL_CARD = "#1B2340"
+_WHEEL_BAND_EVEN = "#2C3766"
+_WHEEL_BAND_ODD = "#222B52"
+_WHEEL_RING = "#8991B3"
+_WHEEL_HOUSE_LINE = "#7D86AD"
 
 
 def _literal_wheel_colors_settings() -> dict[str, str]:
@@ -158,13 +167,13 @@ def _literal_wheel_colors_settings() -> dict[str, str]:
             settings[key] = _WHEEL_CARD
         elif key.startswith("zodiac_bg"):
             index = int(key.rsplit("_", 1)[1])
-            settings[key] = _WHEEL_CARD if index % 2 == 0 else _WHEEL_GROUND
+            settings[key] = _WHEEL_BAND_EVEN if index % 2 == 0 else _WHEEL_BAND_ODD
         elif key.startswith("zodiac_icon"):
-            settings[key] = _WHEEL_COPPER
+            settings[key] = _WHEEL_SIGN_GLYPH
         elif key.startswith("zodiac_radix_ring") or key.startswith("zodiac_transit_ring"):
-            settings[key] = _WHEEL_BORDER
+            settings[key] = _WHEEL_RING
         elif key in ("houses_radix_line", "houses_transit_line"):
-            settings[key] = _WHEEL_MUTED_RULE
+            settings[key] = _WHEEL_HOUSE_LINE
         elif key.startswith("lunar_phase"):
             settings[key] = _WHEEL_INK
     unresolved = {key: value for key, value in settings.items() if "var(" in value}
@@ -190,7 +199,7 @@ def _literal_wheel_celestial_points_settings() -> list[dict[str, Any]]:
 def _literal_wheel_aspects_settings() -> list[dict[str, Any]]:
     settings = copy.deepcopy(DEFAULT_CHART_ASPECTS_SETTINGS)
     for aspect in settings:
-        aspect["color"] = _WHEEL_COPPER
+        aspect["color"] = _WHEEL_ASPECT
     return settings
 
 
@@ -248,19 +257,22 @@ _WHEEL_ASPECT_VAR_NAMES = frozenset(
 
 def _resolve_wheel_svg_css_vars(svg: str) -> str:
     """Every remaining ``var(--kerykeion-chart-color-<name>)`` in ``svg``,
-    replaced by a literal color from this design's copper/ink/card palette
-    -- see ``_WHEEL_CSS_VAR_RE``'s comment for why any remain after the
-    settings-dict overrides above. Aspect-type names go copper (matching
-    ``_literal_wheel_aspects_settings()``'s own choice for the aspects this
-    project actually draws); every other name (planets, fixed stars,
-    asteroids, house angles, paper/background) goes ink or card, mirroring
+    replaced by a literal color from this design's palette -- see
+    ``_WHEEL_CSS_VAR_RE``'s comment for why any remain after the
+    settings-dict overrides above. Aspect-type names go to the aspect color
+    (matching ``_literal_wheel_aspects_settings()``'s own choice for the
+    aspects this project actually draws), house numbers to their own softer
+    tone; every other name (planets, fixed stars, asteroids, house angles,
+    paper/background) goes ink or card, mirroring
     ``_literal_wheel_colors_settings()``/``_literal_wheel_celestial_points_settings()``'s
     own choices for their nearest counterpart."""
 
     def _replace(match: re.Match[str]) -> str:
         name = match.group(1)
         if name in _WHEEL_ASPECT_VAR_NAMES:
-            return _WHEEL_COPPER
+            return _WHEEL_ASPECT
+        if name == "house-number":
+            return _WHEEL_HOUSE_NUMBER
         if name.startswith("paper"):
             return _WHEEL_CARD
         return _WHEEL_INK
@@ -268,10 +280,28 @@ def _resolve_wheel_svg_css_vars(svg: str) -> str:
     return _WHEEL_CSS_VAR_RE.sub(_replace, svg)
 
 
+#: Kerykeion paints each sign band at ``fill-opacity: 0.5`` and each house
+#: number at ``.6`` -- tuned for a light page; on the night card both sink
+#: into the navy, so the export wheel lifts them to full opacity (the
+#: mockup's "contrast" wheel).
+_WHEEL_SIGN_BAND_OPACITY_RE = re.compile(
+    rf"(fill:\s*(?:{_WHEEL_BAND_EVEN}|{_WHEEL_BAND_ODD});\s*fill-opacity:\s*)0?\.5"
+)
+_WHEEL_HOUSE_NUMBER_OPACITY_RE = re.compile(
+    rf"(fill:\s*{_WHEEL_HOUSE_NUMBER};\s*fill-opacity:\s*)\.6"
+)
+
+
+def _opaque_wheel_svg(svg: str) -> str:
+    """``svg`` with the sign bands and house numbers painted fully opaque."""
+    svg = _WHEEL_SIGN_BAND_OPACITY_RE.sub(r"\g<1>1", svg)
+    return _WHEEL_HOUSE_NUMBER_OPACITY_RE.sub(r"\g<1>1", svg)
+
+
 def _build_wheel_svg(client: Client, chart: StoredNatalChart, orb: Decimal) -> str:
     """The run's own natal chart (``chart``, resolved from
     ``ReportRun.natal_chart_id`` -- never the Client's current chart),
-    rendered as a copper/ink SVG wheel -- mirrors ``shell/http/routes/chart.py``'s
+    rendered as a navy "night" SVG wheel -- mirrors ``shell/http/routes/chart.py``'s
     own wheel-build pattern (``chart_wheel.build_subject()`` -> ``ChartDataFactory
     .create_natal_chart_data()`` -> ``ChartDrawer(...)``), reusing
     ``chart_wheel.build_subject``/``active_aspects`` unchanged.
@@ -296,7 +326,7 @@ def _build_wheel_svg(client: Client, chart: StoredNatalChart, orb: Decimal) -> s
         celestial_points_settings=_WHEEL_CELESTIAL_POINTS_SETTINGS,
         aspects_settings=_WHEEL_ASPECTS_SETTINGS,
     ).generate_wheel_only_svg_string()
-    return _resolve_wheel_svg_css_vars(svg)
+    return _opaque_wheel_svg(_resolve_wheel_svg_css_vars(svg))
 
 
 #: "YYYY-MM", zero-padded -- the one shape ``shell/runner/month.py``'s
