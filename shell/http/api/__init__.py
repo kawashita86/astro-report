@@ -9,7 +9,11 @@ has to know about. Endpoints are added by later stories on top of this skeleton.
 
 from __future__ import annotations
 
-from shell.http.api import charts, places  # noqa: F401  (registers the endpoints on `router`)
+from shell.http.api import (  # noqa: F401  (registers the endpoints on `router`)
+    charts,
+    places,
+    transits,
+)
 from shell.http.api.router import API_PREFIX, router
 
 __all__ = ["API_PREFIX", "router"]

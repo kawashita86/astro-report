@@ -15,7 +15,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-__all__ = ["Ingress", "Lunation", "Station", "StandingRetrograde", "TransitAspectEvent"]
+__all__ = [
+    "Ingress",
+    "Lunation",
+    "LunationMoment",
+    "Station",
+    "StandingRetrograde",
+    "TransitAspectEvent",
+]
 
 
 @dataclass(frozen=True)
@@ -145,3 +152,14 @@ class Lunation:
     occurred_at: datetime
     longitude: Decimal
     natal_house: int
+
+
+@dataclass(frozen=True)
+class LunationMoment:
+    """A new or full moon with no natal house (Story 11.3): what a Lunation is
+    before a birth chart's houses are applied, and all that can be said for a
+    subject whose birth time is unknown."""
+
+    kind: str
+    occurred_at: datetime
+    longitude: Decimal

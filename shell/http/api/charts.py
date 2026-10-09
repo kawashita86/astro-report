@@ -12,7 +12,7 @@ identical bytes.
 from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -39,25 +39,27 @@ from shell.http.api.subject import (
     unknown_time_instants,
 )
 
-__all__ = ["NatalRequest", "natal_chart"]
+__all__ = ["NatalRequest", "jsonable", "natal_chart", "subject_json"]
 
 
 class NatalRequest(BaseModel):
     subject: SubjectModel
 
 
-def _jsonable(value: Any) -> Any:
-    """Decimals as strings and dataclasses as dicts, recursively."""
+def jsonable(value: Any) -> Any:
+    """Decimals as strings, instants as ISO-8601 ``Z`` and dataclasses as dicts, recursively."""
     if isinstance(value, Decimal):
         return str(value)
+    if isinstance(value, datetime):
+        return format_utc_instant(value)
     if is_dataclass(value) and not isinstance(value, type):
-        return {field.name: _jsonable(getattr(value, field.name)) for field in fields(value)}
+        return {field.name: jsonable(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
+        return [jsonable(item) for item in value]
     return value
 
 
-def _subject_json(
+def subject_json(
     subject: ParsedSubject, *, utc_offset: timedelta, chart_instant: str, birth_instant: str | None
 ) -> dict[str, Any]:
     return {
@@ -81,10 +83,10 @@ def _known_chart_json(chart: NatalChart, config: ComputationConfig) -> dict[str,
     return {
         "ascendant": str(chart.ascendant),
         "midheaven": str(chart.midheaven),
-        "planets": _jsonable(chart.planets),
-        "houses": _jsonable(chart.houses),
-        "house_rulers": _jsonable(resolve_house_rulers(chart, config)),
-        "aspects": _jsonable(chart.aspects),
+        "planets": jsonable(chart.planets),
+        "houses": jsonable(chart.houses),
+        "house_rulers": jsonable(resolve_house_rulers(chart, config)),
+        "aspects": jsonable(chart.aspects),
     }
 
 
@@ -108,7 +110,7 @@ def _unknown_chart_json(chart: TimeUnknownChart) -> dict[str, Any]:
         "planets": [_unknown_planet_json(planet) for planet in chart.planets],
         "houses": None,
         "house_rulers": None,
-        "aspects": _jsonable(chart.aspects),
+        "aspects": jsonable(chart.aspects),
     }
 
 
@@ -123,7 +125,7 @@ def natal_chart(body: NatalRequest, request: Request) -> Response:
         chart = compute_natal_chart(birth.utc, subject.latitude, subject.longitude, config)
         payload = {
             "meta": meta,
-            "subject": _subject_json(
+            "subject": subject_json(
                 subject,
                 utc_offset=birth.offset,
                 chart_instant=format_utc_instant(birth.utc),
@@ -138,7 +140,7 @@ def natal_chart(body: NatalRequest, request: Request) -> Response:
         )
         payload = {
             "meta": meta,
-            "subject": _subject_json(
+            "subject": subject_json(
                 subject,
                 utc_offset=instants.noon.offset,
                 chart_instant=format_utc_instant(instants.noon.utc),

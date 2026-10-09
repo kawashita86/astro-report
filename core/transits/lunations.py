@@ -55,9 +55,9 @@ from core.ephemeris.chart import _house_for_longitude
 from core.ephemeris.positions import FULL_CIRCLE, HALF_CIRCLE, _calc_body, _julian_day_ut
 from core.transits._month_grid import _bisect, _build_grid, _require_utc_interval
 from core.types.chart import NatalChart
-from core.types.transits import Lunation
+from core.types.transits import Lunation, LunationMoment
 
-__all__ = ["find_lunations"]
+__all__ = ["find_lunation_moments", "find_lunations"]
 
 _NEW_MOON = "new_moon"
 _FULL_MOON = "full_moon"
@@ -99,13 +99,38 @@ def find_lunations(
             confirmed as coming from the Swiss Ephemeris (propagated from
             ``core.ephemeris.positions._calc_body``).
     """
+    cusp_longitudes = [cusp.longitude for cusp in natal_chart.houses]
+    return tuple(
+        Lunation(
+            kind=moment.kind,
+            occurred_at=moment.occurred_at,
+            longitude=moment.longitude,
+            natal_house=_house_for_longitude(moment.longitude, cusp_longitudes),
+        )
+        for moment in find_lunation_moments(month_start_utc, month_end_utc)
+    )
+
+
+def find_lunation_moments(
+    month_start_utc: datetime,
+    month_end_utc: datetime,
+) -> tuple[LunationMoment, ...]:
+    """Every new moon and full moon within ``[month_start_utc, month_end_utc)``
+    with no house assigned -- for a subject whose birth time, and so whose
+    houses, are unknown. :func:`find_lunations` adds the natal house to these.
+
+    Raises:
+        ValueError: either boundary is not timezone-aware UTC, or
+            ``month_start_utc`` is not strictly before ``month_end_utc``.
+        EphemerisIntegrityError: the Sun's or Moon's position was not
+            confirmed as coming from the Swiss Ephemeris.
+    """
     _require_utc_interval(month_start_utc, month_end_utc)
 
-    cusp_longitudes = [cusp.longitude for cusp in natal_chart.houses]
     grid_times = _build_grid(month_start_utc, month_end_utc)
     delta_lambdas = [_delta_lambda_at(instant) for instant in grid_times]
 
-    records: list[Lunation] = []
+    records: list[LunationMoment] = []
     for kind, target in _TARGETS:
         offsets = [_signed_offset(delta_lambda, target) for delta_lambda in delta_lambdas]
 
@@ -143,14 +168,8 @@ def find_lunations(
             # fix.
             if crossed_at is not None and crossed_at < month_end_utc:
                 moon_longitude = _calc_body(_julian_day_ut(crossed_at), swe.MOON)[0]
-                natal_house = _house_for_longitude(moon_longitude, cusp_longitudes)
                 records.append(
-                    Lunation(
-                        kind=kind,
-                        occurred_at=crossed_at,
-                        longitude=moon_longitude,
-                        natal_house=natal_house,
-                    )
+                    LunationMoment(kind=kind, occurred_at=crossed_at, longitude=moon_longitude)
                 )
 
     return tuple(records)

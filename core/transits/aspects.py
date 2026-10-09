@@ -59,7 +59,7 @@ from core.types.chart import NatalChart
 from core.types.computation import ComputationConfig
 from core.types.transits import TransitAspectEvent
 
-__all__ = ["find_transit_aspects"]
+__all__ = ["find_transit_aspects", "find_transit_aspects_to_targets"]
 
 #: swisseph body constants for the transiting side of a scan -- deliberately
 #: excludes the Moon (PRD FR-9 / ComputationConfig.bodies' own docstring):
@@ -84,6 +84,8 @@ def find_transit_aspects(
     month_start_utc: datetime,
     month_end_utc: datetime,
     config: ComputationConfig,
+    *,
+    split_perfections: bool = False,
 ) -> tuple[TransitAspectEvent, ...]:
     """Every transit-to-natal Aspect within ``[month_start_utc, month_end_utc)``.
 
@@ -106,9 +108,28 @@ def find_transit_aspects(
             confirmed as coming from the Swiss Ephemeris (propagated from
             ``core.ephemeris.positions._calc_body``).
     """
+    return find_transit_aspects_to_targets(
+        _natal_targets(natal_chart),
+        month_start_utc,
+        month_end_utc,
+        config,
+        split_perfections=split_perfections,
+    )
+
+
+def find_transit_aspects_to_targets(
+    natal_targets: tuple[tuple[str, Decimal], ...],
+    month_start_utc: datetime,
+    month_end_utc: datetime,
+    config: ComputationConfig,
+    *,
+    split_perfections: bool = False,
+) -> tuple[TransitAspectEvent, ...]:
+    """:func:`find_transit_aspects` against an explicit ``(name, longitude)``
+    target list, for a chart without angles (birth time unknown, Story 11.3).
+    Same scan, same order, same errors."""
     _require_utc_interval(month_start_utc, month_end_utc)
 
-    natal_targets = _natal_targets(natal_chart)
     transiting_bodies = tuple(config.bodies.fast) + tuple(config.bodies.slow)
     orb_limit = config.orbs.transit
 
@@ -146,6 +167,7 @@ def find_transit_aspects(
                             grid_times=grid_times,
                             longitudes=longitudes,
                             orb_limit=orb_limit,
+                            split_perfections=split_perfections,
                         )
                     )
     return tuple(events)
@@ -230,11 +252,19 @@ def _events_for_pair(
     grid_times: list[datetime],
     longitudes: list[Decimal],
     orb_limit: Decimal,
+    split_perfections: bool = False,
 ) -> list[TransitAspectEvent]:
     """Walk one (transiting body, natal point, aspect) triple across the
     grid, emitting one :class:`TransitAspectEvent` per contiguous in-orb
     interval. A pair that re-enters orb after separating (a retrograde loop)
-    produces a second, independent event -- never merged with the first."""
+    produces a second, independent event -- never merged with the first.
+
+    An orb interval can be crossed by exact perfection more than once (a
+    retrograde loop). By default only the first perfection is recorded, one
+    event per interval. With ``split_perfections`` (long API windows, where a
+    loop sits inside one interval instead of being cut by a month boundary)
+    each perfection becomes its own event sharing the interval's entry and
+    exit, so a window reports exactly the perfections its monthly scans would."""
 
     def offset_at(instant: datetime) -> Decimal:
         return _signed_offset(_longitude_at(body_id, instant), natal_longitude, target_degrees)
@@ -245,9 +275,26 @@ def _events_for_pair(
     events: list[TransitAspectEvent] = []
     offsets = [_signed_offset(lon, natal_longitude, target_degrees) for lon in longitudes]
 
+    def interval_events(
+        entry: datetime, exit_at: datetime | None, perfections: list[datetime]
+    ) -> list[TransitAspectEvent]:
+        # No perfection at all is still one event; otherwise one per recorded perfection.
+        return [
+            TransitAspectEvent(
+                transiting_body=body_name,
+                natal_point=natal_name,
+                aspect=aspect_name,
+                perfected_at=perfected,
+                never_perfected=perfected is None,
+                orb_entry_at=entry,
+                orb_exit_at=exit_at,
+            )
+            for perfected in (perfections or [None])
+        ]
+
     in_orb = abs(offsets[0]) <= orb_limit
     entry_at: datetime | None = grid_times[0] if in_orb else None
-    perfected_at: datetime | None = grid_times[0] if (in_orb and offsets[0] == 0) else None
+    perfections: list[datetime] = [grid_times[0]] if (in_orb and offsets[0] == 0) else []
 
     for index in range(len(grid_times) - 1):
         t0, t1 = grid_times[index], grid_times[index + 1]
@@ -257,44 +304,24 @@ def _events_for_pair(
         if not was_in_orb and abs(d1) <= orb_limit:
             entry_at = _bisect(orb_gap_at, t0, t1)
             in_orb = True
-            perfected_at = None
+            perfections = []
 
-        if (was_in_orb or in_orb) and perfected_at is None:
+        if (was_in_orb or in_orb) and (split_perfections or not perfections):
             if d1 == 0:
-                perfected_at = t1
+                perfections.append(t1)
             elif d0 != 0 and (d0 > 0) != (d1 > 0):
-                perfected_at = _bisect(offset_at, t0, t1)
+                perfections.append(_bisect(offset_at, t0, t1))
 
         if was_in_orb and abs(d1) > orb_limit:
             exit_at = _bisect(orb_gap_at, t0, t1)
             assert entry_at is not None
-            events.append(
-                TransitAspectEvent(
-                    transiting_body=body_name,
-                    natal_point=natal_name,
-                    aspect=aspect_name,
-                    perfected_at=perfected_at,
-                    never_perfected=perfected_at is None,
-                    orb_entry_at=entry_at,
-                    orb_exit_at=exit_at,
-                )
-            )
+            events.extend(interval_events(entry_at, exit_at, perfections))
             in_orb = False
             entry_at = None
-            perfected_at = None
+            perfections = []
 
     if in_orb:
         assert entry_at is not None
-        events.append(
-            TransitAspectEvent(
-                transiting_body=body_name,
-                natal_point=natal_name,
-                aspect=aspect_name,
-                perfected_at=perfected_at,
-                never_perfected=perfected_at is None,
-                orb_entry_at=entry_at,
-                orb_exit_at=None,
-            )
-        )
+        events.extend(interval_events(entry_at, None, perfections))
 
     return events
