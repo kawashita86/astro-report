@@ -132,6 +132,10 @@ class Settings:
     gemini_model: str = DEFAULT_GEMINI_MODEL
     generation_concurrency: int = DEFAULT_GENERATION_CONCURRENCY
     gemini_thinking_budget: int = DEFAULT_GEMINI_THINKING_BUDGET
+    # Optional on purpose: unset leaves the chart data API (AD-22) answering 401
+    # to everything, so a deployment that does not serve the alerenzi plugin
+    # needs no token at all.
+    api_token_hash: str | None = None
 
     def __repr__(self) -> str:
         return (
@@ -144,8 +148,20 @@ class Settings:
             f"use_real_gemini_locally={self.use_real_gemini_locally!r}, "
             f"gemini_model={self.gemini_model!r}, "
             f"generation_concurrency={self.generation_concurrency!r}, "
-            f"gemini_thinking_budget={self.gemini_thinking_budget!r})"
+            f"gemini_thinking_budget={self.gemini_thinking_budget!r}, "
+            f"api_token_hash={self.redacted_api_token_hash!r})"
         )
+
+    @property
+    def redacted_api_token_hash(self) -> str | None:
+        """The API token hash with salt and digest replaced, or ``None`` when unset."""
+        if self.api_token_hash is None:
+            return None
+        parts = self.api_token_hash.split("$")
+        if len(parts) < 2:
+            return "<redacted>"
+        *parameters, _salt, _digest = parts
+        return "$".join([*parameters, "***", "***"])
 
     @property
     def redacted_auth_password_hash(self) -> str:
@@ -293,6 +309,24 @@ def _read_auth_password_hash(
     return raw, None
 
 
+def _read_api_token_hash(
+    environ: Mapping[str, str],
+) -> tuple[str | None, str | None]:
+    """``API_TOKEN_HASH`` is optional: unset or blank means the API is disabled
+    (every ``/api/`` request answers 401). A value that is present must be a
+    well-formed Argon2 hash, so a typo fails startup instead of silently
+    disabling the API."""
+    raw = environ.get("API_TOKEN_HASH")
+    if raw is None or not raw.strip():
+        return None, None
+    value = raw.strip()
+    try:
+        argon2.extract_parameters(value)
+    except InvalidHashError:
+        return None, "API_TOKEN_HASH is invalid: it is not a well-formed Argon2 hash."
+    return value, None
+
+
 def _read_session_secret_key(
     environ: Mapping[str, str],
 ) -> tuple[str | None, str | None]:
@@ -433,6 +467,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     gemini_model, gemini_model_error = _read_gemini_model(source)
     generation_concurrency, generation_concurrency_error = _read_generation_concurrency(source)
     gemini_thinking_budget, gemini_thinking_budget_error = _read_gemini_thinking_budget(source)
+    api_token_hash, api_token_hash_error = _read_api_token_hash(source)
 
     problems = [
         problem
@@ -448,6 +483,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             gemini_model_error,
             generation_concurrency_error,
             gemini_thinking_budget_error,
+            api_token_hash_error,
         )
         if problem is not None
     ]
@@ -482,6 +518,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         gemini_model=gemini_model,
         generation_concurrency=generation_concurrency,
         gemini_thinking_budget=gemini_thinking_budget,
+        api_token_hash=api_token_hash,
     )
 
 

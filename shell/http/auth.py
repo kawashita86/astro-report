@@ -29,6 +29,8 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from shell.config import Settings
+from shell.http.api.errors import ErrorCode, error_response
+from shell.http.api.router import API_PATH_PREFIX
 
 __all__ = [
     "ALLOWLIST",
@@ -85,9 +87,7 @@ def sign_session(expires_at: int, session_secret_key: str) -> str:
     return f"{expires_at}{_SEPARATOR}{_signature(expires_at, session_secret_key)}"
 
 
-def verify_session(
-    token: str, session_secret_key: str, *, now: int | None = None
-) -> bool:
+def verify_session(token: str, session_secret_key: str, *, now: int | None = None) -> bool:
     """Verify a session token: well-formed, correctly signed, and not expired.
 
     Every failure mode -- malformed token, bad signature, expired timestamp --
@@ -222,8 +222,38 @@ def _wants_html_navigation(request: Request) -> bool:
     return "text/html" in request.headers.get("accept", "")
 
 
+_BEARER_PREFIX = "bearer "
+
+
+def _bearer_token(request: Request) -> str | None:
+    """The token from an ``Authorization: Bearer`` header, or ``None``."""
+    header = request.headers.get("authorization", "")
+    if header[: len(_BEARER_PREFIX)].lower() != _BEARER_PREFIX:
+        return None
+    return header[len(_BEARER_PREFIX) :].strip() or None
+
+
+def _api_request_is_authorized(request: Request, settings: Settings) -> bool:
+    """Bearer token against ``API_TOKEN_HASH`` -- and nothing else.
+
+    A session cookie is deliberately not consulted here: the API is a separate
+    principal-free surface (AD-22), so a browser session must never open it.
+    With no hash configured nothing can match, so the API is closed.
+    """
+    if settings.api_token_hash is None:
+        return False
+    token = _bearer_token(request)
+    if token is None:
+        return False
+    return verify_password(token, settings.api_token_hash)
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Reject any request outside :data:`ALLOWLIST` without a valid session.
+
+    Under ``/api/`` the rule is different (AD-22): only a valid bearer token
+    passes, and a refusal is the JSON envelope, never a redirect. Off that
+    prefix the ``Authorization`` header is never read.
 
     HTTP middleware, not a per-route ``Depends()``: it runs before any route
     handler, including for paths no route registers, so a new route is
@@ -231,15 +261,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
     remembering to guard it.
     """
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Match the allowlist against the path with any trailing slash
         # trimmed: a health checker (Render's own included) or a hand-typed
         # probe routinely hits `/healthz/`, and Starlette's slash-redirect
         # runs in the router -- *after* this middleware -- so `/healthz/`
         # would get a 401 here before it could ever redirect to `/healthz`.
         # `ALLOWLIST` itself stays canonical (no trailing slash).
+        if request.url.path.startswith(API_PATH_PREFIX):
+            if _api_request_is_authorized(request, request.app.state.settings):
+                return await call_next(request)
+            return error_response(ErrorCode.UNAUTHORIZED)
+
         normalized_path = request.url.path.rstrip("/") or "/"
         if (
             request.url.path in ALLOWLIST
@@ -271,9 +304,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 target = request.url.path
                 if request.url.query:
                     target = f"{target}?{request.url.query}"
-                return RedirectResponse(
-                    f"/login?{urlencode({'next': target})}", status_code=302
-                )
+                return RedirectResponse(f"/login?{urlencode({'next': target})}", status_code=302)
             # Uniform, empty-body, always 401 for every non-navigational
             # caller (HTMX polls, JSON-shaped requests): missing cookie,
             # tampered signature and expired timestamp are indistinguishable

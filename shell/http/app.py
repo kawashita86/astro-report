@@ -30,6 +30,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -37,6 +38,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.pool import ConnectionPoolEntry
 from sqlmodel import Session
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.ephemeris.identity import EphemerisIdentity, verify_ephemeris_identity
 from core.types.computation import ComputationConfig
@@ -46,6 +48,12 @@ from shell import config
 from shell.computation import load_computation_config
 from shell.config import Environment, Settings
 from shell.gate import load_gate_vocabulary
+from shell.http.api import router as api_router
+from shell.http.api.boundary import ApiBoundaryMiddleware
+from shell.http.api.errors import (
+    handle_http_exception,
+    handle_validation_error,
+)
 from shell.http.auth import (
     SESSION_COOKIE_NAME,
     SESSION_MAX_AGE_SECONDS,
@@ -221,6 +229,10 @@ def create_app(settings: Settings) -> FastAPI:
     )
     application.add_middleware(AuthMiddleware)
     application.add_middleware(FlashClearMiddleware)
+    application.add_middleware(ApiBoundaryMiddleware)
+    application.add_exception_handler(StarletteHTTPException, handle_http_exception)
+    application.add_exception_handler(RequestValidationError, handle_validation_error)
+    application.include_router(api_router)
     application.include_router(clients_router)
     application.include_router(chart_router)
     application.include_router(report_runs_router)
@@ -232,9 +244,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
-    @application.api_route(
-        "/healthz", methods=["GET", "HEAD"], include_in_schema=False
-    )
+    @application.api_route("/healthz", methods=["GET", "HEAD"], include_in_schema=False)
     def healthz() -> Response:
         """Liveness only: the process is up and serving. No data, ever.
 

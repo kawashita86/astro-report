@@ -32,7 +32,7 @@ Every environment variable is read in exactly one place, `shell/config.py`, and
 validated into a frozen settings object at startup. No other module reads
 `os.environ` — `tests/test_env_access_is_centralized.py` fails if one starts to.
 
-All seven are required; none has a default.
+All but the optional ones below are required; none has a default.
 
 | Variable | Required | Accepted values |
 | --- | --- | --- |
@@ -44,6 +44,7 @@ All seven are required; none has a default.
 | `GEMINI_API_KEY` | yes | Gemini API key for the Generator adapter; never sent under `ENVIRONMENT=local` |
 | `GEMINI_MODEL` | no | Gemini model the Generator calls; default `gemini-2.5-flash` |
 | `GENERATION_CONCURRENCY` | no | Section generations in flight at once, integer 1–32; default `11` |
+| `API_TOKEN_HASH` | no | Argon2 hash of the bearer token the chart data API (`/api/v1`) accepts; unset ⇒ every `/api/` request answers `401`; present but malformed aborts startup |
 | `GEMINI_DATA_TERMS_VERIFIED_AT` | yes | ISO date (`YYYY-MM-DD`), not in the future — when the Gemini data terms were verified (NFR-17) |
 
 Nothing is defaulted. A missing or invalid variable aborts startup with a

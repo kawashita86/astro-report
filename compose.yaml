@@ -38,6 +38,9 @@ services:
       # hash's own `$`-delimited fields must survive as literal characters.
       AUTH_PASSWORD_HASH: "$$argon2id$$v=19$$m=65536,t=3,p=4$$BoNaYBFxFkVYK0EWHFpjhQ$$siqk2ea0LCm0U9ClzlqGrirWdOUG70cH8vNB1cGODMU"
       SESSION_SECRET_KEY: local-dev-only-session-secret-key-change-me-0000
+      # Hashes the bearer token "local-dev-api-token" for the chart data API
+      # (Story 11.1); local only, production sets its own in Coolify.
+      API_TOKEN_HASH: "$$argon2id$$v=19$$m=65536,t=3,p=4$$VrXPOGTsyRR6gTi2ciHDSg$$DCHkO83XEwz0r0nTomWVmAYST+0g8aZyL14GwMqf0tU"
       # Required by load_settings(). Under ENVIRONMENT=local, get_generator()
       # (shell/http/routes/report_runs.py) returns RecordedResponseGenerator
       # by default and never calls the provider, so the placeholder below is

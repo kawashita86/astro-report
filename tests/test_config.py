@@ -635,3 +635,41 @@ def test_a_bad_thinking_budget_aborts_and_is_named(bad: str) -> None:
     assert "GEMINI_THINKING_BUDGET" in message
     assert "0 and 24576" in message
     assert "PORT" in message
+
+
+# --- Story 11.1: API_TOKEN_HASH is optional, but never silently malformed -----
+
+#: Argon2 hash of "local-dev-api-token" -- a fixed test token, never a real one.
+VALID_API_TOKEN_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$VrXPOGTsyRR6gTi2ciHDSg$"
+    "DCHkO83XEwz0r0nTomWVmAYST+0g8aZyL14GwMqf0tU"
+)
+
+
+def test_an_unset_api_token_hash_leaves_the_api_disabled() -> None:
+    assert load_settings(VALID_ENVIRONMENT).api_token_hash is None
+
+
+def test_a_blank_api_token_hash_is_treated_as_unset() -> None:
+    assert load_settings(environment_with(API_TOKEN_HASH="  ")).api_token_hash is None
+
+
+def test_a_well_formed_api_token_hash_is_accepted() -> None:
+    settings = load_settings(environment_with(API_TOKEN_HASH=VALID_API_TOKEN_HASH))
+
+    assert settings.api_token_hash == VALID_API_TOKEN_HASH
+
+
+def test_a_malformed_api_token_hash_aborts_startup_naming_it() -> None:
+    with pytest.raises(ConfigError) as raised:
+        load_settings(environment_with(API_TOKEN_HASH="not-a-hash"))
+
+    assert "API_TOKEN_HASH" in str(raised.value)
+
+
+def test_repr_does_not_leak_the_api_token_hash_salt_or_digest() -> None:
+    rendered = repr(load_settings(environment_with(API_TOKEN_HASH=VALID_API_TOKEN_HASH)))
+    *_, salt, digest = VALID_API_TOKEN_HASH.split("$")
+
+    assert salt not in rendered
+    assert digest not in rendered
