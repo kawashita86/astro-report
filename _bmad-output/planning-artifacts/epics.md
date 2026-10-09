@@ -2625,6 +2625,8 @@ So that alerenzi Story 7.6 can start.
 **Acceptance Criteria:**
 - `GET /api/v1/vocabulary/it` serves the Gate vocabulary plus the aspect and direction names, read from one shared shell module that the operator UI also reads (no second copy).
 - `docs/api/chart-data-v1.md`: endpoints, request/response shapes, error codes, determinism, the boundary and unknown-time rules, and the version policy — for the alerenzi team.
+- The doc carries one full, real (generated, byte-exact) example response per endpoint, plus a `time_known: false` natal response and a synastry response where one subject's time is unknown — alerenzi Story 7.6 uses them as test fixtures, so a test regenerates them and fails if they drift.
+- The confirmed internal hostname, port and Coolify network name are sent to the alerenzi session (its setting `cm_astro_report_api_url`).
 - `API_TOKEN_HASH` set in Coolify; the astro-report and WordPress containers attached to one Coolify network; a call from the WordPress container to the internal hostname succeeds (public HTTPS fallback documented).
 - 12-month `charts/transits` timed on the VPS (p90 over 20 calls) and recorded in `docs/release-validation/latency.md`; target ≤ 30 s.
 - `docs/decisions/` RGD-7 (service token is not a principal; AGPL source offer to the alerenzi operator) recorded.
