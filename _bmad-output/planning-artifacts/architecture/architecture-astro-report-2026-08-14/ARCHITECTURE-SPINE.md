@@ -7,7 +7,7 @@ paradigm: 'functional core, imperative shell'
 scope: 'astro-report v1 — the whole system: a single-operator hosted web app that computes natal charts and monthly transits, and generates grounded eight-section Italian reports'
 status: final
 created: '2026-08-14'
-updated: '2026-08-28'
+updated: '2026-10-09'
 binds:
   - '4.1 Client Record and Natal Chart (FR-1–FR-5, FR-28, FR-29)'
   - '4.2 Domain Profiles (FR-6, FR-7)'
@@ -17,6 +17,7 @@ binds:
   - '4.6 Groundedness Gate (FR-20–FR-22)'
   - '4.7 Corpus Collection (FR-23, FR-24)'
   - '4.8 Review, Export and Report History (FR-25–FR-27)'
+  - '4.9 Chart Data API (FR-31–FR-36)  # added 2026-10-09'
 sources:
   - '_bmad-output/planning-artifacts/prds/prd-astro-report-2026-08-14/prd.md'
   - '_bmad-output/planning-artifacts/briefs/brief-astro-report-2026-08-14/brief.md'
@@ -100,6 +101,8 @@ No arrow runs from `core` to `shell`. There is no exception.
   cannot be hoisted into the shell because locating perfections, stations, ingresses and lunations
   requires iterative bisection over arbitrary instants. A second exception is a spine amendment, not
   a judgement call. An import-boundary test enforces this rule in CI.
+
+*(Amended 2026-10-09.)* The solar-return instant (`swe.solcross_ut`), the unknown-time natal variant (noon chart and day range) and MC-derived composite houses are ephemeris reads and live in `core/ephemeris/`; synastry inter-aspects, overlays and composite midpoints are pure arithmetic over `NatalChart` and live in `core/synastry/`. This is not a second exception.
 
 ### AD-2 — Ephemeris identity is pinned, asserted at boot, and recorded in every Payload
 
@@ -258,6 +261,8 @@ No arrow runs from `core` to `shell`. There is no exception.
   and every Transit Event's membership is decided against that single interval — so an event at 23:30
   local on the last day belongs to exactly one Report, never to two and never to none.
 
+*(Amended 2026-10-09.)* The chart data API's transit window is one half-open UTC interval derived once in `shell/http/api/` from local dates in the subject's zone (≤ 13 calendar months), passed to the same core functions as a month; local-to-UTC conversion of a subject's birth data happens at the same edge, and a DST gap or fold is rejected, never guessed.
+
 ### AD-13 — Section composition is data, not code
 
 - **Binds:** FR-13, FR-16, PRD extension seam 2
@@ -292,6 +297,8 @@ No arrow runs from `core` to `shell`. There is no exception.
   no password-reset flow. Introducing any second principal is a PRD revision, not a feature. Clients
   receive an exported file, never application access.
 
+*(Amended 2026-10-09.)* One machine credential exists besides the operator's session: the alerenzi plugin's bearer token, held as an Argon2 hash in `API_TOKEN_HASH`. It is not a principal. It authenticates only `/api/v1`, which reaches stateless computation and the place cache and no stored Client data. It has no session, no UI and no account row. The AGPL position is recorded in `docs/decisions/` RGD-7. A second machine client or any read of stored data through the API is a PRD revision, as a second principal is.
+
 ### AD-16 — A Client cannot exist in a partial state
 
 - **Binds:** FR-1, FR-2, FR-3, §8
@@ -300,8 +307,10 @@ No arrow runs from `core` to `shell`. There is no exception.
   load-bearing on houses, rather than failing visibly.
 - **Rule:** the `Client` type has no optional birth fields and no partial constructor. Birthplace
   resolution and historical-offset resolution complete before a Client is persisted; failure means no
-  Client row. There is no noon chart, no solar-house fallback and no house-less path anywhere in the
-  codebase. The Client stores its **own immutable snapshot** of the resolved latitude, longitude,
+  Client row. There is no noon chart, no solar-house fallback and no house-less path anywhere in Client
+  creation, Natal Chart storage or Report production. The stateless chart data API's flagged
+  time-unknown variant (AD-22) is the single, separately typed exception: it produces no Client and
+  its types cannot be passed to Payload assembly *(amended 2026-10-09)*. The Client stores its **own immutable snapshot** of the resolved latitude, longitude,
   IANA zone, **and the geocoded place name that produced them** (amended 2026-09-01: the name is
   captured at resolution time from the same `Geocoder` call, so it never requires a separate lookup
   or a second source of truth); `PLACE_CACHE` is a lookup accelerator consulted before geocoding and
@@ -335,6 +344,8 @@ No arrow runs from `core` to `shell`. There is no exception.
   belongs here rather than in code: it is read by more than one unit, and a Payload that outlives a
   revision must record which version of the table produced it. Changing it is a data edit and a version
   bump, never a code change.
+
+*(Amended 2026-10-09.)* Version 2 adds `orbs.synastry` and `[composite] houses`. The API window maximum is not here: it changes no computed value, so it is a code constant.
 
 ### AD-19 — The Style Guide is versioned data in the database, not a file in the repository
 
@@ -431,6 +442,19 @@ No arrow runs from `core` to `shell`. There is no exception.
   alias-leak, citation, no-date-token and day-list-coverage validations. When all eight are
   `complete`, the driver assembles one `ReportDraft` and the run advances to `gate_passed`.
 
+### AD-22 — The chart data API is a stateless, versioned, token-authenticated computation surface
+
+- **Binds:** FR-31–FR-36, CAP-31–CAP-36
+- **Prevents:** a machine interface quietly becoming a second way into Client data, a place where birth data persists or is logged, a source of non-reproducible numbers, or a thread that computes against Moshier.
+- **Rule:**
+  - **Surface.** `shell/http/api/` mounts `/api/v1`: JSON only, never in an OpenAPI or docs page. A breaking change is `/api/v2`; additive fields are allowed in v1.
+  - **Authentication.** `AuthMiddleware` branches on the `/api/` prefix before the cookie check: there it accepts only `Authorization: Bearer`, verified against `Settings.api_token_hash` (Argon2), and answers `401 {code: "unauthorized"}` JSON on anything else, including a valid session cookie. Off that prefix the bearer header is ignored. When `API_TOKEN_HASH` is unset, every `/api/` request is `401`; a malformed value fails startup.
+  - **Statelessness.** Handlers call core functions and serialise the result. They write nothing except through the existing place-cache path, construct no `Client`, and log only endpoint, status, duration and ComputationConfig version — never a body, birth data or coordinates.
+  - **Determinism.** Bodies are canonical JSON (sorted keys, no insignificant whitespace, `Decimal` as fixed 4-place strings, instants ISO-8601 `Z`), with no timestamp in the body; identical request, ComputationConfig and ephemeris ⇒ identical bytes, asserted by test.
+  - **Threads.** Handlers are sync routes run by FastAPI's worker threadpool. Every `core/ephemeris/` entry point they reach binds the verified ephemeris path first. Handlers create no thread, executor or task and never touch the `RunDriver` (`tests/test_concurrency_boundary.py`).
+  - **Errors.** Typed core errors map to `{code, message, field}` with an Italian message; codes are `invalid_request`, `birth_time_required`, `place_unresolved`, `window_too_long`, `ephemeris_out_of_range`, `unauthorized`, `internal_error`.
+  - **Separation from Reports.** API types (`ChartSubject`, the time-unknown chart, synastry and solar-return results) are distinct from `Client` and `NatalChart` storage. No API result reaches Payload assembly, the Generator or the Gate.
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -488,10 +512,11 @@ with `fetch` and is not a drop-in upgrade.
 ```mermaid
 graph LR
     B["Francesco's browser<br/>session cookie"]
-    subgraph render["Render — free web service, EU, ephemeral filesystem"]
+    W["alerenzi WordPress container<br/>bearer token"]
+    subgraph render["Coolify on Netcup VPS — one Docker container (was Render)"]
         R["FastAPI, single process<br/>vendored .se1 files, checksum-asserted at boot"]
     end
-    subgraph neon["Neon — free Postgres, Europe/Frankfurt"]
+    subgraph neon["Postgres on the same VPS (was Neon)"]
         D[("all durable state")]
     end
     G["Google Gemini API<br/>EEA paid-tier data terms"]
@@ -501,6 +526,7 @@ graph LR
     R -->|HTTPS| G
     R -->|HTTPS, cache-first| N
     R -->|operator-triggered logical export| B
+    W -->|HTTP, Coolify internal network<br/>/api/v1, stateless| R
 ```
 
 Two environments only: **local** (Docker Compose, a local Postgres, a recorded-response Generator
@@ -535,7 +561,9 @@ astro-report/
   core/                     # PURE. no I/O, no clock, no network, no randomness
     types/                  # frozen dataclasses for every glossary term
     errors.py               # typed domain errors, no HTTP knowledge
+    synastry/               # inter-aspects, overlays, composite midpoints (pure)  [AD-22]
     ephemeris/              # positions, Placidus cusps, natal aspects  [AD-1 exception]
+                            #   returns.py: solar-return instant; time-unknown variant
     transits/               # perfections, stations, ingresses, lunations
     domains/                # ruler resolution, the four Domain Profiles
     payload/                # Report Payload assembly, Section projection, day-lists
@@ -548,6 +576,7 @@ astro-report/
     adapters/               # postgres, nominatim, gemini, weasyprint
     runner/                 # stage driver, checkpointing, bounded backoff
     http/                   # FastAPI routes, Jinja2 templates, HTMX
+      api/                  # /api/v1 — bearer auth, JSON errors, stateless  [AD-22]
   data/
     ephemeris/              # sepl_18.se1, semo_18.se1  — pinned by SHA-256
     computation.toml        # orbs, house system, body sets, rulers, day-list table  [AD-18]
@@ -577,6 +606,7 @@ astro-report/
 | 4.8 Review, Export, Report History (FR-25–FR-27) | `shell/http/`, `shell/adapters/weasyprint` | AD-7, AD-17 |
 | Report production as a whole | `shell/runner/` | AD-10, AD-9, AD-20 |
 | Astronomical conformance (SM-3) | `tests/conformance/` | AD-2, AD-18 |
+| 4.9 Chart Data API (FR-31–FR-36) | `shell/http/api/`, `core/synastry/`, `core/ephemeris/` | AD-1, AD-12, AD-15, AD-16, AD-18, AD-22 |
 
 ## Deferred
 

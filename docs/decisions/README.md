@@ -59,6 +59,7 @@ context.
 | [RGD-4](#rgd-4--get-with-side-effects-on-the-export-and-backup-routes-is-accepted) | `GET` with side effects on `/export/pdf`, `/export/markdown`, `/backup` is accepted | Francesco, 2026-08-28 | `shell/http/routes/report_runs.py`, `shell/http/routes/backup.py` |
 | [RGD-5](#rgd-5--corpus-content-is-stored-verbatim-anonymization-is-a-phase-2-boundary-requirement) | Corpus stored verbatim, operator-only; anonymization mandatory before any phase-2 use | Francesco, 2026-08-28 | `_bmad-output/implementation-artifacts/epic-7-context.md` |
 | [RGD-6](#rgd-6--backup-file-operator-handling-fde-only-monthly-rotation-keep-all) | `GET /backup` file: full-disk-encrypted machine only (no per-file encryption); monthly rotation; keep every backup | Francesco, 2026-08-28 | `docs/operations/backup-handling.md` |
+| [RGD-7](#rgd-7--the-alerenzi-service-token-is-an-integration-credential-not-a-principal) | The alerenzi plugin's `/api/v1` bearer token is not a second principal; AGPL Corresponding Source offered to the alerenzi operator | Francesco, 2026-10-09 | `_bmad-output/planning-artifacts/sprint-change-proposal-2026-10-09.md` |
 
 ---
 
@@ -238,3 +239,29 @@ route (epic-6 retro / tracker item `epic-6-retro-item-53`).
 **Links.**
 - Source: [`docs/operations/backup-handling.md`](../operations/backup-handling.md) — full policy, rationale, decommission step.
 - Ratifying context: retrospective item `epic-6-retro-item-53`. Related: **RGD-4** (the `GET`-with-side-effects deviation on the same route) and **RGD-5** (Corpus PII position).
+
+## RGD-7 — the alerenzi service token is an integration credential, not a principal
+
+**Context.** The alerenzi consultation plugin (WordPress, same business) needs astro-report's computed
+astronomy through a JSON API authenticated by a bearer token
+(`change-request-2026-10-09-chart-data-api-for-alerenzi.md` §3.3). The SPEC and AD-15 allow exactly
+one principal and note that a second would trigger the AGPL source-offer obligation of the
+Kerykeion → pyswisseph → Swiss Ephemeris chain.
+
+**Decision.**
+
+- **Not a principal.** The token is one machine credential of the same business. It reaches only the
+  stateless `/api/v1` computation surface (AD-22) and the place cache; it can read no stored Client,
+  Natal Chart, Report or Payload; it has no session, UI or account row. The single human principal is
+  unchanged.
+- **AGPL.** Shop customers never interact with astro-report. The alerenzi operator interacts with it
+  indirectly through the plugin, so astro-report's Corresponding Source is offered to the alerenzi
+  operator; no offer extends to anyone else. This is Francesco's position of record, not legal advice.
+- **Revisit** if the plugin ever exposes computed data to shop customers interactively, if a second
+  machine client is proposed, or if the API is asked to read stored data — each is a PRD revision.
+
+**Ratified.** Francesco, 2026-10-09.
+
+**Links.**
+- Source: [`sprint-change-proposal-2026-10-09.md`](../../_bmad-output/planning-artifacts/sprint-change-proposal-2026-10-09.md) §3 (D3, AGPL position).
+- Contract: SPEC constraint "Exactly one principal" (amended 2026-10-09); `ARCHITECTURE-SPINE.md` AD-15 (amended) and AD-22.

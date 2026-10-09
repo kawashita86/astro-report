@@ -2,7 +2,7 @@
 
 The astronomical tuning values every computation reads. **This file is the record of what those values are; where a source document restates one, this file wins.** They live at runtime in a single versioned `ComputationConfig`, passed explicitly into every core function and recorded with its version and content hash on every Report Payload — so any stored Payload can be reproduced exactly, and changing a value is a data edit and a version bump rather than a code change.
 
-Companion of `SPEC.md`. Governs CAP-3, CAP-6, CAP-7, CAP-9, CAP-10, CAP-11, CAP-12, CAP-13.
+Companion of `SPEC.md`. Governs CAP-3, CAP-6, CAP-7, CAP-9, CAP-10, CAP-11, CAP-12, CAP-13, CAP-32–CAP-35.
 
 ## House system
 
@@ -28,8 +28,11 @@ Natal and transit-to-natal Aspects use different, independently tunable Orbs. Th
 |---|---|---|
 | Natal Aspect | ±7.0° | ±6.0° to ±8.0° |
 | Transit-to-natal Aspect | ±2.0° | ±1.5° to ±2.5° |
+| Synastry inter-aspect (chart data API only) | ±7.0° | ±6.0° to ±8.0° |
 
 The transit Orb is tunable so the value can be calibrated against real Reports without a code change.
+
+Composite and solar-return aspects (RS chart and RS-to-natal) use the natal Orb. *(Added 2026-10-09, correct-course.)*
 
 ## Bodies
 
@@ -105,3 +108,29 @@ Degrees are carried as decimals, never binary floats, in every stored or compare
 ## Ephemeris identity
 
 The ephemeris data files are vendored and pinned by SHA-256, verified at startup, with the process refusing to start on a missing file or a checksum mismatch. The Moshier fallback is never an accepted runtime state. Every Report Payload records the ephemeris file identity that produced it, alongside the ComputationConfig version and hash.
+
+## Synastry and composite (chart data API only)
+
+- **Inter-aspects:** every pair (A point, B point) over the ten planets, both Lunar Nodes, ascendant and midheaven; the five major aspects; the synastry Orb. No applying/separating flag (two static charts).
+- **Overlays:** each person's ten planets and nodes placed in the other person's Placidus houses.
+- **Composite (midpoint method):** each planet, node, ascendant and midheaven is the midpoint of the two positions on the shorter arc. For an exact opposition (arc = 180°, which has no shorter arc) the midpoint is A's longitude + 90°, normalized. Composite aspects use the natal Orb, with no applying flag.
+- **Composite houses:** `[composite] houses` in the ComputationConfig — `midpoint_cusps` (each cusp the shorter-arc midpoint of the two cusps) or `derived_from_mc` (Placidus cusps from the composite MC at the arithmetic mean of the two birth latitudes). Set by the Astro.com composite fixture; changing it is a data edit and a version bump.
+
+## Solar return (chart data API only)
+
+- **Return instant:** the UTC instant when the transiting Sun's tropical longitude equals the natal Sun's, searched from local 00:00 two days before the birthday in the requested year (28 February for a 29 February birthday in a non-leap year), so the nearest return is found.
+- **Chart:** a full Placidus chart for that instant at the stated location (the birthplace by default), with RS aspects within the natal Orb.
+- **Comparison:** the natal house of the RS ascendant; the natal house of each RS planet and node; RS-to-natal aspects within the natal Orb.
+- **Requires a known birth time.** A ±0.5° error in the natal Sun moves the instant by up to ±12 h, which invalidates the RS angles and cusps.
+
+## Unknown birth time (`time_known: false`, chart data API only)
+
+- The chart is computed for 12:00 local civil time on the birth date at the birthplace.
+- **Omitted:** ascendant, midheaven, cusps, house rulers, every `house` field, ingresses and lunation houses.
+- **Ranged:** every body carries its longitude at local 00:00 and at 24:00 of the birth date as `range`; `sign_uncertain` is true when the two fall in different signs. The Moon (about 13° per day) always carries its range.
+- **Excluded from every aspect list** (natal, transit targets, synastry, composite): the angles, and every aspect involving the natal Moon, whose uncertainty (±6.5°) exceeds the transit Orb and rivals the natal Orb.
+- **Synastry:** a time-unknown subject contributes no angles and no Moon aspects; overlays *into* that subject's houses are omitted. If either subject's time is unknown, the composite angles, houses and planet houses are null, and composite Moon aspects are excluded.
+
+## API transit windows
+
+The window is local dates `[start_date, end_date)` in the subject's zone, converted once to one half-open UTC interval, and at most 13 calendar months long. Bodies, Orbs and the transiting-Moon exclusion are exactly those of the monthly scan. **Boundary rule:** an aspect already in orb when the window opens is reported with `orb_entry_at` equal to the window's UTC start; one still in orb when it closes has `orb_exit_at` null; a standing retrograde is clamped the same way. Nothing in orb inside the window is dropped.

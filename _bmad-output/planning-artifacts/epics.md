@@ -106,6 +106,20 @@ FR-26: Francesco can export a Report that has passed the Groundedness Gate, to b
 
 FR-27: Francesco can see all Reports previously generated for a Client, in order, listed by Client and month. Any prior Report can be reopened with its Payload and Gate result intact. Report History is what FR-18 draws on.
 
+**4.9 Chart Data API (alerenzi)** *(added 2026-10-09, `sprint-change-proposal-2026-10-09.md`)*
+
+FR-31: Serve chart data to one integration client — The alerenzi consultation plugin gets astro-report's computed astronomy over a versioned JSON API, so its drafts can name only positions a real ephemeris produced.
+
+FR-32: Resolve a place and compute a natal chart on request — The plugin resolves a birthplace to confirmed candidates, then gets the natal chart for local birth data without astro-report storing anyone.
+
+FR-33: Compute transits over an arbitrary window — A consultation can cover the next three months or the twelve months from a birthday, not only a calendar month.
+
+FR-34: Compute synastry and the composite chart — A couple consultation gets both natal charts, their inter-aspects, the house overlays both ways and the midpoint composite.
+
+FR-35: Compute a solar return, at home or relocated — A solar return consultation gets the return chart for the place the customer spends the birthday, read against the natal chart.
+
+FR-36: Share the Italian vocabulary — The plugin's prose uses exactly the words astro-report's Gate and operator UI use.
+
 ### NonFunctional Requirements
 
 From PRD §5 (cross-cutting), the feature-specific NFRs in §4.3 and §4.6, and the constraints in §6–§7.
@@ -286,6 +300,12 @@ CAP-30 is realized by Epic 9 Story 9.5 together with Epic 3 Story 3.10.
 | FR-28 | Epic 1 | Restrict access to the application |
 | FR-29 | Epic 2 | Delete a Client and their Reports (moved from Epic 1 — see note below) |
 | FR-30 | Epic 4 | Author and maintain the Style Guide |
+| FR-31 | Epic 11 | Serve chart data to one integration client |
+| FR-32 | Epic 11 | Resolve a place and compute a natal chart on request |
+| FR-33 | Epic 11 | Compute transits over an arbitrary window |
+| FR-34 | Epic 11 | Compute synastry and the composite chart |
+| FR-35 | Epic 11 | Compute a solar return, at home or relocated |
+| FR-36 | Epic 11 | Share the Italian vocabulary |
 
 All 30 functional requirements are mapped. Epic 8 covers no FR directly — it realizes NFR-1, NFR-5,
 NFR-9, NFR-10 and NFR-17, and is the release gate behind SM-3.
@@ -414,6 +434,14 @@ waits only for the Sections the Gate rejected, and downloads the PDF in seconds.
 **Governed by:** AD-9, AD-10, AD-20 (amended 2026-10-01), AD-21 (new); AD-6, AD-7 unchanged
 **Notes:** Ports md-report's per-Section generation, driver, leases and progressive UI. Story 10.1
 (PDF) is independent and ships first. Added 2026-10-01 via `sprint-change-proposal-2026-10-01.md`.
+
+### Epic 11: Chart data API for the alerenzi consultation plugin
+
+The alerenzi plugin's drafts name only positions a real ephemeris computed. astro-report serves natal
+charts, transit windows, synastry with composite and solar returns over a stateless `/api/v1`.
+**FRs covered:** FR-31–FR-36 (new), FR-28 (amended)
+**Governed by:** AD-22 (new); AD-1, AD-12, AD-15, AD-16, AD-18 (amended 2026-10-09)
+**Notes:** Independent of Epic 10. Added 2026-10-09 via `sprint-change-proposal-2026-10-09.md`.
 
 ### Dependency flow
 
@@ -2512,3 +2540,91 @@ and PDF first/repeat export times, and its guard test checks them against budget
 **Given** five reports generated before and after Epic 10
 **When** Francesco reads them side by side
 **Then** any repetition between Sections is addressed by a new Style Guide version, recorded as such
+
+---
+
+## Epic 11: Chart data API for the alerenzi consultation plugin
+
+The alerenzi plugin's drafts name only positions a real ephemeris computed: it calls astro-report for natal charts, transit windows, synastry with composite, and solar returns, and stores the frozen responses itself. astro-report stores nothing about those subjects and produces no Report for them.
+
+**FRs covered:** FR-31–FR-36 (new), FR-28 (amended)
+**Governed by:** AD-22 (new); AD-1, AD-12, AD-15, AD-16, AD-18 (amended 2026-10-09) · **Unchanged:** AD-2, AD-7, AD-11
+**Notes:** Source: `sprint-change-proposal-2026-10-09.md`, `change-request-2026-10-09-chart-data-api-for-alerenzi.md`. Build order: 11.1 → 11.2 → (11.3, 11.4, 11.5 in any order) → 11.6. Astro.com fixtures for 11.4 and 11.5 are transcribed by Francesco and chosen adversarially. When 11.6 is deployed, alerenzi Story 7.6 starts.
+
+### Story 11.1: An authenticated, stateless API skeleton
+
+As the alerenzi plugin,
+I want a versioned JSON API that only my token opens,
+So that I can call astro-report's engine without a session or a browser.
+
+**Acceptance Criteria:**
+- `/api/v1` router under `shell/http/api/`; `AuthMiddleware` branches on `/api/`: bearer only, Argon2 check against `Settings.api_token_hash`, `401` JSON `{code:"unauthorized", message, field:null}`, never a redirect.
+- A valid session cookie without a token on `/api/v1/*` → 401; a valid token on an HTML route → treated as unauthenticated (redirect/401 as today).
+- `API_TOKEN_HASH` read only in `shell/config.py`; unset ⇒ API answers 401 for everything; malformed ⇒ startup fails. README variable table and `.env.example` updated.
+- JSON error envelope with Italian messages for every code in AD-22; typed core errors mapped in one place.
+- `meta` block builder (API version, ComputationConfig version/hash/orbs/house system, ephemeris manifest SHA-256, zodiac); canonical JSON serialiser reused from `core/payload/freeze.py`.
+- Logging guard: a test proves no request body, birth date, time or coordinate reaches any log record for an API call, with a negative test (`test_the_guard_detects_a_*`) proving the guard fails when a body is logged.
+- Tests: no token, wrong token, cookie-only, token on HTML route, API absent from any docs/OpenAPI route.
+
+### Story 11.2: Resolve a place and compute a natal chart on request
+
+As the alerenzi plugin,
+I want to resolve a birthplace and get a natal chart for local birth data,
+So that the operator confirms the place and the draft gets real positions.
+
+**Acceptance Criteria:**
+- `POST /api/v1/places/resolve` → every CAP-2 candidate (display name, lat, lon, IANA zone), cache first; zero ⇒ `place_unresolved`.
+- `POST /api/v1/charts/natal`: local date+time → UTC with the historical offset; DST gap or fold ⇒ `invalid_request`, `field: "subject.birth_time"`; response echoes `birth_instant_utc` and `utc_offset`.
+- `time_known: true` output equals, field for field, the `NatalChart` that Client creation stores for the same birth data (planets, nodes, angles, cusps with traditional/modern/co-ruler, aspects with orb and applying flag), and matches an existing Astro.com natal fixture.
+- `time_known: false` per `computation-tables.md` (noon chart; omissions; `range` and `sign_uncertain`; Moon and angle aspects excluded), implemented as a separate type in `core/ephemeris/`; tested at a sign boundary and with a Moon sign change during the day.
+- No row is written except `PLACE_CACHE` (asserted by a row-count test over every table); repeat request ⇒ byte-identical body.
+
+### Story 11.3: Transits over any window up to 13 months
+
+As the alerenzi plugin,
+I want the transits for the next three months or for the twelve months from a birthday,
+So that a consultation's forecast rests on computed events.
+
+**Acceptance Criteria:**
+- `POST /api/v1/charts/transits` with `{subject, window:{start_date,end_date}}`, local dates, half-open, one UTC interval; > 13 calendar months ⇒ `window_too_long`; `end_date ≤ start_date` ⇒ `invalid_request`.
+- Response: `meta`, `subject`, `window_utc`, `aspects`, `stations`, `standing_retrogrades`, `ingresses`, `lunations` (with `natal_house`), serialised from the existing core types.
+- Seam test: for a 12-month window crossing a retrograde station, every perfection, station, ingress and lunation equals the union of the twelve monthly scans, with none duplicated or missing at a seam; boundary clamp rule per `computation-tables.md`.
+- `time_known: false`: ingresses and lunation houses omitted; angle and natal-Moon targets excluded.
+- Local timing recorded for a 12-month window (expected ≈ 3 s); the VPS measurement happens in 11.6.
+
+### Story 11.4: Synastry and the midpoint composite
+
+As the alerenzi plugin,
+I want both charts, inter-aspects, overlays both ways and the composite,
+So that a couple consultation has computed facts.
+
+**Acceptance Criteria:**
+- `core/synastry/` pure functions: inter-aspects (`orbs.synastry`), overlays, composite midpoints with the opposition rule (exact-opposition and near-opposition tests); MC-derived composite houses, if chosen, in `core/ephemeris/`.
+- `data/computation.toml` → `version = 2` with `orbs.synastry = "7.0"` (loader validates 6.0–8.0) and `[composite] houses`; pinned hash/version tests updated.
+- Composite house method set from a transcribed Astro.com composite fixture; synastry fixture covers inter-aspects and both overlays; composite fixture includes a near-opposition pair.
+- `POST /api/v1/charts/synastry` response per change request §4.6, with unknown-time omissions per `computation-tables.md`; byte-identical repeat.
+
+### Story 11.5: The solar return, at home or relocated
+
+As the alerenzi plugin,
+I want the solar return for the place the customer spends the birthday, read against the natal chart,
+So that the annual consultation is computed.
+
+**Acceptance Criteria:**
+- `core/ephemeris/returns.py`: return instant via `swe.solcross_ut` from the anchor in `computation-tables.md`; binds the verified ephemeris path first.
+- `POST /api/v1/charts/solar-return` with `{subject, year, location?}` (birthplace by default) → `return_instant_utc`, `location`, `chart` (§4.4 shape), `comparison` (`rs_ascendant_in_natal_house`, `rs_planets_in_natal_houses`, `rs_to_natal_aspects`).
+- `time_known: false` ⇒ `birth_time_required`.
+- Astro.com fixtures: birthplace, relocated, a birthday near New Year, a 29 February birthday.
+
+### Story 11.6: Vocabulary, API notes for the plugin team, and deployment
+
+As Francesco,
+I want the API live on the VPS and reachable from the WordPress container,
+So that alerenzi Story 7.6 can start.
+
+**Acceptance Criteria:**
+- `GET /api/v1/vocabulary/it` serves the Gate vocabulary plus the aspect and direction names, read from one shared shell module that the operator UI also reads (no second copy).
+- `docs/api/chart-data-v1.md`: endpoints, request/response shapes, error codes, determinism, the boundary and unknown-time rules, and the version policy — for the alerenzi team.
+- `API_TOKEN_HASH` set in Coolify; the astro-report and WordPress containers attached to one Coolify network; a call from the WordPress container to the internal hostname succeeds (public HTTPS fallback documented).
+- 12-month `charts/transits` timed on the VPS (p90 over 20 calls) and recorded in `docs/release-validation/latency.md`; target ≤ 30 s.
+- `docs/decisions/` RGD-7 (service token is not a principal; AGPL source offer to the alerenzi operator) recorded.

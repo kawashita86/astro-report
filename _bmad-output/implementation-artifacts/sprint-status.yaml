@@ -137,6 +137,15 @@ development_status:
   10-6-watch-the-sections-being-written: review
   10-7-measure-it: review
   epic-10-retrospective: optional
+
+  epic-11: backlog
+  11-1-an-authenticated-stateless-api-skeleton: backlog
+  11-2-resolve-a-place-and-compute-a-natal-chart-on-request: backlog
+  11-3-transits-over-any-window-up-to-13-months: backlog
+  11-4-synastry-and-the-midpoint-composite: backlog
+  11-5-the-solar-return-at-home-or-relocated: backlog
+  11-6-vocabulary-api-notes-and-deployment: backlog
+  epic-11-retrospective: optional
 action_items:
   - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"
     epic: 1

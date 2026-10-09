@@ -150,6 +150,30 @@ A pain to solve, and with it a ceiling to remove. Francesco is a working astrolo
   - **intent:** Francesco can start a report run and watch it move through its stages, and can leave the view or close the tab and come back without the run being lost or restarted.
   - **success:** Starting a run returns to the run view immediately without waiting for any stage; the view shows the run's current stage and reflects each advance as it happens; a run left or closed mid-flight resumes from its last completed stage when the view is reopened; a terminally failed run shows which stage failed and why — distinct from a Gate failure, which routes to the review surface of CAP-20; during drafting the view shows each Section's own state (waiting, writing, written, failed) and each Section's text as soon as it is written. Mechanism in `ARCHITECTURE-SPINE.md` AD-10/AD-20 and `EXPERIENCE.md` (*Report Run Lifecycle*).
 
+- **CAP-31** — Serve chart data to one integration client
+  - **intent:** The alerenzi consultation plugin gets astro-report's computed astronomy over a versioned JSON API, so its drafts can name only positions a real ephemeris produced.
+  - **success:** `/api/v1` accepts only `Authorization: Bearer` with the one configured token and answers `401` JSON otherwise (never a redirect); the session cookie is not accepted there and the token is not accepted on HTML routes; identical request, ComputationConfig and ephemeris files return a byte-identical body; every chart response carries `meta` (API version, ComputationConfig version, hash and orbs, house system, ephemeris manifest SHA-256, zodiac); errors are `{code, message (Italian), field}`; nothing about a subject is written to the database or to logs, and only the place cache may grow. Mechanism: `ARCHITECTURE-SPINE.md` AD-22.
+
+- **CAP-32** — Resolve a place and compute a natal chart on request
+  - **intent:** The plugin resolves a birthplace to confirmed candidates, then gets the natal chart for local birth data without astro-report storing anyone.
+  - **success:** `places/resolve` returns every candidate from the CAP-2 resolver, cache first, and `place_unresolved` for none; `charts/natal` converts local date and time with the historical offset, rejects a DST gap or fold as `invalid_request` on `birth_time`, echoes `birth_instant_utc` and `utc_offset`, and returns the same positions, cusps, rulers and aspects as the stored Natal Chart for the same birth data; with `time_known: false` it returns the reduced chart defined in `computation-tables.md`.
+
+- **CAP-33** — Compute transits over an arbitrary window
+  - **intent:** A consultation can cover the next three months or the twelve months from a birthday, not only a calendar month.
+  - **success:** Any half-open window of local dates in the subject's zone up to 13 calendar months is converted once to UTC and scanned with exactly the Report engine's bodies, orbs and Moon exclusion; the event set equals the union of the month-by-month scans of the same span, with no duplicate or missing perfection, station, ingress or lunation at a month seam; boundary events follow the clamp rule in `computation-tables.md`; a longer window is `window_too_long`.
+
+- **CAP-34** — Compute synastry and the composite chart
+  - **intent:** A couple consultation gets both natal charts, their inter-aspects, the house overlays both ways and the midpoint composite.
+  - **success:** Inter-aspects cover every pair of A and B points over the five major aspects within `orbs.synastry`; overlays place each person's planets in the other's Placidus houses; the composite uses the shorter-arc midpoint with the documented opposition rule and the configured `[composite] houses` method; results match the Astro.com synastry and composite fixtures; unknown-time omissions follow `computation-tables.md`.
+
+- **CAP-35** — Compute a solar return, at home or relocated
+  - **intent:** A solar return consultation gets the return chart for the place the customer spends the birthday, read against the natal chart.
+  - **success:** The return instant is the exact solar return nearest the birthday in the requested year; the RS chart is a full Placidus chart at the stated location (the birthplace by default); the comparison gives the RS ascendant's natal house, RS planets in natal houses and RS-to-natal aspects within the natal orb; results match the Astro.com fixtures (birthplace, relocated, a birthday near New Year, a 29 February birthday); an unknown birth time is `birth_time_required`.
+
+- **CAP-36** — Share the Italian vocabulary
+  - **intent:** The plugin's prose uses exactly the words astro-report's Gate and operator UI use.
+  - **success:** `GET /api/v1/vocabulary/it` returns the Italian names for every id the chart responses use (bodies, signs, aspects, house ordinals, directions), read from the same files the Gate and the UI read.
+
 ## Constraints
 
 - The Generator narrates and never computes: it receives the Report Payload, the Style Guide version, the two ReportThemes, and the name of the one Section it is writing — and, for Consiglio finale only, the sentence texts of this same draft's Sections 1–7 — and nothing else: no tools, no database handle, no prior Report's prose. *(Amended 2026-10-01, correct-course.)*
@@ -159,15 +183,15 @@ A pain to solve, and with it a ceiling to remove. Francesco is a working astrolo
 - Reports ship unedited under Francesco's professional name. Every guardrail must hold without a human catching the failure.
 - Everything the operator sees is Italian: report content under every configuration (CAP-15), and the entire operator UI — navigation, labels, helper text, errors, empty states, toasts, stage labels, and the native date/time pickers (`lang="it"`; dates `dd/MM/yyyy`, times `HH:mm`). Only identifiers — `YYYY-MM` month codes, hashes, UUIDs — stay Latin-alphanumeric.
 - The operator-facing web UI conforms to the adopted `EXPERIENCE.md` (information architecture, voice, component / state / interaction patterns, key flows, WCAG 2.1 AA floor) and `DESIGN.md` (visual identity: `#42297A` on white, Inter, light and dark themes). Both companions are binding, not reference.
-- Exact birth time to the minute is mandatory. No noon chart, solar-house fallback or house-less path exists anywhere in the system.
+- Exact birth time to the minute is mandatory for every Client, Natal Chart and Report. No noon chart, solar-house fallback or house-less path exists anywhere in Client creation, Report production or export. The one exception is the stateless chart data API (CAP-32–CAP-34), which may return a reduced, explicitly flagged `time_known: false` chart under the rules in `computation-tables.md`; nothing it computes is stored or reaches a Report. *(Amended 2026-10-09, correct-course.)*
 - Placidus houses; the five major aspects only; natal Orb ±7.0° default (tunable 6.0–8.0); transit-to-natal Orb ±2.0° default (tunable 1.5–2.5); the transiting Moon excluded from Aspects, entering only through Lunations. Values in `computation-tables.md`.
 - Every astronomical tuning value lives in one versioned ComputationConfig, passed explicitly and recorded with its hash on each Payload. Changing the harmonic/disharmonic rule is a data edit and a version bump, never a code change.
-- All computation and storage is UTC. The analyzed month is one half-open UTC interval derived from the Client's local calendar month, so every Transit Event belongs to exactly one Report.
+- All computation and storage is UTC. The analyzed month is one half-open UTC interval derived from the Client's local calendar month, so every Transit Event belongs to exactly one Report. The chart data API's transit window is likewise one half-open UTC interval, derived once from local dates in the subject's zone and at most 13 calendar months long. *(Amended 2026-10-09, correct-course.)*
 - Ephemeris files are vendored, pinned by SHA-256 and asserted at boot; the Moshier fallback is never an accepted runtime state.
 - All durable state lives in Postgres. Nothing written to the compute host's filesystem at runtime is ever read back after a restart.
 - Running cost stays at zero at 30–200 Reports per month. A design requiring paid infrastructure at target volume must be raised rather than absorbed.
 - Hosting and storage are EU/EEA. Exactly one Generator adapter is configured with no runtime failover, and its data terms are verified before real Client data is sent and again on any provider change.
-- Exactly one principal, enforced structurally. Adding a second is a revision of this contract, not a feature — it would also trigger the AGPL source-offer obligation the current shape avoids.
+- Exactly one principal, enforced structurally. Adding a second is a revision of this contract, not a feature — it would also trigger the AGPL source-offer obligation the current shape avoids. The alerenzi plugin's service token is not a principal: it is one machine credential of the same business, reaches only the stateless `/api/v1` computation surface, and can read no stored Client, chart, Report or Payload. Corresponding Source is offered to the alerenzi operator (`docs/decisions/` RGD-7). *(Amended 2026-10-09, correct-course.)*
 - Reports are non-fatalistic: no fixed outcome, medical event, death or financial result is ever predicted.
 - The dated entries of Sections 6 and 7 are projected from the Payload by code. A date token written by the Generator inside those two Sections is a Gate violation.
 - The glossary vocabulary is used verbatim across code, database and configuration, and the four domains stay Italian and lowercase (`amore`, `lavoro`, `denaro`, `benessere`). Introducing a synonym is a defect.
@@ -180,11 +204,12 @@ A pain to solve, and with it a ceiling to remove. Francesco is a working astrolo
 - No client-facing surface: no accounts, logins, portal or interface any Client touches. Clients receive an exported file.
 - No multi-astrologer or multi-tenant operation. Permanently out, not deferred.
 - No native mobile application. The hosted web app is reachable from a phone browser.
-- No astrological techniques beyond natal chart and monthly transits — synastry, compatibility, solar returns and progressions are out.
+- No Report generation for techniques beyond natal chart and monthly transits. Synastry, the midpoint composite and the solar return are computed for the chart data API only (CAP-34, CAP-35), with no Generator, Gate or Report. Progressions, directions and targeted (relocation-search) solar returns are out. *(Amended 2026-10-09, correct-course.)*
 - No chart pattern detection: stelliums, grand trines, dispositor chains and similar configurations. Each would be a new class of Claim the Gate must learn to verify.
 - No billing, payments, scheduling or CRM. The Client record exists to produce Reports.
 - No output language other than Italian.
-- No support for Clients with an unknown birth time. Rectification, noon charts, solar houses and house-less readings are all out.
+- No support for Clients with an unknown birth time. Rectification, noon charts, solar houses and house-less readings are all out of Client creation and Reports. The chart data API's reduced `time_known: false` chart is the only exception (see Constraints). *(Amended 2026-10-09, correct-course.)*
+- No second machine client and no general-purpose public API. `/api/v1` serves the alerenzi plugin only, is absent from any public documentation page, and stores nothing about the subjects it computes.
 - No delivery mechanics. The product produces a file; sending it stays manual.
 - No Corpus-based voice conditioning, exemplar retrieval or fine-tuning in v1 — phase 2, gated on the count from CAP-22.
 - No multi-year narrative memory and no alternative report formats (quarterly, annual, per-domain) in v1.

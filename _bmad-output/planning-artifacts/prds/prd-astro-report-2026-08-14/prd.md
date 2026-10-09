@@ -74,6 +74,7 @@ defend any line of a report when a client questions it mid-consultation.
 - **Other astrologers.** Not deferred — this tool serves one operator, permanently. Multi-tenancy is
   not a roadmap item.
 - **Anyone learning astrology.** The tool assumes professional competence and explains nothing.
+- **The alerenzi consultation plugin** is a machine consumer of computed data, not a user (FR-31). *(Added 2026-10-09.)*
 
 ### 2.3 Key User Journeys
 
@@ -195,6 +196,7 @@ report) the month to analyze.
   silently corrupt Amore, Lavoro and Benessere rather than fail visibly.
 - Birthplace is entered as free text and resolved (FR-2) before the Client is persisted.
 - Names are not required to be unique. Two Clients may share a name and remain distinct records.
+- The chart data API's reduced time-unknown chart (FR-32) creates no Client and is not a degraded path of this requirement. *(Amended 2026-10-09.)*
 
 #### FR-2: Resolve birthplace to coordinates and historical timezone
 
@@ -254,6 +256,8 @@ numbering.)*
   assumes he is already signed in).
 - There is exactly one account. Account creation, invitations, password reset flows for other people,
   and role distinctions are all out of scope (§8).
+- One machine credential — the alerenzi plugin's bearer token — reaches only the stateless chart data
+  API (FR-31) and no stored Client data; it is not an account. *(Amended 2026-10-09.)*
 
 #### FR-29: Delete a Client and their Reports
 
@@ -704,6 +708,50 @@ Francesco can see all Reports previously generated for a Client, in order.
 
 ---
 
+### 4.9 Chart Data API (alerenzi)
+
+**Description:** A stateless JSON surface that lets the alerenzi consultation plugin read astro-report's computed astronomy. It produces no Report and stores no subject. Added 2026-10-09 by correct-course (`sprint-change-proposal-2026-10-09.md`); the SPEC's CAP-31–CAP-36 are the canonical twins of these requirements, and `computation-tables.md` holds their computation rules.
+
+**Functional Requirements:**
+
+#### FR-31: Serve chart data to one integration client
+
+The alerenzi consultation plugin gets astro-report's computed astronomy over a versioned JSON API, so its drafts can name only positions a real ephemeris produced.
+
+**Consequences (testable):** `/api/v1` accepts only `Authorization: Bearer` with the one configured token and answers `401` JSON otherwise (never a redirect); the session cookie is not accepted there and the token is not accepted on HTML routes; identical request, ComputationConfig and ephemeris files return a byte-identical body; every chart response carries `meta` (API version, ComputationConfig version, hash and orbs, house system, ephemeris manifest SHA-256, zodiac); errors are `{code, message (Italian), field}`; nothing about a subject is written to the database or to logs, and only the place cache may grow. Mechanism: `ARCHITECTURE-SPINE.md` AD-22.
+
+#### FR-32: Resolve a place and compute a natal chart on request
+
+The plugin resolves a birthplace to confirmed candidates, then gets the natal chart for local birth data without astro-report storing anyone.
+
+**Consequences (testable):** `places/resolve` returns every candidate from the CAP-2 resolver, cache first, and `place_unresolved` for none; `charts/natal` converts local date and time with the historical offset, rejects a DST gap or fold as `invalid_request` on `birth_time`, echoes `birth_instant_utc` and `utc_offset`, and returns the same positions, cusps, rulers and aspects as the stored Natal Chart for the same birth data; with `time_known: false` it returns the reduced chart defined in `computation-tables.md`.
+
+#### FR-33: Compute transits over an arbitrary window
+
+A consultation can cover the next three months or the twelve months from a birthday, not only a calendar month.
+
+**Consequences (testable):** Any half-open window of local dates in the subject's zone up to 13 calendar months is converted once to UTC and scanned with exactly the Report engine's bodies, orbs and Moon exclusion; the event set equals the union of the month-by-month scans of the same span, with no duplicate or missing perfection, station, ingress or lunation at a month seam; boundary events follow the clamp rule in `computation-tables.md`; a longer window is `window_too_long`.
+
+#### FR-34: Compute synastry and the composite chart
+
+A couple consultation gets both natal charts, their inter-aspects, the house overlays both ways and the midpoint composite.
+
+**Consequences (testable):** Inter-aspects cover every pair of A and B points over the five major aspects within `orbs.synastry`; overlays place each person's planets in the other's Placidus houses; the composite uses the shorter-arc midpoint with the documented opposition rule and the configured `[composite] houses` method; results match the Astro.com synastry and composite fixtures; unknown-time omissions follow `computation-tables.md`.
+
+#### FR-35: Compute a solar return, at home or relocated
+
+A solar return consultation gets the return chart for the place the customer spends the birthday, read against the natal chart.
+
+**Consequences (testable):** The return instant is the exact solar return nearest the birthday in the requested year; the RS chart is a full Placidus chart at the stated location (the birthplace by default); the comparison gives the RS ascendant's natal house, RS planets in natal houses and RS-to-natal aspects within the natal orb; results match the Astro.com fixtures (birthplace, relocated, a birthday near New Year, a 29 February birthday); an unknown birth time is `birth_time_required`.
+
+#### FR-36: Share the Italian vocabulary
+
+The plugin's prose uses exactly the words astro-report's Gate and operator UI use.
+
+**Consequences (testable):** `GET /api/v1/vocabulary/it` returns the Italian names for every id the chart responses use (bodies, signs, aspects, house ordinals, directions), read from the same files the Gate and the UI read.
+
+---
+
 ## 5. Cross-Cutting NFRs
 
 - **Astronomical conformance.** Computed output — planetary positions, house cusps, transit-to-natal
@@ -834,15 +882,21 @@ This section governs product-generated Italian prose, which *is* the deliverable
   one operator.
 - **No mobile application.** The hosted web app is reachable from a phone browser; a native app is not
   built.
-- **No astrological techniques beyond natal chart and monthly transits.** Synastry, compatibility,
-  solar returns and progressions are out. Francesco explicitly did not prioritize them for the
-  extension model.
+- **No Report generation for techniques beyond natal chart and monthly transits.** Synastry, the
+  midpoint composite and the solar return are computed for the chart data API only (FR-34, FR-35),
+  with no Generator, Gate or Report. Progressions, directions and targeted (relocation-search) solar
+  returns are out. *(Amended 2026-10-09, correct-course.)*
+- **No second machine client and no general-purpose public API.** `/api/v1` serves the alerenzi plugin
+  only, is absent from any public documentation page, and stores nothing about the subjects it
+  computes. *(Added 2026-10-09.)*
 - **No billing, payments, scheduling or CRM.** The Client record exists to produce Reports, nothing
   more.
 - **No output language other than Italian.**
 - **No support for Clients with an unknown birth time.** Rectification, noon charts, solar houses and
   house-less readings are all out. Exact birth time is an entry requirement (FR-1), and a Client who
-  cannot supply one is not served by this product.
+  cannot supply one is not served by this product. The chart data API's reduced, flagged
+  `time_known: false` chart (FR-32) is the only exception; it creates no Client and reaches no Report.
+  *(Amended 2026-10-09.)*
 - **No capacity planning beyond 200 Reports per month.**
 - **No delivery mechanics.** The product produces a file. Sending it to the Client stays manual and out
   of scope. `[ASSUMPTION: inferred — Francesco did not select client delivery as an extension
