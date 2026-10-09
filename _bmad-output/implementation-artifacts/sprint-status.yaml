@@ -140,7 +140,7 @@ development_status:
 
   epic-11: in-progress
   11-1-an-authenticated-stateless-api-skeleton: review
-  11-2-resolve-a-place-and-compute-a-natal-chart-on-request: backlog
+  11-2-resolve-a-place-and-compute-a-natal-chart-on-request: review
   11-3-transits-over-any-window-up-to-13-months: backlog
   11-4-synastry-and-the-midpoint-composite: backlog
   11-5-the-solar-return-at-home-or-relocated: backlog

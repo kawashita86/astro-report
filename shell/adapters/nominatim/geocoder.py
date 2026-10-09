@@ -9,23 +9,24 @@ instant -- the zone is a property of the place, the offset is not.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfoNotFoundError
 
 from geopy.geocoders import Nominatim
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 from timezonefinder import TimezoneFinder
 
-from core.errors import PlaceResolutionError
-from core.types.place import PlaceCandidate, ResolvedPlace
+from core.errors import LocalTimeError, PlaceResolutionError
+from core.types.place import PlaceCandidate, ResolvedPlace, ZonedPlaceCandidate
 from shell.adapters.postgres.place_cache import (
     CachedPlace,
     lookup_cached_place,
     store_resolved_place,
 )
+from shell.local_time import local_to_utc
 
 __all__ = ["NominatimGeocoder"]
 
@@ -134,6 +135,50 @@ class NominatimGeocoder:
             display_name=candidate.display_name,
         )
 
+    def list_candidates(self, place_text: str) -> list[ZonedPlaceCandidate]:
+        """Every match for ``place_text`` with its IANA zone, cache first.
+
+        A cache hit is a single candidate and never touches the geocoder.
+        Otherwise all geocoder matches are returned; only an unambiguous
+        (single) match is written to ``PLACE_CACHE`` (flushed, not committed --
+        the caller owns the transaction), exactly as :meth:`resolve` does.
+
+        Raises:
+            PlaceResolutionError: no match, an unreachable geocoder or cache,
+                or a match for which no zone can be found.
+        """
+        cached = self._lookup_cache(place_text)
+        if cached is not None:
+            return [
+                ZonedPlaceCandidate(
+                    display_name=cached.display_name or place_text,
+                    latitude=cached.latitude,
+                    longitude=cached.longitude,
+                    iana_zone=cached.iana_zone,
+                )
+            ]
+
+        matches = [
+            ZonedPlaceCandidate(
+                display_name=match.address,
+                latitude=_to_decimal(match.latitude),
+                longitude=_to_decimal(match.longitude),
+                iana_zone=self._zone_for(_to_decimal(match.latitude), _to_decimal(match.longitude)),
+            )
+            for match in self._geocode(place_text)
+        ]
+        if len(matches) == 1:
+            [only] = matches
+            store_resolved_place(
+                self._session,
+                place_text,
+                latitude=only.latitude,
+                longitude=only.longitude,
+                iana_zone=only.iana_zone,
+                display_name=only.display_name,
+            )
+        return matches
+
     def _lookup_cache(self, place_text: str) -> CachedPlace | None:
         try:
             return lookup_cached_place(self._session, place_text)
@@ -164,38 +209,18 @@ class NominatimGeocoder:
         return zone
 
     def _historical_offset(self, iana_zone: str, birth_local_time: datetime) -> timedelta:
+        # An ambiguous or nonexistent birth time is refused, not guessed,
+        # mirroring this story's own rule for an ambiguous *place* match
+        # (FR-2). The rule itself lives in ``shell/local_time.py``, shared
+        # with the chart data API.
         try:
-            zone = ZoneInfo(iana_zone)
+            return local_to_utc(birth_local_time, iana_zone).offset
         except ZoneInfoNotFoundError as error:
             raise PlaceResolutionError(
                 "timezone_resolution", f"{iana_zone!r} is not a known IANA zone: {error}"
             ) from error
-
-        # Per PEP 495: `fold` disambiguates the two local instants a DST
-        # fall-back repeats, and reveals a spring-forward instant that never
-        # occurred at all. Neither is silently auto-resolved here, mirroring
-        # this story's own rule for an ambiguous *place* match (FR-2): an
-        # ambiguous or nonexistent birth time is refused, not guessed.
-        before = birth_local_time.replace(tzinfo=zone, fold=0)
-        after = birth_local_time.replace(tzinfo=zone, fold=1)
-        offset_before, offset_after = before.utcoffset(), after.utcoffset()
-        assert offset_before is not None and offset_after is not None
-
-        if offset_before == offset_after:
-            return offset_before
-
-        round_trip = before.astimezone(UTC).astimezone(zone).replace(tzinfo=None)
-        if round_trip == birth_local_time:
-            raise PlaceResolutionError(
-                "timezone_resolution",
-                f"{birth_local_time} is ambiguous in {iana_zone} (occurs twice across a "
-                "DST fall-back); cannot resolve a single offset without disambiguation",
-            )
-        raise PlaceResolutionError(
-            "timezone_resolution",
-            f"{birth_local_time} does not exist in {iana_zone} (skipped by a DST "
-            "spring-forward gap)",
-        )
+        except LocalTimeError as error:
+            raise PlaceResolutionError("timezone_resolution", str(error)) from error
 
 
 def _to_decimal(value: float) -> Decimal:

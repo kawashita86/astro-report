@@ -46,14 +46,14 @@ from core.ephemeris.positions import (
 from core.types.chart import Aspect, HouseCusp, NatalChart, PlanetPosition
 from core.types.computation import ComputationConfig
 
-__all__ = ["compute_natal_chart"]
+__all__ = ["PLANET_BODIES", "compute_natal_chart", "detect_aspects", "sign_and_degree"]
 
 #: Fixed body order this module iterates in throughout: the ``planets``
 #: field's order, and -- alongside the True Node but never the South Node --
 #: the pair-generation order Aspect detection walks. Matches the order
 #: Astro.com reference charts list bodies in (conformance fixtures, Story
 #: 1.7), which is itself just ``swe``'s own body-constant order.
-_PLANET_BODIES: tuple[tuple[str, int], ...] = (
+PLANET_BODIES: tuple[tuple[str, int], ...] = (
     ("sun", swe.SUN),
     ("moon", swe.MOON),
     ("mercury", swe.MERCURY),
@@ -135,7 +135,7 @@ def compute_natal_chart(
 
     jd_ut = _julian_day_ut(birth_instant_utc)
 
-    positions = {name: _calc_body(jd_ut, body_id) for name, body_id in _PLANET_BODIES}
+    positions = {name: _calc_body(jd_ut, body_id) for name, body_id in PLANET_BODIES}
 
     cusps_raw, _ascmc_raw = swe.houses(jd_ut, float(latitude), float(longitude), _HOUSE_SYSTEM)
     cusp_longitudes = [_to_normalized_decimal(value) for value in cusps_raw]
@@ -147,7 +147,7 @@ def compute_natal_chart(
 
     planets = [
         _planet_position(name, positions[name][0], positions[name][1], cusp_longitudes)
-        for name, _body_id in _PLANET_BODIES
+        for name, _body_id in PLANET_BODIES
     ]
     true_node_longitude, true_node_speed = positions["true_node"]
     south_node_longitude = _normalize_decimal(true_node_longitude + HALF_CIRCLE)
@@ -155,8 +155,8 @@ def compute_natal_chart(
         _planet_position("south_node", south_node_longitude, true_node_speed, cusp_longitudes)
     )
 
-    aspect_bodies = [(name, positions[name][0], positions[name][1]) for name, _ in _PLANET_BODIES]
-    aspects = _detect_aspects(aspect_bodies, config.orbs.natal)
+    aspect_bodies = [(name, positions[name][0], positions[name][1]) for name, _ in PLANET_BODIES]
+    aspects = detect_aspects(aspect_bodies, config.orbs.natal)
 
     return NatalChart(
         ascendant=ascendant,
@@ -170,12 +170,11 @@ def compute_natal_chart(
 def _require_utc(instant: datetime) -> None:
     if instant.tzinfo is None or instant.utcoffset() != _ZERO_OFFSET:
         raise ValueError(
-            "birth_instant_utc must be timezone-aware UTC (utcoffset() == 0); "
-            f"got {instant!r}."
+            f"birth_instant_utc must be timezone-aware UTC (utcoffset() == 0); got {instant!r}."
         )
 
 
-def _sign_and_degree(longitude: Decimal) -> tuple[str, Decimal]:
+def sign_and_degree(longitude: Decimal) -> tuple[str, Decimal]:
     sign_index = int(longitude // _DEGREES_PER_SIGN)
     degree = (longitude - sign_index * _DEGREES_PER_SIGN).quantize(QUANTUM)
     return _ZODIAC_SIGNS[sign_index], degree
@@ -202,7 +201,7 @@ def _planet_position(
     speed: Decimal,
     cusp_longitudes: list[Decimal],
 ) -> PlanetPosition:
-    sign, degree = _sign_and_degree(longitude)
+    sign, degree = sign_and_degree(longitude)
     house = _house_for_longitude(longitude, cusp_longitudes)
     return PlanetPosition(
         name=name,
@@ -249,7 +248,7 @@ def _is_applying(
     return True
 
 
-def _detect_aspects(
+def detect_aspects(
     bodies: list[tuple[str, Decimal, Decimal]], orb_limit: Decimal
 ) -> tuple[Aspect, ...]:
     """Every natal Aspect within ``orb_limit`` (``ComputationConfig.orbs.natal``,

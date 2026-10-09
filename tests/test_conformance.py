@@ -73,11 +73,11 @@ Two tests, matching the story's own AC2/AC3 split:
 
   Story 8.1 wires the last stubbed section, ``expected.transit_positions``,
   in for real: ``_transit_positions_for_month_fixture()`` recomputes each of
-  the ten bodies sun..pluto (``_PLANET_BODIES`` with ``true_node`` filtered)
+  the ten bodies sun..pluto (``PLANET_BODIES`` with ``true_node`` filtered)
   at the fixture's ``transit_snapshot_utc`` via the same
   ``_calc_body()``/``_julian_day_ut()`` helpers the other test-shaping
   functions already use -- geocentric, anchor-chart-independent -- and emits
-  ``{name, longitude, retrograde}`` rows in ``_PLANET_BODIES`` order.
+  ``{name, longitude, retrograde}`` rows in ``PLANET_BODIES`` order.
   ``retrograde`` is ``speed < 0`` on every row; ``compare()`` only checks it
   where a fixture asserts it. With that wired, the ``"remainder"`` case no
   longer stands for an unimplemented section: it is demoted from an
@@ -104,7 +104,7 @@ from typing import Any
 
 import pytest
 
-from core.ephemeris.chart import _ASPECTS, _PLANET_BODIES, compute_natal_chart
+from core.ephemeris.chart import _ASPECTS, PLANET_BODIES, compute_natal_chart
 from core.ephemeris.identity import verify_ephemeris_identity
 from core.ephemeris.positions import QUANTUM, _angular_separation, _calc_body, _julian_day_ut
 from core.transits.aspects import _TRANSIT_BODY_IDS, _natal_targets, find_transit_aspects
@@ -483,7 +483,7 @@ def _transit_positions_for_month_fixture(fixture: Fixture) -> list[dict[str, Any
     (which already recompute against ``_calc_body``), never a second
     ephemeris path in ``core/``.
 
-    Bodies are ``_PLANET_BODIES`` with ``true_node`` filtered out (the ten
+    Bodies are ``PLANET_BODIES`` with ``true_node`` filtered out (the ten
     sun..pluto), emitted in that order so ``compare()``'s positional list
     walk aligns with each fixture's own ``transit_positions`` order. Unlike
     ``_transit_events_for_month_fixture``'s ``_TRANSIT_BODY_IDS`` (which
@@ -500,7 +500,7 @@ def _transit_positions_for_month_fixture(fixture: Fixture) -> list[dict[str, Any
     jd_ut = _julian_day_ut(_transit_snapshot_utc(fixture))
 
     rows: list[dict[str, Any]] = []
-    for name, body_id in _PLANET_BODIES:
+    for name, body_id in PLANET_BODIES:
         if name == "true_node":
             continue
         longitude, speed = _calc_body(jd_ut, body_id)
@@ -788,7 +788,7 @@ def test_transit_snapshot_utc_rejects_a_missing_or_naive_value(
 def test_transit_positions_row_shape_is_ten_bodies_in_planet_order() -> None:
     """Oracle-independent structural check on
     ``_transit_positions_for_month_fixture`` -- asserts the row *shape*, not
-    any ephemeris value: exactly the ten ``_PLANET_BODIES`` bodies
+    any ephemeris value: exactly the ten ``PLANET_BODIES`` bodies
     (``true_node`` excluded) in that order, each row a ``str`` longitude and
     a ``bool`` retrograde flag."""
     fixture = load_fixture(FIXTURES_DIR / "retrograde-station-month.toml")

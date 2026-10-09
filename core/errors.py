@@ -14,6 +14,7 @@ __all__ = [
     "GateVocabularyError",
     "GenerationError",
     "GenerationStep",
+    "LocalTimeError",
     "PlaceResolutionError",
     "PlaceResolutionStep",
     "ReportNotFoundError",
@@ -130,6 +131,31 @@ class PlaceResolutionError(RuntimeError):
     def __init__(self, step: PlaceResolutionStep, message: str) -> None:
         self.step = step
         super().__init__(f"Refusing to resolve birthplace ({step}): {message}")
+
+
+class LocalTimeError(RuntimeError):
+    """A civil birth time that does not name exactly one instant in its zone.
+
+    ``kind`` is ``"gap"`` when the wall-clock time was skipped by a DST
+    spring-forward and ``"fold"`` when a fall-back repeated it. Neither is
+    silently resolved: guessing an offset would shift every angle of the chart.
+    Raised from :mod:`shell.local_time`; the API maps it to ``invalid_request``
+    on ``subject.birth_time`` and the geocoder re-raises it as a
+    :class:`PlaceResolutionError`.
+    """
+
+    def __init__(self, kind: Literal["gap", "fold"], local_time: object, iana_zone: str) -> None:
+        self.kind = kind
+        if kind == "fold":
+            message = (
+                f"{local_time} is ambiguous in {iana_zone} (occurs twice across a "
+                "DST fall-back); cannot resolve a single offset without disambiguation"
+            )
+        else:
+            message = (
+                f"{local_time} does not exist in {iana_zone} (skipped by a DST spring-forward gap)"
+            )
+        super().__init__(message)
 
 
 class GenerationError(RuntimeError):

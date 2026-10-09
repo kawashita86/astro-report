@@ -14,7 +14,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-__all__ = ["Aspect", "HouseCusp", "HouseRuler", "NatalChart", "PlanetPosition"]
+__all__ = [
+    "Aspect",
+    "HouseCusp",
+    "HouseRuler",
+    "NatalChart",
+    "PlanetPosition",
+    "TimeUnknownChart",
+    "TimeUnknownPlanet",
+]
 
 
 @dataclass(frozen=True)
@@ -99,4 +107,39 @@ class NatalChart:
     midheaven: Decimal
     planets: tuple[PlanetPosition, ...]
     houses: tuple[HouseCusp, ...]
+    aspects: tuple[Aspect, ...]
+
+
+@dataclass(frozen=True)
+class TimeUnknownPlanet:
+    """One body in a chart whose birth time is unknown (Story 11.2).
+
+    ``longitude``/``sign``/``degree`` are the position at local noon.
+    ``range_from``/``range_to`` are the longitudes at local 00:00 and the next
+    local 00:00 -- the span the body can really have occupied that day, which
+    for a retrograde body is walked backwards. ``sign_uncertain`` is true when
+    the day's samples do not all fall in one sign.
+    """
+
+    name: str
+    longitude: Decimal
+    sign: str
+    degree: Decimal
+    retrograde: bool
+    range_from: Decimal
+    range_to: Decimal
+    sign_uncertain: bool
+
+
+@dataclass(frozen=True)
+class TimeUnknownChart:
+    """The noon civil-time chart for an unknown birth time (Story 11.2).
+
+    Deliberately a type of its own with no ascendant, midheaven, houses or
+    per-body house fields, so nothing house-dependent can be read off it by
+    mistake. ``aspects`` exclude every aspect involving the Moon, whose
+    position across the day is a range rather than a point.
+    """
+
+    planets: tuple[TimeUnknownPlanet, ...]
     aspects: tuple[Aspect, ...]

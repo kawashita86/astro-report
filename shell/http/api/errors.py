@@ -17,7 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from core.errors import PlaceResolutionError
+from core.errors import LocalTimeError, PlaceResolutionError
 from core.payload.freeze import canonical_json_bytes
 from shell.http.api.router import API_PATH_PREFIX
 
@@ -94,6 +94,9 @@ def map_exception(exc: BaseException) -> tuple[ErrorCode, str | None]:
     """The single mapping from an exception to ``(code, field)``."""
     if isinstance(exc, ApiError):
         return exc.code, exc.field
+    if isinstance(exc, LocalTimeError):
+        # A DST gap or fold is the caller's input, never silently guessed.
+        return ErrorCode.INVALID_REQUEST, "subject.birth_time"
     if isinstance(exc, PlaceResolutionError):
         return ErrorCode.PLACE_UNRESOLVED, None
     return ErrorCode.INTERNAL_ERROR, None

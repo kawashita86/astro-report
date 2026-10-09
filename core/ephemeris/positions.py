@@ -39,6 +39,8 @@ from core.errors import EphemerisIntegrityError
 #: declaring them in ``__all__`` would claim them as this module's public
 #: API, which contradicts it existing purely as an internal shared module.
 __all__ = [
+    "EPHEMERIS_FIRST_YEAR",
+    "EPHEMERIS_LAST_YEAR",
     "FULL_CIRCLE",
     "HALF_CIRCLE",
     "QUANTUM",
@@ -50,6 +52,14 @@ __all__ = [
 FULL_CIRCLE = Decimal(360)
 HALF_CIRCLE = Decimal(180)
 QUANTUM = Decimal("0.0001")
+
+#: The calendar years a birth date may fall in, inclusive. The vendored
+#: ``sepl_18``/``semo_18`` files cover 1800-01-02 through at least 2400-01-01
+#: (probed against ``swe.calc_ut``); the first year is 1801 rather than 1800 so
+#: a local 00:00 that precedes its UTC instant by a few hours can never reach
+#: before the first covered day.
+EPHEMERIS_FIRST_YEAR = 1801
+EPHEMERIS_LAST_YEAR = 2399
 
 #: Swiss Ephemeris, with daily motion so retrograde/applying can be derived.
 #: The returned flags are checked against ``FLG_SWIEPH`` on every call -- a

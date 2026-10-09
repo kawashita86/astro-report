@@ -21,13 +21,23 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import Engine, event
+from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 
-def fk_enforcing_engine() -> Engine:
+def fk_enforcing_engine(*, shared_across_threads: bool = False) -> Engine:
     """A fresh in-memory SQLite engine with ``PRAGMA foreign_keys=ON`` armed
-    on every connection and ``SQLModel.metadata`` already created."""
-    engine = create_engine("sqlite://")
+    on every connection and ``SQLModel.metadata`` already created.
+
+    ``shared_across_threads`` is for tests that drive a sync FastAPI route
+    through ``TestClient``: the handler runs on a worker thread, and without a
+    single shared connection each thread would see its own empty database."""
+    if shared_across_threads:
+        engine = create_engine(
+            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+        )
+    else:
+        engine = create_engine("sqlite://")
 
     @event.listens_for(engine, "connect")
     def _enable_foreign_keys(dbapi_connection: object, connection_record: object) -> None:

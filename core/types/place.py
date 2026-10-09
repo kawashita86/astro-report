@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
 
-__all__ = ["PlaceCandidate", "ResolvedPlace"]
+__all__ = ["PlaceCandidate", "ResolvedPlace", "ZonedPlaceCandidate"]
 
 
 @dataclass(frozen=True)
@@ -55,3 +55,19 @@ class ResolvedPlace:
     iana_zone: str
     utc_offset: timedelta
     display_name: str | None = None
+
+
+@dataclass(frozen=True)
+class ZonedPlaceCandidate:
+    """One geocoder match together with its IANA zone (Story 11.2).
+
+    The API lists every candidate with its zone so a machine client can pick
+    one and send it back as a subject's place without a second lookup. Unlike
+    ``PlaceCandidate`` (offered to a human in the operator UI) the zone is
+    resolved up front for every match.
+    """
+
+    display_name: str
+    latitude: Decimal
+    longitude: Decimal
+    iana_zone: str

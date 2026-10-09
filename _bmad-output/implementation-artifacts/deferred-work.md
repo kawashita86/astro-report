@@ -967,3 +967,7 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-10-5-regenerate-only-what-the-gate-rejected.md`
   summary: Consider a composite index on `gate_result (report_run_id, draft_attempt)` if targeted-regeneration lookups ever show up in profiling.
   evidence: `_carried_sections` filters by run, `passed` and `draft_attempt`; table is tiny today (single operator), so not urgent.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-2-resolve-a-place-and-compute-a-natal-chart-on-request.md`
+  summary: A Nominatim outage or network failure surfaces as `place_unresolved` (422), indistinguishable from "no such place".
+  evidence: `map_exception` maps every `PlaceResolutionError` to `place_unresolved`, and `_geocode` wraps transport errors in the same type with step "geocoding".
