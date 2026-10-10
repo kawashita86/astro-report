@@ -42,7 +42,11 @@ def build_meta(config: ComputationConfig, identity: EphemerisIdentity) -> dict[s
             "version": config.version,
             "content_hash": config.content_hash,
             "house_system": config.house_system.name,
-            "orbs": {"natal": str(config.orbs.natal), "transit": str(config.orbs.transit)},
+            "orbs": {
+                "natal": str(config.orbs.natal),
+                "transit": str(config.orbs.transit),
+                "synastry": str(config.orbs.synastry),
+            },
         },
         "ephemeris": {"manifest_sha256": ephemeris_manifest_sha256(identity)},
         "zodiac": ZODIAC,

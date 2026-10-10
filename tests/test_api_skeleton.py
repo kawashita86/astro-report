@@ -273,6 +273,7 @@ def test_meta_carries_the_configuration_and_ephemeris_identity() -> None:
         "orbs": {
             "natal": str(computation_config.orbs.natal),
             "transit": str(computation_config.orbs.transit),
+            "synastry": str(computation_config.orbs.synastry),
         },
     }
     assert len(meta["ephemeris"]["manifest_sha256"]) == 64

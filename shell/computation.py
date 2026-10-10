@@ -26,6 +26,7 @@ from typing import Any
 from core.errors import ComputationConfigError
 from core.types.computation import (
     Bodies,
+    Composite,
     ComputationConfig,
     HarmonicRule,
     HouseSystem,
@@ -48,6 +49,11 @@ _NATAL_ORB_MIN = Decimal("6.0")
 _NATAL_ORB_MAX = Decimal("8.0")
 _TRANSIT_ORB_MIN = Decimal("1.5")
 _TRANSIT_ORB_MAX = Decimal("2.5")
+_SYNASTRY_ORB_MIN = Decimal("6.0")
+_SYNASTRY_ORB_MAX = Decimal("8.0")
+
+#: The composite house methods the engine implements (chart data API).
+_COMPOSITE_HOUSE_METHODS = frozenset({"midpoint_cusps", "derived_from_mc"})
 
 _ZODIAC_SIGNS: tuple[str, ...] = (
     "aries",
@@ -155,7 +161,7 @@ def _read_house_system(
     return HouseSystem(name=raw), None
 
 
-_ORBS_KEYS = frozenset({"natal", "transit"})
+_ORBS_KEYS = frozenset({"natal", "transit", "synastry"})
 _HOUSE_SYSTEM_KEYS = frozenset({"name"})
 
 
@@ -172,11 +178,38 @@ def _read_orbs(data: dict[str, Any]) -> tuple[Orbs | None, list[str]]:
         errors.append(unexpected)
     natal, natal_error = _read_orb(table, "orbs", "natal", _NATAL_ORB_MIN, _NATAL_ORB_MAX)
     transit, transit_error = _read_orb(table, "orbs", "transit", _TRANSIT_ORB_MIN, _TRANSIT_ORB_MAX)
-    errors.extend(error for error in (natal_error, transit_error) if error is not None)
+    synastry, synastry_error = _read_orb(
+        table, "orbs", "synastry", _SYNASTRY_ORB_MIN, _SYNASTRY_ORB_MAX
+    )
+    errors.extend(
+        error for error in (natal_error, transit_error, synastry_error) if error is not None
+    )
     if errors:
         return None, errors
-    assert natal is not None and transit is not None
-    return Orbs(natal=natal, transit=transit), []
+    assert natal is not None and transit is not None and synastry is not None
+    return Orbs(natal=natal, transit=transit, synastry=synastry), []
+
+
+_COMPOSITE_KEYS = frozenset({"houses"})
+
+
+def _read_composite(data: dict[str, Any]) -> tuple[Composite | None, list[str]]:
+    table, table_error = _read_table(data, "composite")
+    if table_error is not None:
+        return None, [table_error]
+    errors: list[str] = []
+    if (unexpected := _check_unexpected_keys(table, "composite", _COMPOSITE_KEYS)) is not None:
+        errors.append(unexpected)
+    raw = table.get("houses")
+    if not isinstance(raw, str) or raw not in _COMPOSITE_HOUSE_METHODS:
+        errors.append(
+            f"composite.houses is invalid: {raw!r} is not one of "
+            f"{', '.join(sorted(_COMPOSITE_HOUSE_METHODS))}."
+        )
+    if errors:
+        return None, errors
+    assert isinstance(raw, str)
+    return Composite(houses=raw), []
 
 
 def _read_house_system_field(data: dict[str, Any]) -> tuple[HouseSystem | None, list[str]]:
@@ -332,6 +365,7 @@ def load_computation_config(path: Path = DEFAULT_COMPUTATION_PATH) -> Computatio
 
     version, version_error = _read_version(data)
     orbs, orbs_errors = _read_orbs(data)
+    composite, composite_errors = _read_composite(data)
     house_system, house_system_errors = _read_house_system_field(data)
     bodies, bodies_errors = _read_bodies(data)
     rulers, rulers_errors = _read_rulers(data)
@@ -342,6 +376,7 @@ def load_computation_config(path: Path = DEFAULT_COMPUTATION_PATH) -> Computatio
         for problem in (
             version_error,
             *orbs_errors,
+            *composite_errors,
             *house_system_errors,
             *bodies_errors,
             *rulers_errors,
@@ -358,6 +393,7 @@ def load_computation_config(path: Path = DEFAULT_COMPUTATION_PATH) -> Computatio
     assert (
         version is not None
         and orbs is not None
+        and composite is not None
         and house_system is not None
         and bodies is not None
         and rulers is not None
@@ -367,6 +403,7 @@ def load_computation_config(path: Path = DEFAULT_COMPUTATION_PATH) -> Computatio
         version=version,
         content_hash=hashlib.sha256(raw).hexdigest(),
         orbs=orbs,
+        composite=composite,
         house_system=house_system,
         bodies=bodies,
         rulers=rulers,

@@ -971,3 +971,7 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-11-2-resolve-a-place-and-compute-a-natal-chart-on-request.md`
   summary: A Nominatim outage or network failure surfaces as `place_unresolved` (422), indistinguishable from "no such place".
   evidence: `map_exception` maps every `PlaceResolutionError` to `place_unresolved`, and `_geocode` wraps transport errors in the same type with step "geocoding".
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-4-synastry-and-the-midpoint-composite.md`
+  summary: Decide whether an unknown-time subject's noon Moon should be placed in overlay houses and the composite, or carry a range/uncertainty marker.
+  evidence: The Moon moves about 13 degrees a day, so its noon house is unreliable; 11.4 excludes it from aspects (per computation-tables.md) but still lists it in overlays and the composite Moon, with no marker.

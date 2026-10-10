@@ -116,21 +116,23 @@ class UnknownTimeInstants:
     day_end: LocalInstant
 
 
-def parse_subject(model: SubjectModel) -> ParsedSubject:
+def parse_subject(model: SubjectModel, field_prefix: str = "subject") -> ParsedSubject:
     """The subject with its cross-field rules applied.
 
     Raises:
-        ApiError: ``invalid_request`` on ``subject.birth_time`` when the time is
-            known but absent; ``ephemeris_out_of_range`` on
-            ``subject.birth_date`` when the year is outside the vendored span.
+        ApiError: ``invalid_request`` on ``<field_prefix>.birth_time`` when the
+            time is known but absent; ``ephemeris_out_of_range`` on
+            ``<field_prefix>.birth_date`` when the year is outside the vendored
+            span. ``field_prefix`` is ``subject`` except where a request carries
+            two subjects (``subject_a`` / ``subject_b``).
     """
     birth_date = date.fromisoformat(model.birth_date)
     if not EPHEMERIS_FIRST_YEAR <= birth_date.year <= EPHEMERIS_LAST_YEAR:
-        raise ApiError(ErrorCode.EPHEMERIS_OUT_OF_RANGE, "subject.birth_date")
+        raise ApiError(ErrorCode.EPHEMERIS_OUT_OF_RANGE, f"{field_prefix}.birth_date")
     birth_time: time | None = None
     if model.time_known:
         if model.birth_time is None:
-            raise ApiError(ErrorCode.INVALID_REQUEST, "subject.birth_time")
+            raise ApiError(ErrorCode.INVALID_REQUEST, f"{field_prefix}.birth_time")
         birth_time = time.fromisoformat(model.birth_time)
     return ParsedSubject(
         label=model.label,

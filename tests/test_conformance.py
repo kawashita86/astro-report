@@ -140,8 +140,22 @@ _COMPUTATION_CONFIG = load_computation_config()
 _MONTH_FIXTURE_ANCHOR_KEY = "anchor_natal_fixture"
 
 
+#: Key a composite fixture's ``birth_data`` carries: the two natal fixtures it
+#: combines. Checked by ``tests/test_synastry_core.py``, not by this module's
+#: natal/month machinery.
+_COMPOSITE_FIXTURE_KEY = "composite_of"
+_SYNASTRY_FIXTURE_KEY = "synastry_of"
+
+
+def _is_composite_fixture(fixture: Fixture) -> bool:
+    keys = (_COMPOSITE_FIXTURE_KEY, _SYNASTRY_FIXTURE_KEY)
+    return any(key in fixture.birth_data for key in keys)
+
+
 def _is_natal_fixture(fixture: Fixture) -> bool:
-    return _MONTH_FIXTURE_ANCHOR_KEY not in fixture.birth_data
+    return (
+        _MONTH_FIXTURE_ANCHOR_KEY not in fixture.birth_data and not _is_composite_fixture(fixture)
+    )
 
 
 def _birth_instant_utc(birth_data: dict[str, Any]) -> datetime:
@@ -642,6 +656,8 @@ def _fixture_params() -> list[Any]:
     params: list[Any] = []
     for path in discover_fixtures():
         fixture = load_fixture(path)
+        if _is_composite_fixture(fixture):
+            continue
         if _is_natal_fixture(fixture):
             params.append(pytest.param(path, None, id=path.stem))
             continue
@@ -873,7 +889,7 @@ def _month_fixture_params() -> list[Any]:
     return [
         pytest.param(path, id=path.stem)
         for path in discover_fixtures()
-        if not _is_natal_fixture(load_fixture(path))
+        if _MONTH_FIXTURE_ANCHOR_KEY in load_fixture(path).birth_data
     ]
 
 

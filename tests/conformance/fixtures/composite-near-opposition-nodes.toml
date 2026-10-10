@@ -1,0 +1,70 @@
+[metadata]
+name = "composite-near-opposition-nodes"
+adversarial_case = "composite of a body pair near 180 degrees apart: the two True Nodes are 179.33 degrees apart, so the shorter-arc midpoint is the only correct answer"
+source = "Astro.com composite chart, Midpoint method (btyp=621), Placidus, of the profiles 'Case3 Midnight' (first) and 'Case2 Samuel Dst' (second), Francesco's Astro.com session 2026-10-10. Values transcribed in degrees-minutes-seconds and converted to decimal degrees here."
+finding = "Every planet, the true node and every cusp equals the shorter-arc midpoint within 0.0002 degrees."
+tolerance_degrees = "0.002"
+
+[birth_data]
+composite_of = ["near-midnight-birth", "dst-fallback-before"]
+
+[expected]
+
+[expected.composite]
+ascendant = "169.8858"
+midheaven = "77.8408"
+
+[[expected.composite.houses]]
+number = 2
+longitude = "195.4408"
+
+[[expected.composite.houses]]
+number = 3
+longitude = "225.0586"
+
+[[expected.composite.houses]]
+number = 11
+longitude = "111.3136"
+
+[[expected.composite.houses]]
+number = 12
+longitude = "142.4619"
+
+[[expected.composite.planets]]
+name = "true_node"
+longitude = "70.5881"
+
+[[expected.composite.planets]]
+name = "sun"
+longitude = "252.5322"
+house = 3
+
+[[expected.composite.planets]]
+name = "moon"
+longitude = "3.0864"
+house = 7
+
+[[expected.composite.planets]]
+name = "mercury"
+longitude = "249.5522"
+house = 3
+
+[[expected.composite.planets]]
+name = "venus"
+longitude = "271.1850"
+house = 4
+
+[[expected.composite.planets]]
+name = "jupiter"
+longitude = "151.7836"
+house = 12
+
+[[expected.composite.planets]]
+name = "saturn"
+longitude = "305.5589"
+house = 5
+
+[[expected.composite.planets]]
+name = "neptune"
+longitude = "349.4028"
+house = 6

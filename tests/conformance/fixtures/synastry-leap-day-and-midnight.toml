@@ -1,0 +1,39 @@
+[metadata]
+name = "synastry-leap-day-and-midnight"
+adversarial_case = "synastry across two charts four years apart in different cities: inter-aspects and house overlays both ways"
+source = "Astro.com Partner Comparison data sheet (btyp=61), Placidus, of 'Case1 LeapDay' (first) and 'Case3 Midnight' (second), Francesco's Astro.com session 2026-10-10. Inter-aspects read from the sheet's 'Aspects between both' grid; overlays worked out from the cusps the sheet prints for each chart (the grid's 'in N' headers are each planet's own-chart house, not an overlay)."
+note = "Astro.com's grid also lists Mean Node, Chiron and minor aspects; only the five majors between bodies the API reports are transcribed."
+orb_limit = "7.0"
+
+[birth_data]
+synastry_of = ["leap-day-birth", "near-midnight-birth"]
+
+[expected]
+
+[[expected.inter_aspects]]
+body_a = "sun"
+body_b = "sun"
+aspect = "sextile"
+orb = "0.5111"
+
+[[expected.inter_aspects]]
+body_a = "mercury"
+body_b = "sun"
+aspect = "sextile"
+orb = "0.4156"
+
+[[expected.overlays.a_in_b]]
+body = "sun"
+house = 6
+
+[[expected.overlays.a_in_b]]
+body = "mercury"
+house = 6
+
+[[expected.overlays.b_in_a]]
+body = "sun"
+house = 12
+
+[[expected.overlays.b_in_a]]
+body = "moon"
+house = 4

@@ -24,11 +24,15 @@ from shell.computation import DEFAULT_COMPUTATION_PATH, load_computation_config
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _VALID_TOML = """\
-version = 1
+version = 2
 
 [orbs]
 natal = "7.0"
 transit = "2.0"
+synastry = "7.0"
+
+[composite]
+houses = "midpoint_cusps"
 
 [house_system]
 name = "placidus"
@@ -88,10 +92,12 @@ def test_a_valid_file_returns_a_populated_frozen_config(tmp_path: Path) -> None:
     config = load_computation_config(path)
 
     assert isinstance(config, ComputationConfig)
-    assert config.version == 1
+    assert config.version == 2
     assert config.content_hash == hashlib.sha256(path.read_bytes()).hexdigest()
     assert config.orbs.natal == Decimal("7.0")
     assert config.orbs.transit == Decimal("2.0")
+    assert config.orbs.synastry == Decimal("7.0")
+    assert config.composite.houses == "midpoint_cusps"
     assert config.house_system.name == "placidus"
     assert config.bodies.fast == ("sun", "mercury", "venus", "mars")
     assert config.bodies.slow == ("jupiter", "saturn", "uranus", "neptune", "pluto")
@@ -134,6 +140,57 @@ def test_a_natal_orb_out_of_range_fails_and_names_the_field_and_value(
     message = str(raised.value)
     assert "orbs.natal" in message
     assert value in message
+
+
+# --- Synastry orb and composite house method ---------------------------------------
+
+
+@pytest.mark.parametrize("value", ["5.9", "8.1", "nan"])
+def test_a_synastry_orb_out_of_range_fails_and_names_the_field(
+    tmp_path: Path, value: str
+) -> None:
+    content = _VALID_TOML.replace('synastry = "7.0"', f'synastry = "{value}"')
+    path = _write(tmp_path, content)
+
+    with pytest.raises(ComputationConfigError) as raised:
+        load_computation_config(path)
+
+    assert "orbs.synastry" in str(raised.value)
+
+
+@pytest.mark.parametrize("value", ["6.0", "8.0"])
+def test_the_synastry_orb_bounds_are_inclusive(tmp_path: Path, value: str) -> None:
+    content = _VALID_TOML.replace('synastry = "7.0"', f'synastry = "{value}"')
+
+    config = load_computation_config(_write(tmp_path, content))
+
+    assert config.orbs.synastry == Decimal(value)
+
+
+def test_an_unknown_composite_house_method_fails_and_names_the_field(tmp_path: Path) -> None:
+    content = _VALID_TOML.replace('houses = "midpoint_cusps"', 'houses = "koch"')
+
+    with pytest.raises(ComputationConfigError) as raised:
+        load_computation_config(_write(tmp_path, content))
+
+    assert "composite.houses" in str(raised.value)
+
+
+def test_derived_from_mc_is_an_accepted_composite_house_method(tmp_path: Path) -> None:
+    content = _VALID_TOML.replace('houses = "midpoint_cusps"', 'houses = "derived_from_mc"')
+
+    assert load_computation_config(_write(tmp_path, content)).composite.houses == "derived_from_mc"
+
+
+def test_a_missing_or_extended_composite_table_fails(tmp_path: Path) -> None:
+    missing = _VALID_TOML.replace('[composite]\nhouses = "midpoint_cusps"\n', "")
+    extended = _VALID_TOML.replace(
+        'houses = "midpoint_cusps"', 'houses = "midpoint_cusps"\nbogus = "1"'
+    )
+
+    for content in (missing, extended):
+        with pytest.raises(ComputationConfigError):
+            load_computation_config(_write(tmp_path, content))
 
 
 # --- Matrix row: transit orb out of range ----------------------------------------
@@ -246,7 +303,7 @@ def test_a_file_missing_a_required_table_fails_with_a_typed_error_not_a_keyerror
 ) -> None:
     """A malformed *structure* (a whole table dropped) must not surface as a
     raw `KeyError`/`TypeError` from deep inside parsing."""
-    path = _write(tmp_path, "version = 1\n")
+    path = _write(tmp_path, "version = 2\n")
 
     with pytest.raises(ComputationConfigError):
         load_computation_config(path)
@@ -263,7 +320,7 @@ def test_computation_config_and_nested_value_types_are_frozen(tmp_path: Path) ->
     assert type(config).__dataclass_params__.frozen is True
 
     with pytest.raises(dataclasses.FrozenInstanceError):
-        config.version = 2  # type: ignore[misc]
+        config.version = 3  # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
         config.orbs.natal = Decimal("1")  # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -290,6 +347,9 @@ def test_the_shipped_files_default_orbs_load_without_error() -> None:
 
     assert config.orbs.natal == Decimal("7.0")
     assert config.orbs.transit == Decimal("2.0")
+    assert config.orbs.synastry == Decimal("7.0")
+    assert config.composite.houses == "midpoint_cusps"
+    assert config.version == 2
 
 
 def test_load_computation_config_defaults_to_the_shipped_file() -> None:

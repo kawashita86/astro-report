@@ -9,17 +9,30 @@
 # Orb values are quoted strings, parsed as `Decimal`, never binary float
 # (angles are `Decimal` everywhere in this codebase).
 
-version = 1
+version = 2
 
 [orbs]
 # Natal aspect orb: default +/-7.0 degrees, permitted range 6.0-8.0.
 natal = "7.0"
 # Transit-to-natal aspect orb: default +/-2.0 degrees, permitted range 1.5-2.5.
 transit = "2.0"
+# Synastry inter-aspect orb (chart data API only): default +/-7.0 degrees,
+# permitted range 6.0-8.0.
+synastry = "7.0"
 
 [house_system]
 # The only house system defined anywhere in the planning artifacts.
 name = "placidus"
+
+[composite]
+# How the midpoint composite's twelve house cusps are found (chart data API
+# only). "midpoint_cusps": each cusp is the shorter-arc midpoint of the two
+# natal cusps. "derived_from_mc": Placidus cusps from the composite midheaven
+# at the mean of the two birth latitudes. Set by a transcribed Astro.com
+# composite (Midpoint method) of two real charts: every cusp matched the
+# midpoint of the natal cusps within 0.0008 degrees, while the MC-derived
+# variant missed by 2-7 degrees. Changing it is a data edit and a version bump.
+houses = "midpoint_cusps"
 
 [bodies]
 # Transiting bodies covered by transit-to-natal aspect detection (PRD FR-9).

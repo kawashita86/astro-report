@@ -20,6 +20,7 @@ from types import MappingProxyType
 
 __all__ = [
     "Bodies",
+    "Composite",
     "ComputationConfig",
     "HarmonicRule",
     "HouseSystem",
@@ -30,12 +31,26 @@ __all__ = [
 
 @dataclass(frozen=True)
 class Orbs:
-    """The two configured aspect orbs. Range validation happens once, at load
+    """The three configured aspect orbs. Range validation happens once, at load
     time, in ``shell/computation.py`` -- by the time a value reaches here it
     has already been confirmed within its permitted range."""
 
     natal: Decimal
     transit: Decimal
+    synastry: Decimal
+
+
+@dataclass(frozen=True)
+class Composite:
+    """How the midpoint composite's house cusps are found (chart data API).
+
+    ``houses`` is ``"midpoint_cusps"`` (each cusp the shorter-arc midpoint of
+    the two natal cusps) or ``"derived_from_mc"`` (Placidus cusps from the
+    composite midheaven at the mean of the two birth latitudes). Validated
+    against that closed set at load time.
+    """
+
+    houses: str
 
 
 @dataclass(frozen=True)
@@ -108,6 +123,7 @@ class ComputationConfig:
     version: int
     content_hash: str
     orbs: Orbs
+    composite: Composite
     house_system: HouseSystem
     bodies: Bodies
     rulers: Rulers

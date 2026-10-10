@@ -1,0 +1,48 @@
+[metadata]
+name = "composite-midpoint-houses"
+adversarial_case = "composite house method: which of midpoint_cusps / derived_from_mc Astro.com uses"
+source = "Astro.com composite chart, Midpoint method (btyp=621), Placidus, of the profiles 'Case1 LeapDay' and 'Case3 Midnight', Francesco's Astro.com session 2026-10-10. Values transcribed in degrees-minutes-seconds and converted to decimal degrees here."
+finding = "Every cusp and the ascendant equals the shorter-arc midpoint of the two natal cusps within 0.0008 degrees; the MC-derived variant misses by 2-7 degrees (cusps 11/12, 2/3, ascendant). Hence [composite] houses = midpoint_cusps."
+tolerance_degrees = "0.002"
+
+[birth_data]
+composite_of = ["leap-day-birth", "near-midnight-birth"]
+
+[expected]
+
+[expected.composite]
+ascendant = "244.6117"
+midheaven = "164.2197"
+
+[[expected.composite.houses]]
+number = 2
+longitude = "280.3564"
+
+[[expected.composite.houses]]
+number = 3
+longitude = "314.2350"
+
+[[expected.composite.houses]]
+number = 11
+longitude = "191.6808"
+
+[[expected.composite.houses]]
+number = 12
+longitude = "217.8844"
+
+[[expected.composite.planets]]
+name = "sun"
+longitude = "310.5678"
+house = 2
+
+[[expected.composite.planets]]
+name = "moon"
+house = 9
+
+[[expected.composite.planets]]
+name = "jupiter"
+house = 7
+
+[[expected.composite.planets]]
+name = "saturn"
+house = 4

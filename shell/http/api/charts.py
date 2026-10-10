@@ -39,7 +39,14 @@ from shell.http.api.subject import (
     unknown_time_instants,
 )
 
-__all__ = ["NatalRequest", "jsonable", "natal_chart", "subject_json"]
+__all__ = [
+    "NatalRequest",
+    "jsonable",
+    "known_chart_json",
+    "natal_chart",
+    "subject_json",
+    "unknown_chart_json",
+]
 
 
 class NatalRequest(BaseModel):
@@ -79,7 +86,7 @@ def subject_json(
     }
 
 
-def _known_chart_json(chart: NatalChart, config: ComputationConfig) -> dict[str, Any]:
+def known_chart_json(chart: NatalChart, config: ComputationConfig) -> dict[str, Any]:
     return {
         "ascendant": str(chart.ascendant),
         "midheaven": str(chart.midheaven),
@@ -103,7 +110,7 @@ def _unknown_planet_json(planet: TimeUnknownPlanet) -> dict[str, Any]:
     }
 
 
-def _unknown_chart_json(chart: TimeUnknownChart) -> dict[str, Any]:
+def unknown_chart_json(chart: TimeUnknownChart) -> dict[str, Any]:
     return {
         "ascendant": None,
         "midheaven": None,
@@ -131,7 +138,7 @@ def natal_chart(body: NatalRequest, request: Request) -> Response:
                 chart_instant=format_utc_instant(birth.utc),
                 birth_instant=format_utc_instant(birth.utc),
             ),
-            "chart": _known_chart_json(chart, config),
+            "chart": known_chart_json(chart, config),
         }
     else:
         instants = unknown_time_instants(subject)
@@ -146,6 +153,6 @@ def natal_chart(body: NatalRequest, request: Request) -> Response:
                 chart_instant=format_utc_instant(instants.noon.utc),
                 birth_instant=None,
             ),
-            "chart": _unknown_chart_json(unknown),
+            "chart": unknown_chart_json(unknown),
         }
     return Response(canonical_json_bytes(payload), media_type="application/json")
