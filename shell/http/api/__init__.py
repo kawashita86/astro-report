@@ -12,6 +12,7 @@ from __future__ import annotations
 from shell.http.api import (  # noqa: F401  (registers the endpoints on `router`)
     charts,
     places,
+    solar_return,
     synastry,
     transits,
 )

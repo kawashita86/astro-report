@@ -145,10 +145,11 @@ _MONTH_FIXTURE_ANCHOR_KEY = "anchor_natal_fixture"
 #: natal/month machinery.
 _COMPOSITE_FIXTURE_KEY = "composite_of"
 _SYNASTRY_FIXTURE_KEY = "synastry_of"
+_SOLAR_RETURN_FIXTURE_KEY = "solar_return_of"
 
 
 def _is_composite_fixture(fixture: Fixture) -> bool:
-    keys = (_COMPOSITE_FIXTURE_KEY, _SYNASTRY_FIXTURE_KEY)
+    keys = (_COMPOSITE_FIXTURE_KEY, _SYNASTRY_FIXTURE_KEY, _SOLAR_RETURN_FIXTURE_KEY)
     return any(key in fixture.birth_data for key in keys)
 
 

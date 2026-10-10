@@ -10,6 +10,7 @@ from core.types.gate import GateViolation
 __all__ = [
     "ComputationConfigError",
     "EphemerisIntegrityError",
+    "EphemerisRangeError",
     "GateFailedError",
     "GateVocabularyError",
     "GenerationError",
@@ -63,6 +64,14 @@ class EphemerisIntegrityError(RuntimeError):
     touch the filesystem. Letting it propagate uncaught is the non-zero exit;
     no explicit ``sys.exit`` is needed, mirroring how ``ConfigError`` already
     aborts startup from ``shell/config.py``.
+    """
+
+
+class EphemerisRangeError(ValueError):
+    """A requested instant lies beyond the span the vendored ephemeris covers.
+
+    Raised by :mod:`core.ephemeris.returns` when a solar-return crossing would
+    fall after the last covered year. The API maps it to ``ephemeris_out_of_range``.
     """
 
 

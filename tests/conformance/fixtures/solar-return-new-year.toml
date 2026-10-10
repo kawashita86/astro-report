@@ -1,0 +1,73 @@
+[metadata]
+name = "solar-return-new-year"
+adversarial_case = "solar return of a 1 January birth falls on 1 January of the next year at 11:50 UTC, the year boundary"
+source = "Astro.com 'Solar Return chart' (btyp=32, Placidus, tropical), profile 'Case3 Midnight', year 2027, Francesco's Astro.com session 2026-10-10."
+tolerance_degrees = "0.005"
+cusp_tolerance_degrees = "0.009"
+instant_tolerance_seconds = "2"
+note = "Astro.com rounds the return instant to whole seconds and prints cusps 2, 3, 11 and 12 to the minute only (hence cusp_tolerance_degrees); planets agree to 1 arc-second, angles within 0.004 degrees. Mean Node, Chiron and Lilith are not transcribed."
+
+[birth_data]
+solar_return_of = ["near-midnight-birth"]
+year = 2027
+
+[expected]
+return_instant_utc = "2027-01-01T11:50:34Z"
+ascendant = "256.6969"
+midheaven = "181.3142"
+
+[[expected.planets]]
+name = "sun"
+longitude = "280.8233"
+
+[[expected.planets]]
+name = "moon"
+longitude = "210.8233"
+
+[[expected.planets]]
+name = "mercury"
+longitude = "280.6939"
+
+[[expected.planets]]
+name = "venus"
+longitude = "233.9844"
+
+[[expected.planets]]
+name = "mars"
+longitude = "159.9261"
+
+[[expected.planets]]
+name = "jupiter"
+longitude = "146.4119"
+
+[[expected.planets]]
+name = "saturn"
+longitude = "8.3508"
+
+[[expected.planets]]
+name = "uranus"
+longitude = "62.2872"
+
+[[expected.planets]]
+name = "neptune"
+longitude = "1.7236"
+
+[[expected.planets]]
+name = "pluto"
+longitude = "304.3661"
+
+[[expected.houses]]
+number = 2
+longitude = "289.5500"
+
+[[expected.houses]]
+number = 3
+longitude = "326.1667"
+
+[[expected.houses]]
+number = 11
+longitude = "210.7667"
+
+[[expected.houses]]
+number = 12
+longitude = "235.0167"

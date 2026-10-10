@@ -975,3 +975,7 @@ the spec that surfaced it. Append only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-11-4-synastry-and-the-midpoint-composite.md`
   summary: Decide whether an unknown-time subject's noon Moon should be placed in overlay houses and the composite, or carry a range/uncertainty marker.
   evidence: The Moon moves about 13 degrees a day, so its noon house is unreliable; 11.4 excludes it from aspects (per computation-tables.md) but still lists it in overlays and the composite Moon, with no marker.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-5-the-solar-return-at-home-or-relocated.md`
+  summary: Decide what the chart endpoints return when Placidus cannot be computed (relocated location above the polar circle).
+  evidence: Review of 11.5 noted no defined behaviour or fixture for a polar `location`; `compute_natal_chart` and the Swiss Ephemeris fallback there are pre-existing.

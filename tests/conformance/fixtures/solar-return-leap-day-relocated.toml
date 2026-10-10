@@ -1,0 +1,79 @@
+[metadata]
+name = "solar-return-leap-day-relocated"
+adversarial_case = "solar return relocated from Durham to Milan: same instant, different angles and houses"
+source = "Astro.com 'Solar Return chart' (btyp=32, Placidus, tropical), profile 'Case1 LeapDay', year 2026, Francesco's Astro.com session 2026-10-10. Reference place Milano, Italy (45n28, 9e12)."
+tolerance_degrees = "0.005"
+cusp_tolerance_degrees = "0.009"
+instant_tolerance_seconds = "2"
+note = "Astro.com rounds the return instant to whole seconds and prints cusps 2, 3, 11 and 12 to the minute only (hence cusp_tolerance_degrees); planets agree to 1 arc-second, angles within 0.004 degrees. Mean Node, Chiron and Lilith are not transcribed."
+
+[birth_data]
+solar_return_of = ["leap-day-birth"]
+year = 2026
+
+[birth_data.location]
+latitude = "45.4667"
+longitude = "9.2"
+iana_zone = "Europe/Rome"
+display_name = "Milano, Lombardia, Italia"
+
+[expected]
+return_instant_utc = "2026-02-28T21:45:38Z"
+ascendant = "213.3814"
+midheaven = "131.8719"
+
+[[expected.planets]]
+name = "sun"
+longitude = "340.3122"
+
+[[expected.planets]]
+name = "moon"
+longitude = "127.8228"
+
+[[expected.planets]]
+name = "mercury"
+longitude = "352.0125"
+
+[[expected.planets]]
+name = "venus"
+longitude = "353.0981"
+
+[[expected.planets]]
+name = "mars"
+longitude = "328.6703"
+
+[[expected.planets]]
+name = "jupiter"
+longitude = "105.2586"
+
+[[expected.planets]]
+name = "saturn"
+longitude = "1.7131"
+
+[[expected.planets]]
+name = "uranus"
+longitude = "57.7303"
+
+[[expected.planets]]
+name = "neptune"
+longitude = "1.0406"
+
+[[expected.planets]]
+name = "pluto"
+longitude = "304.5308"
+
+[[expected.houses]]
+number = 2
+longitude = "241.5833"
+
+[[expected.houses]]
+number = 3
+longitude = "275.2000"
+
+[[expected.houses]]
+number = 11
+longitude = "165.1500"
+
+[[expected.houses]]
+number = 12
+longitude = "192.0667"
