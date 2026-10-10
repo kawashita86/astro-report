@@ -24,6 +24,7 @@ from core.gate.run import body_sign_label
 from core.types.transits import Ingress, Lunation, StandingRetrograde, Station, TransitAspectEvent
 from shell.http.payload_view import _localize_value
 from shell.runner.advance import _STAGE_SEQUENCE
+from shell.vocabulary import ASPECT_LABELS_IT, DIRECTION_LABELS_IT
 
 __all__ = [
     "CITED_ENTRY_FIELD_LABELS",
@@ -161,22 +162,6 @@ CITED_ENTRY_FIELD_LABELS: dict[str, str] = {
     "natal_house": "Casa natale",
 }
 
-#: The five Aspect names ``core/ephemeris/chart.py``'s ``_ASPECTS`` table
-#: can assign a :class:`TransitAspectEvent`'s ``aspect`` field.
-_ASPECT_LABELS_IT: dict[str, str] = {
-    "conjunction": "Congiunzione",
-    "sextile": "Sestile",
-    "square": "Quadratura",
-    "trine": "Trigono",
-    "opposition": "Opposizione",
-}
-
-#: The two directions a :class:`Station`'s ``direction`` field can carry.
-_DIRECTION_LABELS_IT: dict[str, str] = {
-    "retrograde": "Retrogrado",
-    "direct": "Diretto",
-}
-
 #: The two kinds a :class:`Lunation`'s own ``"kind"`` field (frozen as
 #: ``"lunation_kind"``) can carry.
 _LUNATION_KIND_LABELS_IT: dict[str, str] = {
@@ -222,9 +207,9 @@ def _format_entry_value(field_name: str, value: Any, zone: ZoneInfo) -> str:
     if field_name in _BODY_FIELD_NAMES:
         return body_sign_label(str(value))
     if field_name == "aspect":
-        return _ASPECT_LABELS_IT.get(value, value)
+        return ASPECT_LABELS_IT.get(value, value)
     if field_name == "direction":
-        return _DIRECTION_LABELS_IT.get(value, value)
+        return DIRECTION_LABELS_IT.get(value, value)
     if field_name == "lunation_kind":
         return _LUNATION_KIND_LABELS_IT.get(value, value)
     if field_name == "longitude":

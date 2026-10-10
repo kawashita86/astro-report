@@ -144,7 +144,7 @@ development_status:
   11-3-transits-over-any-window-up-to-13-months: review
   11-4-synastry-and-the-midpoint-composite: review
   11-5-the-solar-return-at-home-or-relocated: review
-  11-6-vocabulary-api-notes-and-deployment: backlog
+  11-6-vocabulary-api-notes-and-deployment: review
   epic-11-retrospective: optional
 action_items:
   - id: "epic-1-retro-item-1-fix-verify_session-s-unicode-digit-crash"

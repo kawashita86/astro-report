@@ -15,6 +15,7 @@ from shell.http.api import (  # noqa: F401  (registers the endpoints on `router`
     solar_return,
     synastry,
     transits,
+    vocabulary,
 )
 from shell.http.api.router import API_PREFIX, router
 

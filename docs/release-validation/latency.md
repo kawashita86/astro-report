@@ -204,6 +204,28 @@ first 2.7 s (≤ 6 s), repeat 0.035 s (< 1 s), NFR-5 with regeneration 52.3 s
 Francesco has ratified the figures. `test_outcome_permits_release` is now an
 ordinary test; the strict `xfail` that held it has been removed.
 
+## Chart data API: 12-month transits (Story 11.6) -- NOT MEASURED
+
+> **UNMEASURED. This is a placeholder, not a result, and it is not a pass.** No
+> figure below has been taken. It is outside the machine-readable TOML block on
+> purpose, so `tests/test_latency_record.py` neither reads nor satisfies it.
+
+| Figure | Target | Measured | Verdict |
+|---|---|---|---|
+| `POST /api/v1/charts/transits`, 12-month window, p90 over 20 calls, on the Netcup VPS | <= 30 s | **not measured** | **open** |
+
+Francesco measures this on the VPS (the build that wrote this had no access to it).
+Recipe, from the WordPress container or any host that can reach the service:
+
+1. Save a request body, for example the transits request in
+   `docs/api/chart-data-v1.md` with `"window": {"start_date": "2026-01-01", "end_date": "2027-01-01"}`, as `body.json`.
+2. Run one warm-up call, then 20 timed calls, with the token in `ASTRO_API_TOKEN`
+   (not on the command line). Each line is `seconds http_status`; every status must be 200:
+   `for i in $(seq 20); do curl -s -o /dev/null -w '%{time_total} %{http_code}\n' -X POST -H "Authorization: Bearer $ASTRO_API_TOKEN" -H 'Content-Type: application/json' --data @body.json <base>/api/v1/charts/transits; done | sort -n`
+3. Discard the run if any status is not 200. Sorted ascending, the p90 of 20 samples is
+   the 18th line. Record it, the date and the environment here, and set the verdict only
+   if it is <= 30 s.
+
 ## Re-measure trigger
 
 Re-run `test_measure_epic10_latency` and bump `checked` whenever any of these
